@@ -1,0 +1,23 @@
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%.-20thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="info">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+    <!-- Отключаем логи sshj полностью -->
+    <logger name="net.schmizz.sshj" level="ERROR"/>
+    <logger name="ru.galkov.servers" level="DEBUG"/>
+
+    <!-- <logger name="java.util.logging.ConsoleHandler.level" level="ALL"/>
+    <logger name="com.sun.net.httpserver.level" level="FINEST"/> -->
+
+
+    <!-- Или уменьшаем до уровня ERROR (будут только ошибки) -->
+    <!-- <logger name="net.schmizz.sshj" level="ERROR"/> -->
+</configuration>
+
