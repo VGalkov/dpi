@@ -46,14 +46,4 @@ public class HttpProxyServer {
         }
     }
 
-    // Точка входа для запуска
-    public static void main(String[] args) {
-        int port = 8080; // Можно взять из конфига, как в DNS сервере
-        if (args.length > 0) {
-            port = Integer.parseInt(args[0]);
-        }
-
-        HttpProxyServer server = new HttpProxyServer(port);
-        server.start();
-    }
 }

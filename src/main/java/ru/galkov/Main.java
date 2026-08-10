@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.servers.DnsServer;
+import ru.galkov.servers.HttpProxyServer;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -15,17 +16,16 @@ import java.util.Arrays;
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
     private static DnsServer dnsServer;
-    private static HikariDataSource dataSource;   // <-- пул
+    private static HttpProxyServer proxyServer;
     private static AppConfig config;
 
     public static void main(String[] args) {
         try {
             applicationInitialisation();
             startDnsServer();
-
+            startProxyServer();
         } catch (Exception e) {
             logger.error(e.getMessage());
-            closeDataSource();
             Runtime.getRuntime().exit(-1);
         } finally {
             logger.info("Система запущена!");
@@ -49,22 +49,23 @@ public class Main {
         }
     }
 
-    private static void closeDataSource() {
-        if (dataSource != null) {
-            try {
-                dataSource.close();
-            } catch (Exception ex) {
-                logger.error(Arrays.toString(ex.getStackTrace()));
-            }
-        }
-    }
-
     public static synchronized void startDnsServer() {
         if (dnsServer == null && config.getBoolean("dns.start")) {
             synchronized (DnsServer.class) {
                 if (dnsServer == null) {
                     dnsServer = new DnsServer();
                     dnsServer.run();
+                }
+            }
+        }
+    }
+
+    public static synchronized void startProxyServer() {
+        if (proxyServer == null && config.getBoolean("proxy.start")) {
+            synchronized (HttpProxyServer.class) {
+                if (proxyServer == null) {
+                    proxyServer = new HttpProxyServer(getConfig().getInt("proxy.local.port"));
+                    proxyServer.start();
                 }
             }
         }
