@@ -21,7 +21,6 @@ public class BlacklistLoader {
         InputStream inputStream = null;
         boolean found = false;
 
-        // 1. Поиск в Classpath (рекомендуемый способ)
         URL resource = getClass().getClassLoader().getResource("blacklist.txt");
         if (resource != null) {
             try {
@@ -32,7 +31,6 @@ public class BlacklistLoader {
                 logger.error("Ошибка открытия ресурса blacklist.txt", e);
             }
         } else {
-            // 2. Поиск в рабочей директории (для локальной отладки)
             File file = new File("blacklist.txt");
             if (file.exists() && file.isFile()) {
                 try {
@@ -86,7 +84,6 @@ public class BlacklistLoader {
 
         if (!loaded || (domains.isEmpty() && ips.isEmpty())) return false;
 
-        // Проверка IP клиента
         if (clientIp != null && !clientIp.isEmpty()) {
             String ipClean = clientIp;
             if (ipClean.contains("/")) ipClean = ipClean.split("/")[0];
@@ -96,23 +93,18 @@ public class BlacklistLoader {
             }
         }
 
-        // Проверка домена
         if (host != null && !host.isEmpty()) {
             String hClean = host.toLowerCase();
 
-            // Убираем порт, если есть (example.com:8080)
             if (hClean.contains(":")) hClean = hClean.split(":")[0];
 
-            // Убираем точку в конце, если есть
             if (hClean.endsWith(".")) hClean = hClean.substring(0, hClean.length() - 1);
 
-            // Точное совпадение
             if (domains.contains(hClean)) {
                 logger.info("BLOCKED [Domain]: Точное совпадение {}", hClean);
                 return true;
             }
 
-            // Частичное совпадение (поддомены)
             for (String blocked : domains) {
                 if (hClean.endsWith("." + blocked)) {
                     logger.info("BLOCKED [Subdomain]: {} совпадает с правилом {}", hClean, blocked);

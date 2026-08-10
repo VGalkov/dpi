@@ -28,31 +28,22 @@ public class ProxyHandler implements Runnable {
             ByteArrayOutputStream headerBuffer = new ByteArrayOutputStream();
             boolean headersEnded = false;
             String hostHeader = null;
-            String requestLine = null;
 
-            // --- ШАГ 1: Чтение заголовков (до \r\n\r\n) ---
             while (!headersEnded) {
                 int bytesRead = clientIn.read(buffer);
-                if (bytesRead == -1) return; // Клиент закрыл соединение
+                if (bytesRead == -1) return;
 
                 headerBuffer.write(buffer, 0, bytesRead);
-
-                // Ищем конец заголовков в прочитанном буфере
-                // Используем ISO_8859_1, так как HTTP заголовки текстовые ASCII
                 String chunk = new String(buffer, 0, bytesRead, StandardCharsets.ISO_8859_1);
 
-                // Проверка наличия маркера конца заголовков
-                if (chunk.contains("\r\n\r\n")) {
+                if (chunk.contains("\r\n\r\n"))
                     headersEnded = true;
-                }
             }
 
             byte[] fullHeaderBytes = headerBuffer.toByteArray();
             String fullHeaderText = new String(fullHeaderBytes, StandardCharsets.ISO_8859_1);
 
-            // Парсим первую строку и заголовок Host
             String[] lines = fullHeaderText.split("\r\n");
-            if (lines.length > 0) requestLine = lines[0];
 
             for (String line : lines) {
                 if (line.toLowerCase().startsWith("host:")) {
@@ -63,19 +54,16 @@ public class ProxyHandler implements Runnable {
 
             if (hostHeader == null) {
                 logger.warn("HTTP [{}]: Отсутствует обязательный заголовок Host", clientIp);
-                return; // Молча закрываем
+                return;
             }
 
             logger.info("HTTP [{}] -> Запрос к: {}", clientIp, hostHeader);
 
-            // --- ШАГ 2: ПРОВЕРКА BLACKLIST ---
             if (blacklist.isBlocked(hostHeader, clientIp)) {
                 logger.info("HTTP [{}] <- ЗАБЛОКИРОВАНО (домен или IP в черном списке)", clientIp);
-                // Молча закрываем соединение. Клиент получит таймаут.
                 return;
             }
 
-            // --- ШАГ 3: Подключение к целевому серверу ---
             int targetPort = 80;
             String targetHost = hostHeader;
 
@@ -100,12 +88,9 @@ public class ProxyHandler implements Runnable {
             try (OutputStream upstreamOut = upstreamSocket.getOutputStream();
                  InputStream upstreamIn = upstreamSocket.getInputStream()) {
 
-                // Отправляем оригинальные заголовки на целевой сервер
                 upstreamOut.write(fullHeaderBytes);
                 upstreamOut.flush();
 
-                // --- ШАГ 4: Двусторонняя ретрансляция (Relay) ---
-                // Поток 1: Данные от Target -> Client
                 Thread toClient = new Thread(() -> {
                     try {
                         byte[] buf = new byte[4096];
@@ -115,12 +100,10 @@ public class ProxyHandler implements Runnable {
                             clientOut.flush();
                         }
                     } catch (IOException e) {
-                        // Нормально, если клиент или сервер закрыли соединение
                         logger.trace("Relay (Upstream->Client) finished or error", e);
                     }
                 });
 
-                // Поток 2: Данные от Client -> Target (тело запроса, если есть)
                 Thread toServer = new Thread(() -> {
                     try {
                         byte[] buf = new byte[4096];
