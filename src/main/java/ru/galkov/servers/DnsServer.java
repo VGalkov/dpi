@@ -118,10 +118,7 @@ public class DnsServer {
         return false;
     }
 
-    /**
-     * Проверяет содержимое ответа DNS на наличие запрещенных доменов или IP.
-     * Возвращает true, если ответ содержит что-то запрещенное.
-     */
+
     private boolean checkResponseBlacklist(Message response, String requestedDomain) {
         if (!blacklistLoaded || (blacklistDomains.isEmpty() && blacklistIps.isEmpty())) {
             return false;
@@ -369,10 +366,6 @@ public class DnsServer {
             }
         }
         return null;
-    }
-
-    private Message forwardToResolver(Message query) {
-        return forwardToResolver(query, "unknown");
     }
 
     private DatagramPacket getFormatedReply(Message response, DatagramPacket packet) {
