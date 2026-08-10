@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xbill.DNS.*;
 import org.xbill.DNS.Record;
-
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -18,7 +17,6 @@ public class DnsServer {
     private static final Logger logger = LoggerFactory.getLogger(DnsServer.class);
     private final ExecutorService workerPool = Executors.newFixedThreadPool(getConfig().getInt("dns.thread.num"));
 
-    // --- BLACKLIST LOGIC ---
     private static Set<String> blacklistDomains = null;
     private static Set<String> blacklistIps = null;
     private static boolean blacklistLoaded = false;
@@ -32,8 +30,6 @@ public class DnsServer {
         InputStream inputStream = null;
         boolean found = false;
 
-        // 1. Попытка найти в ClassPath (стандарт для Java приложений)
-        // Ищем файл просто по имени, без пути. Он должен быть в папке resources
         URL resource = getClass().getClassLoader().getResource("blacklist.txt");
 
         if (resource != null) {
@@ -45,7 +41,6 @@ public class DnsServer {
                 logger.error("Ошибка открытия blacklist.txt из Classpath", e);
             }
         } else {
-            // 2. Попытка найти в рабочей директории (fallback для локальной разработки)
             File file = new File("blacklist.txt");
             if (file.exists() && file.isFile()) {
                 try {
@@ -53,11 +48,11 @@ public class DnsServer {
                     found = true;
                     logger.info("Blacklist найден в рабочей директории: {}", file.getAbsolutePath());
                 } catch (FileNotFoundException e) {
-                    // Игнорируем, так как мы уже проверили существование
+                    // Игнорируем
                 }
             } else {
                 logger.warn("Файл blacklist.txt не найден ни в Classpath, ни в рабочей директории. Блокировка отключена.");
-                blacklistLoaded = true; // Помечаем как загруженный (пустым), чтобы не искать снова
+                blacklistLoaded = true;
                 return;
             }
         }
@@ -70,7 +65,6 @@ public class DnsServer {
                     line = line.trim();
                     if (line.isEmpty() || line.startsWith("#")) continue;
 
-                    // Простая эвристика: если похоже на IP - в список IP, иначе в домены
                     if (line.matches("\\d{1,3}(\\.\\d{1,3}){3}")) {
                         blacklistIps.add(line.toLowerCase());
                     } else {
@@ -98,31 +92,23 @@ public class DnsServer {
             return false;
         }
 
-        // 1. Проверка IP клиента
         if (clientIp != null && blacklistIps.contains(clientIp.toLowerCase())) {
             logger.debug("BLOCKED [IP]: Запрос от заблокированного IP {}", clientIp);
             return true;
         }
 
-        // 2. Проверка домена запроса
         if (domain != null && !domain.isEmpty()) {
-            // ВАЖНО: Нормализуем домен. DNS всегда добавляет точку в конце (FQDN).
-            // Если строка заканчивается на '.', убираем её для сравнения.
             String dNormalized = domain.toLowerCase();
             if (dNormalized.endsWith(".")) {
                 dNormalized = dNormalized.substring(0, dNormalized.length() - 1);
             }
 
-            // Точное совпадение
             if (blacklistDomains.contains(dNormalized)) {
                 logger.info("BLOCKED [Domain]: Точное совпадение домена {}", domain);
                 return true;
             }
 
-            // Частичное совпадение (поддомены)
-            // Пример: в списке "ru", запрос "www.ru" -> должен блокироваться.
             for (String blocked : blacklistDomains) {
-                // Проверяем, заканчивается ли нормализованный домен на заблокированный
                 if (dNormalized.endsWith("." + blocked) || dNormalized.equals(blocked)) {
                     logger.info("BLOCKED [Subdomain]: Домен {} совпадает с правилом {}", domain, blocked);
                     return true;
@@ -148,24 +134,19 @@ public class DnsServer {
 
         for (Record record : allRecords) {
             Name name = record.getName();
-            // Проверка имени записи (домен)
 
-            // Проверка имени записи (домен)
             if (name != null) {
                 String recName = name.toString().toLowerCase();
 
-                // НОРМАЛИЗАЦИЯ: убираем точку в конце для корректного сравнения
                 if (recName.endsWith(".")) {
                     recName = recName.substring(0, recName.length() - 1);
                 }
 
-                // Точное совпадение
                 if (blacklistDomains.contains(recName)) {
                     logger.info("BLOCKED [Response]: В ответе найден запрещенный домен (точное): {}", recName);
                     return true;
                 }
 
-                // Частичное совпадение (поддомены)
                 for (String blocked : blacklistDomains) {
                     if (recName.endsWith("." + blocked)) {
                         logger.info("BLOCKED [Response]: В ответе найден запрещенный поддомен: {} (матч: {})", recName, blocked);
@@ -174,7 +155,6 @@ public class DnsServer {
                 }
             }
 
-            // Специфическая проверка для A и AAAA записей (IP адреса)
             if (record instanceof ARecord) {
                 ARecord a = (ARecord) record;
                 String ip = a.getAddress().getHostAddress().toLowerCase();
@@ -193,7 +173,6 @@ public class DnsServer {
         }
         return false;
     }
-    // ----------------------
 
     public DnsServer() {}
 
