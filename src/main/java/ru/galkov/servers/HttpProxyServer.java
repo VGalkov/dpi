@@ -1,3 +1,4 @@
+
 package ru.galkov.servers;
 
 import org.slf4j.Logger;
@@ -16,34 +17,82 @@ public class HttpProxyServer {
     private final ExecutorService workerPool;
     private final BlacklistLoader blacklist;
 
+    private volatile boolean running = false;
+    private Thread serverThread;
+
     public HttpProxyServer(int port) {
         this.port = port;
-        // Размер пула: 2 потока на ядро процессора
+        // Пул потоков для обработки клиентов
         this.workerPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2);
         this.blacklist = new BlacklistLoader();
     }
 
     public void start() {
-        logger.info("Запуск прозрачного HTTP прокси на порту {}", port);
+        if (running) {
+            logger.warn("Прокси сервер уже запущен на порту {}", port);
+            return;
+        }
 
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
-            while (!Thread.currentThread().isInterrupted()) {
-                Socket clientSocket = serverSocket.accept();
-                String clientIp = clientSocket.getInetAddress().getHostAddress();
+        running = true;
+        logger.info("Инициализация HTTP прокси на порту {}", port);
 
-                logger.debug("TCP: Принято соединение от {}", clientIp);
+        serverThread = new Thread(() -> {
+            try (ServerSocket serverSocket = new ServerSocket(port)) {
+                logger.info("HTTP Proxy успешно начал слушать порт {}", port);
 
-                // Делегируем обработку в отдельный поток
-                workerPool.execute(new ProxyHandler(clientSocket, clientIp, blacklist));
+                while (running) {
+                    Socket clientSocket;
+                    try {
+                        clientSocket = serverSocket.accept();
+                    } catch (IOException e) {
+                        if (!running) {
+                            logger.debug("Прием соединений остановлен корректно.");
+                            break;
+                        }
+                        logger.error("Ошибка при попытке принять соединение на порту {}", port, e);
+                        continue;
+                    }
+
+                    String clientIp = clientSocket.getInetAddress().getHostAddress();
+                    logger.trace("Принято соединение от {} на порт {}", clientIp, port);
+
+                    workerPool.execute(new ProxyHandler(clientSocket, clientIp, blacklist));
+                }
+            } catch (IOException e) {
+                if (running) {
+                    logger.error("Не удалось запустить HTTP Proxy на порту {}. Порт занят или нет прав доступа.", port, e);
+                } else {
+                    logger.info("HTTP Proxy корректно остановлен на порту {}", port);
+                }
+            } finally {
+                workerPool.shutdown();
+                logger.info("Пул потоков прокси-сервера остановлен.");
             }
-        } catch (IOException e) {
-            if (!Thread.currentThread().isInterrupted()) {
-                logger.error("Ошибка запуска прокси-сервера", e);
-            }
-        } finally {
-            workerPool.shutdown();
-            logger.info("Прокси-сервер остановлен");
+        }, "HttpProxy-Server-Thread-" + port);
+
+        serverThread.setDaemon(false); // ВАЖНО: JVM не завершится, пока жив этот поток
+        serverThread.start();
+
+        waitForSocketReady(port);
+    }
+
+    public void stop() {
+        logger.info("Запрос на остановку HTTP Proxy...");
+        running = false;
+        if (serverThread != null) {
+            serverThread.interrupt();
         }
     }
 
+    private void waitForSocketReady(int port) {
+        long timeout = System.currentTimeMillis() + 5000; // 5 секунд таймаут
+        while (System.currentTimeMillis() < timeout) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
 }

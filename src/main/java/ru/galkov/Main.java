@@ -22,8 +22,8 @@ public class Main {
     public static void main(String[] args) {
         try {
             applicationInitialisation();
-            startDnsServer();
             startProxyServer();
+            startDnsServer();
         } catch (Exception e) {
             logger.error(e.getMessage());
             Runtime.getRuntime().exit(-1);
@@ -60,14 +60,19 @@ public class Main {
         }
     }
 
+
     public static synchronized void startProxyServer() {
         if (proxyServer == null && config.getBoolean("proxy.start")) {
             synchronized (HttpProxyServer.class) {
                 if (proxyServer == null) {
-                    proxyServer = new HttpProxyServer(getConfig().getInt("proxy.local.port"));
+                    int port = getConfig().getInt("proxy.local.port");
+                    logger.info("Инициализация и запуск HTTP Proxy на порту {}", port);
+                    proxyServer = new HttpProxyServer(port);
                     proxyServer.start();
                 }
             }
+        } else if (proxyServer != null) {
+            logger.info("HTTP Proxy уже инициализирован");
         }
     }
 
