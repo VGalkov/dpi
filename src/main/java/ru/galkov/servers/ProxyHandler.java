@@ -2,27 +2,11 @@ package ru.galkov.servers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.*;
-import java.net.Socket;
-import java.net.SocketException;
-import java.nio.charset.StandardCharsets;
-import java.util.StringTokenizer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.StringTokenizer;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.*;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
-import java.util.StringTokenizer;
 
 public class ProxyHandler implements Runnable {
     private final Socket clientSocket;
@@ -46,7 +30,6 @@ public class ProxyHandler implements Runnable {
             clientIn = clientSocket.getInputStream();
             clientOut = clientSocket.getOutputStream();
 
-            // Читаем первую строку
             String firstLine = readLine(clientIn);
             if (firstLine == null || firstLine.isEmpty()) {
                 logger.debug("{} -> Empty request", clientIp);
@@ -121,19 +104,14 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        // Отправляем ответ 200
         String response = "HTTP/1.1 200 Connection established\r\n" +
                 "Proxy-Agent: MyProxy\r\n" +
                 "\r\n";
         clientOut.write(response.getBytes(StandardCharsets.ISO_8859_1));
         clientOut.flush();
 
-        // ЗАПУСКАЕМ ТУННЕЛЬ
-        // Важно: мы не закрываем clientSocket здесь. runTunnel будет держать его открытым,
-        // пока не закончится соединение с удаленным сервером.
         runTunnel(clientSocket, remoteSocket);
 
-        // После завершения туннеля сокеты уже закрыты внутри runTunnel или сами собой
     }
 
     private void handleHttp(InputStream clientIn, OutputStream clientOut, String firstLine, String target, String method) throws IOException {
@@ -220,11 +198,9 @@ public class ProxyHandler implements Runnable {
             if (path.isEmpty()) path = "/";
         }
 
-        StringBuilder finalRequest = new StringBuilder();
-        finalRequest.append(method).append(" ").append(path).append(" HTTP/1.1\r\n");
-        finalRequest.append(headersBuilder.toString());
+        String finalRequest = method + " " + path + " HTTP/1.1\r\n" + headersBuilder;
 
-        remoteOut.write(finalRequest.toString().getBytes(StandardCharsets.ISO_8859_1));
+        remoteOut.write(finalRequest.getBytes(StandardCharsets.ISO_8859_1));
         if (body.length > 0) {
             remoteOut.write(body);
         }
@@ -241,8 +217,7 @@ public class ProxyHandler implements Runnable {
         remoteSocket.close();
     }
 
-    // ИСПРАВЛЕННЫЙ ТУННЕЛЬ: теперь ошибки логируются явно
-    private void runTunnel(Socket client, Socket remote) throws IOException {
+    private void runTunnel(Socket client, Socket remote) {
         Thread t1 = new Thread(() -> {
             InputStream in = null;
             OutputStream out = null;
@@ -256,7 +231,6 @@ public class ProxyHandler implements Runnable {
                     out.flush(); // Важно для Windows/curl
                 }
             } catch (IOException e) {
-                // Логгируем проблему в одном направлении
                 logger.debug("Tunnel thread 1 ended: {}", e.getMessage());
             } finally {
                 try { if (in != null) in.close(); } catch (IOException ignored) {}
@@ -296,7 +270,6 @@ public class ProxyHandler implements Runnable {
             Thread.currentThread().interrupt();
         }
 
-        // Закрываем основные сокеты после завершения туннеля
         try { client.close(); } catch (IOException ignored) {}
         try { remote.close(); } catch (IOException ignored) {}
     }
@@ -304,7 +277,6 @@ public class ProxyHandler implements Runnable {
     private String readLine(InputStream in) throws IOException {
         StringBuilder sb = new StringBuilder();
         int c;
-        // Читаем побайтово, чтобы не потерять данные из-за буферизации BufferedReader
         while ((c = in.read()) != -1) {
             if (c == '\n') {
                 if (!sb.toString().isEmpty() && sb.charAt(sb.length() - 1) == '\r') {
@@ -314,7 +286,7 @@ public class ProxyHandler implements Runnable {
             }
             sb.append((char) c);
         }
-        return sb.length() > 0 ? sb.toString() : null;
+        return !sb.isEmpty() ? sb.toString() : null;
     }
 
     private void sendError(OutputStream out, int code, String message) throws IOException {

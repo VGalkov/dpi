@@ -17,12 +17,10 @@ import java.util.*;
 public final class AppConfig {
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
 
-    // Путь по умолчанию. Можно переопределить через -Dconfig.path=/path/to/config.properties
     private static final String DEFAULT_PATH = "application.properties";
 
     private Properties props;
 
-    // Singleton
     private AppConfig(String path) throws IOException {
         this.props = load(path);
     }
@@ -32,7 +30,6 @@ public final class AppConfig {
     }
 
     public static synchronized AppConfig getInstance() throws IOException {
-        // Проверяем, существует ли файл по указанному пути (или по умолчанию)
         String path = System.getProperty("config.path", DEFAULT_PATH);
 
         if (Holder.INSTANCE == null) {
@@ -42,34 +39,18 @@ public final class AppConfig {
         return Holder.INSTANCE;
     }
 
-    public static AppConfig get() {
-        if (Holder.INSTANCE == null) {
-            throw new IllegalStateException("AppConfig ещё не инициализирован. Вызовите getInstance() в main.");
-        }
-        return Holder.INSTANCE;
-    }
-
-    public synchronized void reload() throws IOException {
-        getInstance().props = getInstance().load(System.getProperty("config.path", DEFAULT_PATH));
-    }
-
-    /* -----------------------------------------------------------------
-     * ЛОГИКА ЗАГРУЗКИ: Диск -> JAR
-     * ----------------------------------------------------------------- */
     private synchronized Properties load(String path) throws IOException {
         Properties raw = new Properties();
         InputStream inputStream;
         File configFile = new File(path);
 
         try {
-            // 1. ПРИОРИТЕТ: Пробуем прочитать файл с диска (рядом с JAR)
             if (configFile.exists() && configFile.isFile()) {
                 logger.info("✅ Конфиг найден на диске: {}", configFile.getAbsolutePath());
                 try (FileInputStream fis = new FileInputStream(configFile)) {
                     raw.load(fis);
                 }
             }
-            // 2. ФОЛБЭК: Если файла нет на диске, пробуем найти внутри JAR
             else {
                 logger.warn("⚠️ Файл '{}' не найден на диске. Пытаемся найти внутри JAR...", path);
                 URL resourceUrl = AppConfig.class.getResource("/application.properties");
@@ -90,7 +71,6 @@ public final class AppConfig {
                 }
             }
 
-            // Если файл пустой или не загрузился
             if (raw.isEmpty()) {
                 throw new IOException("⚠️ Конфиг не найден на диске или внутри JAR!");
             }
@@ -136,10 +116,6 @@ public final class AppConfig {
         return value;
     }
 
-    /* -----------------------------------------------------------------
-     * Публичный API (без изменений, только исправлено название метода внизу)
-     * ----------------------------------------------------------------- */
-
     public String get(String key) {
         String val = props.getProperty(key);
         if (val == null) {
@@ -148,21 +124,12 @@ public final class AppConfig {
         return val;
     }
 
-    public String getString(String key) {
-        return get(key); // Делегируем основному методу
-    }
-
     public List<String> getList(String key) {
         String raw = get(key);
         if (raw.trim().isEmpty()) return Collections.emptyList();
 
         String[] parts = raw.split("\\s*,\\s*");
         return Arrays.asList(parts);
-    }
-
-    // Исправлена опечатка в названии метода (было getProterties)
-    public Properties getProperties() {
-        return props;
     }
 
     public Set<String> getSet(String key) {

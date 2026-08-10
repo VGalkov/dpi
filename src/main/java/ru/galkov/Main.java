@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
-import java.io.IOException;
 
 
 /**
@@ -22,7 +21,7 @@ public class Main {
 
     public static void main(String[] args) {
         try {
-            applicationInitialisation();
+            config = AppConfig.getInstance();
             startProxyServer();
             startDnsServer();
         } catch (Exception e) {
@@ -30,23 +29,6 @@ public class Main {
             Runtime.getRuntime().exit(-1);
         } finally {
             logger.info("Система запущена!");
-        }
-    }
-
-    private static void applicationInitialisation() throws IOException {
-        //порядок имеет значение.
-        config = AppConfig.getInstance();
-    }
-
-
-    //Мы меняем настройки, но не все настройки перечитываются наново процессами.
-    // Так что не все настройки будут обновляться без перезагрузки.
-    private static void updateAppConf() {
-        try {
-            AppConfig.getInstance().reload();           // проверяем, изменились ли свойства.
-            logger.info("Перегрузка конфигурации.({} сек.)", getConfig().get("Config.reload.timeout"));
-        } catch (Exception e) {
-            logger.warn("Ошибка при перезагрузке конфигурации: {}", e.getMessage());
         }
     }
 
@@ -60,7 +42,6 @@ public class Main {
             }
         }
     }
-
 
     public static synchronized void startProxyServer() {
         if (proxyServer == null && config.getBoolean("proxy.start")) {

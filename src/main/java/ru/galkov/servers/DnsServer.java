@@ -77,7 +77,7 @@ public class DnsServer {
                 blacklistLoaded = true;
             } catch (IOException e) {
                 logger.error("Критическая ошибка чтения blacklist.txt", e);
-                blacklistLoaded = true; // Не пытаемся читать снова
+                blacklistLoaded = true;
             } finally {
                 try { inputStream.close(); } catch (IOException ignore) {}
             }
@@ -212,10 +212,8 @@ public class DnsServer {
         Message message;
 
         try {
-            // Пытаемся распарсить как DNS
             message = new Message(queryData);
         } catch (WireParseException e) {
-            // Игнорируем не-DNS трафик (DoH/DoT handshake и т.д.)
             logger.debug("UDP [{}]: Игнорируем не-DNS трафик (длина: {}). Возможно DoH/DoT.", clientIp, len);
             return;
         } catch (Exception e) {
@@ -232,32 +230,26 @@ public class DnsServer {
 
         loadBlacklist();
 
-        // 1. Проверка ЗАПРОСА
         if (isBlocked(domain, clientIp)) {
             logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО (домен в черном списке)", clientIp);
 
-            // ОТПРАВКА ОШИБКИ С ОБРАБОТКОЙ ИСКЛЮЧЕНИЯ
             try {
                 sendRefusedResponse(socket, packet, queryData);
             } catch (IOException ioe) {
-                // Критично: ошибка отправки не должна ронять весь поток workerPool
                 logger.error("UDP [{}]: Не удалось отправить REFUSED ответ для домена {}. Причина: {}",
                         clientIp, domain, ioe.getMessage(), ioe);
             }
             return;
         }
 
-        // 2. Форвардинг
         Message response = forwardToResolver(message, clientIp);
 
         if (response != null) {
-            // 3. Проверка ОТВЕТА (IP адреса)
             if (checkResponseBlacklist(response, domain)) {
                 logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО (ответ содержит запрещенный IP/Домен)", clientIp);
-                return; // Не отправляем ответ клиенту
+                return;
             }
 
-            // ОТПРАВКА ОТВЕТА С ОБРАБОТКОЙ ИСКЛЮЧЕНИЯ
             try {
                 DatagramPacket replyPacket = getFormatedReply(response, packet);
                 socket.send(replyPacket);
@@ -269,7 +261,6 @@ public class DnsServer {
         } else {
             logger.warn("UDP [{}] <- Upstream не ответил для домена {}", clientIp, domain);
 
-            // ОТПРАВКА ОШИБКИ UPSTREAM С ОБРАБОТКОЙ ИСКЛЮЧЕНИЯ
             try {
                 sendRefusedResponse(socket, packet, queryData);
             } catch (IOException ioe) {
@@ -325,9 +316,6 @@ public class DnsServer {
                 try {
                     message = new Message(requestData);
                 } catch (WireParseException e) {
-                    // ЭТО ГЛАВНОЕ ИЗМЕНЕНИЕ ДЛЯ TCP:
-                    // Получен не DNS over TCP трафик (например, TLS ClientHello).
-                    // Просто закрываем сессию. Не пытаемся отвечать DNS-ошибкой.
                     logger.debug("TCP [{}]: Получен не-DNS трафик. Завершаем сессию.", clientIp);
                     return;
                 } catch (Exception e) {
@@ -360,7 +348,7 @@ public class DnsServer {
                 if (response != null) {
                     if (checkResponseBlacklist(response, domain)) {
                         logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО (запрещенный IP в ответе)", clientIp);
-                        continue; // Не отправляем ответ
+                        continue;
                     }
 
                     byte[] respBytes = response.toWire();
@@ -368,7 +356,6 @@ public class DnsServer {
                     out.write(respBytes);
                     out.flush();
                 } else {
-                    // Логика отказа upstream...
                 }
             }
         } catch (IOException e) {

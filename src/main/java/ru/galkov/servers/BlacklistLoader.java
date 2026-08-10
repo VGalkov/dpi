@@ -78,7 +78,7 @@ public class BlacklistLoader {
     }
 
     public boolean isBlocked(String host, String clientIp) {
-        load(); // Гарантируем загрузку при первом вызове
+        load();
 
         if (!loaded || (domains.isEmpty() && ips.isEmpty())) return false;
 

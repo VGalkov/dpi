@@ -22,7 +22,6 @@ public class HttpProxyServer {
 
     public HttpProxyServer(int port) {
         this.port = port;
-        // Пул потоков для обработки клиентов
         this.workerPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2);
         this.blacklist = new BlacklistLoader();
     }
@@ -74,14 +73,6 @@ public class HttpProxyServer {
         serverThread.start();
 
         waitForSocketReady(port);
-    }
-
-    public void stop() {
-        logger.info("Запрос на остановку HTTP Proxy...");
-        running = false;
-        if (serverThread != null) {
-            serverThread.interrupt();
-        }
     }
 
     private void waitForSocketReady(int port) {
