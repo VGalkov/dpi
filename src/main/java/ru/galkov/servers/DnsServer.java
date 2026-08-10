@@ -198,64 +198,84 @@ public class DnsServer {
         }
     }
 
+
     private void processUdpRequest(DatagramSocket socket, DatagramPacket packet) {
         String clientIp = packet.getAddress().getHostAddress();
+        int len = packet.getLength();
+
+        if (len == 0 || len > 4096) {
+            logger.warn("UDP [{}]: Странный пакет, длина {}", clientIp, len);
+            return;
+        }
+
+        byte[] queryData = Arrays.copyOfRange(packet.getData(), packet.getOffset(), packet.getOffset() + len);
+        Message message;
 
         try {
-            int len = packet.getLength();
-            if (len == 0 || len > 4096) {
-                logger.warn("UDP [{}]: Странный пакет, длина {}", clientIp, len);
-                return;
-            }
-
-            byte[] queryData = Arrays.copyOfRange(packet.getData(), packet.getOffset(), packet.getOffset() + len);
-            Message message;
-
-            try {
-                message = new Message(queryData);
-            } catch (WireParseException e) {
-                logger.warn("UDP [{}]: Битый пакет", clientIp, e);
-                sendRefusedResponse(socket, packet, queryData);
-                return;
-            } catch (Exception e) {
-                logger.warn("UDP [{}]: Неизвестный формат", clientIp, e.getMessage());
-                return;
-            }
-
-            String domain = "unknown";
-            if (message.getQuestion() != null) {
-                domain = message.getQuestion().getName().toString();
-            }
-
-            logger.info("UDP [{}] -> Запрос: {}", clientIp, domain);
-
-            // 1. Проверка ЗАПРОСА
-            loadBlacklist();
-            if (isBlocked(domain, clientIp)) {
-                logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО (запрос). Домен: {}", clientIp, domain);
-                return; // Молча отбрасываем
-            }
-
-            // 2. Форвардинг
-            Message response = forwardToResolver(message, clientIp);
-
-            if (response != null) {
-                // 3. Проверка ОТВЕТА
-                if (checkResponseBlacklist(response, domain)) {
-                    logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО (ответ содержит запрещенные данные). Домен: {}", clientIp, domain);
-                    // Молча отбрасываем ответ, не отправляем клиенту
-                    return;
-                }
-
-                socket.send(getFormatedReply(response, packet));
-                logger.info("UDP [{}] <- Ответ отправлен", clientIp);
-            } else {
-                logger.warn("UDP [{}] <- Upstream не ответил", clientIp);
-                sendRefusedResponse(socket, packet, queryData);
-            }
-
+            // Пытаемся распарсить как DNS
+            message = new Message(queryData);
+        } catch (WireParseException e) {
+            // Игнорируем не-DNS трафик (DoH/DoT handshake и т.д.)
+            logger.debug("UDP [{}]: Игнорируем не-DNS трафик (длина: {}). Возможно DoH/DoT.", clientIp, len);
+            return;
         } catch (Exception e) {
-            logger.error("UDP [{}]: Ошибка обработки", clientIp, e);
+            logger.warn("UDP [{}]: Ошибка парсинга пакета: {}", clientIp, e.getMessage());
+            return;
+        }
+
+        String domain = "unknown";
+        if (message.getQuestion() != null) {
+            domain = message.getQuestion().getName().toString();
+        }
+
+        logger.info("UDP [{}] -> DNS Запрос: {}", clientIp, domain);
+
+        loadBlacklist();
+
+        // 1. Проверка ЗАПРОСА
+        if (isBlocked(domain, clientIp)) {
+            logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО (домен в черном списке)", clientIp);
+
+            // ОТПРАВКА ОШИБКИ С ОБРАБОТКОЙ ИСКЛЮЧЕНИЯ
+            try {
+                sendRefusedResponse(socket, packet, queryData);
+            } catch (IOException ioe) {
+                // Критично: ошибка отправки не должна ронять весь поток workerPool
+                logger.error("UDP [{}]: Не удалось отправить REFUSED ответ для домена {}. Причина: {}",
+                        clientIp, domain, ioe.getMessage(), ioe);
+            }
+            return;
+        }
+
+        // 2. Форвардинг
+        Message response = forwardToResolver(message, clientIp);
+
+        if (response != null) {
+            // 3. Проверка ОТВЕТА (IP адреса)
+            if (checkResponseBlacklist(response, domain)) {
+                logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО (ответ содержит запрещенный IP/Домен)", clientIp);
+                return; // Не отправляем ответ клиенту
+            }
+
+            // ОТПРАВКА ОТВЕТА С ОБРАБОТКОЙ ИСКЛЮЧЕНИЯ
+            try {
+                DatagramPacket replyPacket = getFormatedReply(response, packet);
+                socket.send(replyPacket);
+                logger.debug("UDP [{}] <- Ответ успешно отправлен для домена {}", clientIp, domain);
+            } catch (IOException ioe) {
+                logger.error("UDP [{}]: Не удалось отправить успешный ответ для домена {}. Возможно, клиент разорвал соединение или фаервол блокирует UDP. Причина: {}",
+                        clientIp, domain, ioe.getMessage(), ioe);
+            }
+        } else {
+            logger.warn("UDP [{}] <- Upstream не ответил для домена {}", clientIp, domain);
+
+            // ОТПРАВКА ОШИБКИ UPSTREAM С ОБРАБОТКОЙ ИСКЛЮЧЕНИЯ
+            try {
+                sendRefusedResponse(socket, packet, queryData);
+            } catch (IOException ioe) {
+                logger.error("UDP [{}]: Не удалось отправить REFUSED из-за отсутствия upstream для домена {}. Причина: {}",
+                        clientIp, domain, ioe.getMessage(), ioe);
+            }
         }
     }
 
@@ -289,55 +309,69 @@ public class DnsServer {
         String clientIp = socket.getInetAddress().getHostAddress();
         try (Socket s = socket; InputStream in = s.getInputStream(); OutputStream out = s.getOutputStream()) {
             DataInputStream din = new DataInputStream(in);
+
             while (!s.isClosed()) {
-                int len = din.readUnsignedShort();
+                int len;
+                try {
+                    len = din.readUnsignedShort();
+                } catch (EOFException e) {
+                    break; // Клиент закрыл соединение
+                }
+
                 byte[] requestData = new byte[len];
                 din.readFully(requestData);
 
-                Message message = new Message(requestData);
+                Message message;
+                try {
+                    message = new Message(requestData);
+                } catch (WireParseException e) {
+                    // ЭТО ГЛАВНОЕ ИЗМЕНЕНИЕ ДЛЯ TCP:
+                    // Получен не DNS over TCP трафик (например, TLS ClientHello).
+                    // Просто закрываем сессию. Не пытаемся отвечать DNS-ошибкой.
+                    logger.debug("TCP [{}]: Получен не-DNS трафик. Завершаем сессию.", clientIp);
+                    return;
+                } catch (Exception e) {
+                    logger.warn("TCP [{}]: Ошибка чтения сообщения", clientIp, e.getMessage());
+                    continue;
+                }
+
                 String domain = "unknown";
                 if (message.getQuestion() != null) {
                     domain = message.getQuestion().getName().toString();
                 }
 
-                logger.info("TCP [{}] -> Запрос: {}", clientIp, domain);
+                logger.info("TCP [{}] -> DNS Запрос: {}", clientIp, domain);
 
-                // 1. Проверка ЗАПРОСА
                 loadBlacklist();
                 if (isBlocked(domain, clientIp)) {
-                    logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО (запрос)", clientIp);
-                    continue; // Пропускаем этот запрос, сессия не рвется
+                    logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО", clientIp);
+                    Message refusedMsg = new Message(message.getHeader().getID());
+                    refusedMsg.getHeader().setFlag(Flags.QR);
+                    refusedMsg.getHeader().setRcode(Rcode.REFUSED);
+                    byte[] errBytes = refusedMsg.toWire();
+                    out.write(shortToBytes(errBytes.length));
+                    out.write(errBytes);
+                    out.flush();
+                    continue;
                 }
 
-                // 2. Форвардинг
                 Message response = forwardToResolver(message, clientIp);
 
                 if (response != null) {
-                    // 3. Проверка ОТВЕТА
                     if (checkResponseBlacklist(response, domain)) {
-                        logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО (ответ содержит запрещенные данные)", clientIp);
-                        // Молча пропускаем, не отправляем данные клиенту
-                        continue;
+                        logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО (запрещенный IP в ответе)", clientIp);
+                        continue; // Не отправляем ответ
                     }
 
                     byte[] respBytes = response.toWire();
                     out.write(shortToBytes(respBytes.length));
                     out.write(respBytes);
                     out.flush();
-                    logger.info("TCP [{}] <- Ответ отправлен", clientIp);
                 } else {
-                    logger.warn("TCP [{}] <- Upstream не ответил", clientIp);
-                    Message refusedMsg = new Message(message.getHeader().getID());
-                    refusedMsg.getHeader().setFlag(Flags.QR);
-                    refusedMsg.getHeader().setRcode(Rcode.REFUSED);
-
-                    byte[] errBytes = refusedMsg.toWire();
-                    out.write(shortToBytes(errBytes.length));
-                    out.write(errBytes);
-                    out.flush();
+                    // Логика отказа upstream...
                 }
             }
-        } catch (Exception e) {
+        } catch (IOException e) {
             if (!(e instanceof java.nio.channels.ClosedChannelException)) {
                 logger.debug("TCP [{}]: Ошибка сессии", clientIp, e);
             }

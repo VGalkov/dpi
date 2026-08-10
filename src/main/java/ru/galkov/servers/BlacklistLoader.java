@@ -2,7 +2,6 @@ package ru.galkov.servers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.io.*;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -48,12 +47,10 @@ public class BlacklistLoader {
         if (found && inputStream != null) {
             try (BufferedReader br = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
                 String line;
-                int count = 0;
                 while ((line = br.readLine()) != null) {
                     line = line.trim();
                     if (line.isEmpty() || line.startsWith("#")) continue;
 
-                    // Нормализация: убираем точку в конце, если есть (для единообразия с DNS)
                     String cleanLine = line;
                     if (cleanLine.endsWith(".")) {
                         cleanLine = cleanLine.substring(0, cleanLine.length() - 1);
@@ -64,7 +61,6 @@ public class BlacklistLoader {
                     } else {
                         domains.add(cleanLine.toLowerCase());
                     }
-                    count++;
                 }
                 logger.info("Blacklist успешно загружен. Доменов: {}, IP: {}", domains.size(), ips.size());
                 loaded = true;
@@ -72,7 +68,9 @@ public class BlacklistLoader {
                 logger.error("Критическая ошибка чтения blacklist.txt", e);
                 loaded = true;
             } finally {
-                try { if(inputStream != null) inputStream.close(); } catch (IOException ignore) {}
+                try {
+                    inputStream.close();
+                } catch (IOException ignore) {}
             }
         } else {
             loaded = true;

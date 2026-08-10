@@ -1,17 +1,18 @@
 package ru.galkov;
 
-import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
-
 import java.io.IOException;
-import java.util.Arrays;
 
 
 /**
  * Galkov V A s0506777@yandex.ru
+ *
+ * nslookup.exe www.ssr.ru 10.0.3.10
+ * .\curl -v -x http://127.0.0.1:8888 https://www.google.com
+ * .\curl -v -x http://127.0.0.1:8888 http://example.com
  */
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
