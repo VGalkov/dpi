@@ -1,61 +1,34 @@
 package ru.galkov;
 
-import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.servers.DnsServer;
-
-import java.io.IOException;
-import java.util.Arrays;
+import ru.galkov.servers.HttpProxyServer;
 
 
 /**
  * Galkov V A s0506777@yandex.ru
+ *
+ * nslookup.exe www.ssr.ru 10.0.3.10
+ * .\curl -v -x http://127.0.0.1:8888 https://www.google.com
+ * .\curl -v -x http://127.0.0.1:8888 http://example.com
  */
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
     private static DnsServer dnsServer;
-    private static HikariDataSource dataSource;   // <-- пул
+    private static HttpProxyServer proxyServer;
     private static AppConfig config;
 
     public static void main(String[] args) {
         try {
-            applicationInitialisation();
+            config = AppConfig.getInstance();
+            startProxyServer();
             startDnsServer();
-
         } catch (Exception e) {
             logger.error(e.getMessage());
-            closeDataSource();
             Runtime.getRuntime().exit(-1);
         } finally {
             logger.info("Система запущена!");
-        }
-    }
-
-    private static void applicationInitialisation() throws IOException {
-        //порядок имеет значение.
-        config = AppConfig.getInstance();
-    }
-
-
-    //Мы меняем настройки, но не все настройки перечитываются наново процессами.
-    // Так что не все настройки будут обновляться без перезагрузки.
-    private static void updateAppConf() {
-        try {
-            AppConfig.getInstance().reload();           // проверяем, изменились ли свойства.
-            logger.info("Перегрузка конфигурации.({} сек.)", getConfig().get("Config.reload.timeout"));
-        } catch (Exception e) {
-            logger.warn("Ошибка при перезагрузке конфигурации: {}", e.getMessage());
-        }
-    }
-
-    private static void closeDataSource() {
-        if (dataSource != null) {
-            try {
-                dataSource.close();
-            } catch (Exception ex) {
-                logger.error(Arrays.toString(ex.getStackTrace()));
-            }
         }
     }
 
@@ -67,6 +40,21 @@ public class Main {
                     dnsServer.run();
                 }
             }
+        }
+    }
+
+    public static synchronized void startProxyServer() {
+        if (proxyServer == null && config.getBoolean("proxy.start")) {
+            synchronized (HttpProxyServer.class) {
+                if (proxyServer == null) {
+                    int port = getConfig().getInt("proxy.local.port");
+                    logger.info("Инициализация и запуск HTTP Proxy на порту {}", port);
+                    proxyServer = new HttpProxyServer(port);
+                    proxyServer.start();
+                }
+            }
+        } else if (proxyServer != null) {
+            logger.info("HTTP Proxy уже инициализирован");
         }
     }
 
