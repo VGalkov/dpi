@@ -39,15 +39,11 @@ public final class HostNormalizer {
 
         String ip = value.trim();
 
-        // Поддерживаем запись IPv4/IPv6 без CIDR.
-        // Например, 192.168.1.10/24 превращаем в 192.168.1.10.
         int slash = ip.indexOf('/');
         if (slash >= 0) {
             ip = ip.substring(0, slash);
         }
 
-        // Не пытаемся разрешать имена через DNS.
-        // В blacklist должен быть именно IP.
         if (!looksLikeIp(ip)) {
             return null;
         }

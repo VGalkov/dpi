@@ -1,393 +1,771 @@
-    package ru.galkov.servers;
+package ru.galkov.servers;
 
-    import org.slf4j.Logger;
-    import org.slf4j.LoggerFactory;
-    import org.xbill.DNS.*;
-    import org.xbill.DNS.Record;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.xbill.DNS.*;
+import org.xbill.DNS.Record;
 
-    import java.io.*;
-    import java.net.*;
-    import java.time.Duration;
-    import java.util.*;
-    import java.util.concurrent.ArrayBlockingQueue;
-    import java.util.concurrent.ExecutorService;
-    import java.util.concurrent.ThreadPoolExecutor;
-    import java.util.concurrent.TimeUnit;
+import java.io.*;
+import java.net.*;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-    import static ru.galkov.Main.getConfig;
+import static ru.galkov.Main.getConfig;
 
-    public class DnsServer {
-        private static final Logger logger = LoggerFactory.getLogger(DnsServer.class);
-        private final ExecutorService workerPool =
-                new ThreadPoolExecutor(
-                        getConfig().getInt("dns.thread.num"),
-                        getConfig().getInt("dns.thread.num"),
-                        0L,
-                        TimeUnit.MILLISECONDS,
-                        new ArrayBlockingQueue<Runnable>(500),
-                        new ThreadPoolExecutor.CallerRunsPolicy()
+public class DnsServer {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(DnsServer.class);
+
+    private final ExecutorService workerPool =
+            new ThreadPoolExecutor(
+                    getConfig().getInt("dns.thread.num"),
+                    getConfig().getInt("dns.thread.num"),
+                    0L,
+                    TimeUnit.MILLISECONDS,
+                    new ArrayBlockingQueue<Runnable>(500),
+                    new ThreadPoolExecutor.CallerRunsPolicy()
+            );
+
+    private final BlacklistLoader blacklist;
+
+    private final Map<String, SimpleResolver> resolvers;
+
+    public DnsServer(BlacklistLoader blacklist) {
+        this.blacklist = Objects.requireNonNull(blacklist);
+        this.resolvers = createResolvers();
+    }
+
+    private Map<String, SimpleResolver> createResolvers() {
+        Map<String, SimpleResolver> result =
+                new LinkedHashMap<String, SimpleResolver>();
+
+        int timeout = getConfig().getInt("dns.timeout");
+
+        List<String> dnsServers =
+                getConfig().getList("dns.list");
+
+        for (String dns : dnsServers) {
+            try {
+                SimpleResolver resolver =
+                        new SimpleResolver(dns);
+
+                resolver.setTimeout(
+                        Duration.ofSeconds(timeout)
                 );
-        private final BlacklistLoader blacklist;
-        private final Map<String, SimpleResolver> resolvers;
 
-        public DnsServer(BlacklistLoader blacklist) {
-            this.blacklist = Objects.requireNonNull(blacklist);
-            this.resolvers = createResolvers();
+                result.put(dns, resolver);
+
+                logger.info(
+                        "DNS upstream инициализирован: {}",
+                        dns
+                );
+
+            } catch (UnknownHostException e) {
+                throw new IllegalArgumentException(
+                        "Некорректный DNS upstream: " + dns,
+                        e
+                );
+            }
         }
 
-        private Map<String, SimpleResolver> createResolvers() {
-            Map<String, SimpleResolver> result =
-                    new LinkedHashMap<String, SimpleResolver>();
+        if (result.isEmpty()) {
+            throw new IllegalStateException(
+                    "Список DNS upstream пуст"
+            );
+        }
 
-            int timeout = getConfig().getInt("dns.timeout");
+        return Collections.unmodifiableMap(result);
+    }
 
-            for (String dns : getConfig().getList("dns.list")) {
-                try {
-                    SimpleResolver resolver = new SimpleResolver(dns);
-                    resolver.setTimeout(Duration.ofSeconds(timeout));
+    private boolean checkResponseBlacklist(
+            Message response,
+            String requestedDomain) {
 
-                    result.put(dns, resolver);
+        List<Record> records =
+                new ArrayList<Record>();
 
+        addRecords(
+                records,
+                response,
+                Section.ANSWER
+        );
+
+        addRecords(
+                records,
+                response,
+                Section.AUTHORITY
+        );
+
+        addRecords(
+                records,
+                response,
+                Section.ADDITIONAL
+        );
+
+        for (Record record : records) {
+            Name name = record.getName();
+
+            if (name != null &&
+                    blacklist.isBlockedDomain(
+                            name.toString())) {
+
+                logger.info(
+                        "BLOCKED [Response]: запрещённый домен {} " +
+                                "для запроса {}",
+                        name,
+                        requestedDomain
+                );
+
+                return true;
+            }
+
+            if (record instanceof ARecord) {
+                ARecord aRecord =
+                        (ARecord) record;
+
+                String ip = aRecord
+                        .getAddress()
+                        .getHostAddress()
+                        .toLowerCase(Locale.ROOT);
+
+                if (blacklist.isBlockedIp(ip)) {
                     logger.info(
-                            "DNS upstream инициализирован: {}",
-                            dns
+                            "BLOCKED [Response]: запрещённый IPv4 {}",
+                            ip
                     );
-                } catch (UnknownHostException e) {
-                    throw new IllegalArgumentException(
-                            "Некорректный DNS upstream: " + dns,
+
+                    return true;
+                }
+            }
+
+            if (record instanceof AAAARecord) {
+                AAAARecord aaaaRecord =
+                        (AAAARecord) record;
+
+                String ip = aaaaRecord
+                        .getAddress()
+                        .getHostAddress()
+                        .toLowerCase(Locale.ROOT);
+
+                if (blacklist.isBlockedIp(ip)) {
+                    logger.info(
+                            "BLOCKED [Response]: запрещённый IPv6 {}",
+                            ip
+                    );
+
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void addRecords(
+            List<Record> target,
+            Message message,
+            int section) {
+
+        List<Record> sectionRecords =
+                message.getSection(section);
+
+        if (sectionRecords != null) {
+            target.addAll(sectionRecords);
+        }
+    }
+
+    public void run() {
+        int port =
+                getConfig().getInt("dns.local.port");
+
+        logger.info(
+                "Запуск DNS форвардера на порту {}",
+                port
+        );
+
+        try (
+                DatagramSocket udpSocket =
+                        new DatagramSocket(port);
+
+                ServerSocket tcpListener =
+                        new ServerSocket(port)
+        ) {
+            Thread tcpThread =
+                    new Thread(
+                            new Runnable() {
+                                @Override
+                                public void run() {
+                                    handleTcpConnections(
+                                            tcpListener
+                                    );
+                                }
+                            },
+                            "DnsServer-TCP-Acceptor"
+                    );
+
+            tcpThread.setDaemon(true);
+            tcpThread.start();
+
+            while (!Thread.currentThread().isInterrupted()) {
+                DatagramPacket request =
+                        new DatagramPacket(
+                                new byte[4096],
+                                4096
+                        );
+
+                udpSocket.receive(request);
+
+                String clientIp =
+                        request
+                                .getAddress()
+                                .getHostAddress();
+
+                logger.debug(
+                        "UDP: Получен пакет от {}",
+                        clientIp
+                );
+
+                workerPool.execute(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                processUdpRequest(
+                                        udpSocket,
+                                        request
+                                );
+                            }
+                        }
+                );
+            }
+
+        } catch (IOException e) {
+            logger.error(
+                    "Критическая ошибка запуска DNS-сервера",
+                    e
+            );
+        }
+    }
+
+    private void processUdpRequest(
+            DatagramSocket socket,
+            DatagramPacket packet) {
+
+        String clientIp =
+                packet.getAddress().getHostAddress();
+
+        int len =
+                packet.getLength();
+
+        if (len == 0 || len > 4096) {
+            logger.warn(
+                    "UDP [{}]: странный пакет, длина {}",
+                    clientIp,
+                    len
+            );
+            return;
+        }
+
+        byte[] queryData =
+                new byte[len];
+
+        System.arraycopy(
+                packet.getData(),
+                packet.getOffset(),
+                queryData,
+                0,
+                len
+        );
+
+        Message message;
+
+        try {
+            message =
+                    new Message(queryData);
+
+        } catch (WireParseException e) {
+            logger.debug(
+                    "UDP [{}]: некорректный DNS-пакет, длина {}",
+                    clientIp,
+                    len
+            );
+            return;
+
+        } catch (Exception e) {
+            logger.warn(
+                    "UDP [{}]: ошибка парсинга пакета: {}",
+                    clientIp,
+                    e.getMessage()
+            );
+            return;
+        }
+
+        String domain =
+                "unknown";
+
+        if (message.getQuestion() != null) {
+            domain =
+                    message
+                            .getQuestion()
+                            .getName()
+                            .toString();
+        }
+
+        logger.info(
+                "UDP [{}] -> DNS-запрос: {}",
+                clientIp,
+                domain
+        );
+
+        if (blacklist.isBlocked(domain, clientIp)) {
+            logger.info(
+                    "UDP [{}] <- ЗАБЛОКИРОВАНО: {}",
+                    clientIp,
+                    domain
+            );
+
+            try {
+                sendRefusedResponse(
+                        socket,
+                        packet,
+                        message
+                );
+
+            } catch (IOException e) {
+                logger.error(
+                        "UDP [{}]: не удалось отправить REFUSED",
+                        clientIp,
+                        e
+                );
+            }
+
+            return;
+        }
+
+        Message response =
+                forwardToResolver(
+                        message,
+                        clientIp
+                );
+
+        if (response == null) {
+            logger.warn(
+                    "UDP [{}] <- upstream не ответил для домена {}",
+                    clientIp,
+                    domain
+            );
+
+            try {
+                sendRefusedResponse(
+                        socket,
+                        packet,
+                        message
+                );
+
+            } catch (IOException e) {
+                logger.error(
+                        "UDP [{}]: не удалось отправить REFUSED " +
+                                "из-за отсутствия upstream",
+                        clientIp,
+                        e
+                );
+            }
+
+            return;
+        }
+
+        if (checkResponseBlacklist(
+                response,
+                domain
+        )) {
+            logger.info(
+                    "UDP [{}] <- ответ заблокирован: {}",
+                    clientIp,
+                    domain
+            );
+
+            try {
+                sendRefusedResponse(
+                        socket,
+                        packet,
+                        message
+                );
+
+            } catch (IOException e) {
+                logger.error(
+                        "UDP [{}]: не удалось отправить REFUSED " +
+                                "для заблокированного ответа",
+                        clientIp,
+                        e
+                );
+            }
+
+            return;
+        }
+
+        try {
+            DatagramPacket replyPacket =
+                    getFormattedReply(
+                            response,
+                            packet
+                    );
+
+            socket.send(replyPacket);
+
+            logger.debug(
+                    "UDP [{}] <- ответ отправлен для домена {}",
+                    clientIp,
+                    domain
+            );
+
+        } catch (IOException e) {
+            logger.error(
+                    "UDP [{}]: не удалось отправить ответ " +
+                            "для домена {}",
+                    clientIp,
+                    domain,
+                    e
+            );
+        }
+    }
+
+    private void sendRefusedResponse(
+            DatagramSocket socket,
+            DatagramPacket originalPacket,
+            Message query) throws IOException {
+
+        Message response =
+                createRefusedResponse(query);
+
+        byte[] responseBytes =
+                response.toWire();
+
+        DatagramPacket reply =
+                new DatagramPacket(
+                        responseBytes,
+                        responseBytes.length,
+                        originalPacket.getAddress(),
+                        originalPacket.getPort()
+                );
+
+        socket.send(reply);
+    }
+
+    private Message createRefusedResponse(
+            Message query) {
+
+        Message response =
+                query.clone();
+
+        response.getHeader().setFlag(Flags.QR);
+        response.getHeader().setRcode(Rcode.REFUSED);
+
+        return response;
+    }
+
+    private void handleTcpConnections(
+            ServerSocket serverSocket) {
+
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                Socket socket =
+                        serverSocket.accept();
+
+                String clientIp =
+                        socket
+                                .getInetAddress()
+                                .getHostAddress();
+
+                logger.info(
+                        "TCP: принято соединение от {}",
+                        clientIp
+                );
+
+                workerPool.execute(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                handleSingleTcpSession(socket);
+                            }
+                        }
+                );
+
+            } catch (IOException e) {
+                if (!Thread.currentThread().isInterrupted()) {
+                    logger.debug(
+                            "TCP accept error",
                             e
                     );
                 }
             }
-
-            if (result.isEmpty()) {
-                throw new IllegalStateException(
-                        "Список DNS upstream пуст"
-                );
-            }
-
-            return Collections.unmodifiableMap(result);
         }
+    }
 
-        private boolean checkResponseBlacklist(
-                Message response,
-                String requestedDomain) {
+    private void handleSingleTcpSession(
+            Socket socket) {
 
-            List<Record> records = new ArrayList<Record>();
+        String clientIp =
+                socket
+                        .getInetAddress()
+                        .getHostAddress();
 
-            addRecords(records, response, Section.ANSWER);
-            addRecords(records, response, Section.AUTHORITY);
-            addRecords(records, response, Section.ADDITIONAL);
+        try (
+                Socket s = socket;
+                InputStream in = s.getInputStream();
+                OutputStream out = s.getOutputStream()
+        ) {
+            DataInputStream dataInput =
+                    new DataInputStream(in);
 
-            for (Record record : records) {
-                Name name = record.getName();
+            while (!s.isClosed()) {
+                int len;
 
-                if (name != null &&
-                        blacklist.isBlockedDomain(name.toString())) {
+                try {
+                    len =
+                            dataInput.readUnsignedShort();
 
-                    logger.info(
-                            "BLOCKED [Response]: запрещённый домен {} для запроса {}",
-                            name,
-                            requestedDomain
+                } catch (EOFException e) {
+                    break;
+                }
+
+                if (len == 0) {
+                    logger.warn(
+                            "TCP [{}]: получен пакет нулевой длины",
+                            clientIp
                     );
-                    return true;
+                    break;
                 }
 
-                if (record instanceof ARecord) {
-                    ARecord aRecord = (ARecord) record;
+                byte[] requestData =
+                        new byte[len];
 
-                    String ip = aRecord.getAddress()
-                            .getHostAddress()
-                            .toLowerCase(Locale.ROOT);
+                dataInput.readFully(requestData);
 
-                    if (blacklist.isBlockedIp(ip)) {
-                        logger.info(
-                                "BLOCKED [Response]: запрещённый IPv4 {}",
-                                ip
-                        );
-                        return true;
-                    }
+                Message message;
+
+                try {
+                    message =
+                            new Message(requestData);
+
+                } catch (WireParseException e) {
+                    logger.debug(
+                            "TCP [{}]: получен некорректный DNS-пакет",
+                            clientIp
+                    );
+                    return;
+
+                } catch (Exception e) {
+                    logger.warn(
+                            "TCP [{}]: ошибка чтения сообщения: {}",
+                            clientIp,
+                            e.getMessage()
+                    );
+                    continue;
                 }
 
-                if (record instanceof AAAARecord) {
-                    AAAARecord aaaaRecord = (AAAARecord) record;
+                String domain =
+                        "unknown";
 
-                    String ip = aaaaRecord.getAddress()
-                            .getHostAddress()
-                            .toLowerCase(Locale.ROOT);
-
-                    if (blacklist.isBlockedIp(ip)) {
-                        logger.info(
-                                "BLOCKED [Response]: запрещённый IPv6 {}",
-                                ip
-                        );
-                        return true;
-                    }
+                if (message.getQuestion() != null) {
+                    domain =
+                            message
+                                    .getQuestion()
+                                    .getName()
+                                    .toString();
                 }
-            }
 
-            return false;
-        }
-
-
-        private void addRecords(
-                List<Record> target,
-                Message message,
-                int section) {
-
-            List<Record> sectionRecords =
-                    message.getSection(section);
-
-            if (sectionRecords != null) {
-                target.addAll(sectionRecords);
-            }
-        }
-
-        public void run() {
-            int port = getConfig().getShort("dns.local.port");
-            logger.info("Запуск DNS форвардера на порту {}", port);
-
-            try (
-                    DatagramSocket udpSocket = new DatagramSocket(port);
-                    ServerSocket tcpListener = new ServerSocket(port)
-            ) {
-                Thread tcpThread = new Thread(() -> handleTcpConnections(tcpListener));
-                tcpThread.setDaemon(true);
-                tcpThread.start();
-
-                while (!Thread.currentThread().isInterrupted()) {
-                    DatagramPacket request = new DatagramPacket(new byte[4096], 4096);
-                    udpSocket.receive(request);
-
-                    String clientIp = request.getAddress().getHostAddress();
-                    logger.debug("UDP: Получен пакет от {}", clientIp);
-                    workerPool.execute(() -> processUdpRequest(udpSocket, request));
-                }
-            } catch (IOException e) {
-                logger.error("Критическая ошибка запуска сервера", e);
-            }
-        }
-
-
-        private void processUdpRequest(DatagramSocket socket, DatagramPacket packet) {
-            String clientIp = packet.getAddress().getHostAddress();
-            int len = packet.getLength();
-
-            if (len == 0 || len > 4096) {
-                logger.warn("UDP [{}]: Странный пакет, длина {}", clientIp, len);
-                return;
-            }
-
-            byte[] queryData = Arrays.copyOfRange(packet.getData(), packet.getOffset(), packet.getOffset() + len);
-            Message message;
-
-            try {
-                message = new Message(queryData);
-            } catch (WireParseException e) {
-                logger.debug("UDP [{}]: Игнорируем не-DNS трафик (длина: {}). Возможно DoH/DoT.", clientIp, len);
-                return;
-            } catch (Exception e) {
-                logger.warn("UDP [{}]: Ошибка парсинга пакета: {}", clientIp, e.getMessage());
-                return;
-            }
-
-            String domain = "unknown";
-            if (message.getQuestion() != null) {
-                domain = message.getQuestion().getName().toString();
-            }
-
-            logger.info("UDP [{}] -> DNS Запрос: {}", clientIp, domain);
-
-            if (blacklist.isBlocked(domain, clientIp)) {
                 logger.info(
-                        "UDP [{}] <- ЗАБЛОКИРОВАНО: {}",
+                        "TCP [{}] -> DNS-запрос: {}",
                         clientIp,
                         domain
                 );
 
-                try {
-                    sendRefusedResponse(socket, packet, queryData);
-                } catch (IOException ioe) {
-                    logger.error(
-                            "UDP [{}]: Не удалось отправить REFUSED",
+                if (blacklist.isBlocked(
+                        domain,
+                        clientIp
+                )) {
+                    logger.info(
+                            "TCP [{}] <- ЗАБЛОКИРОВАНО: {}",
                             clientIp,
-                            ioe
+                            domain
                     );
+
+                    sendTcpRefusedResponse(
+                            out,
+                            message
+                    );
+
+                    continue;
                 }
 
-                return;
-            }
-
-            Message response = forwardToResolver(message, clientIp);
-
-            if (response != null) {
-                if (checkResponseBlacklist(response, domain)) {
-                    logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО (ответ содержит запрещенный IP/Домен)", clientIp);
-                    return;
-                }
-
-                try {
-                    DatagramPacket replyPacket = getFormatedReply(response, packet);
-                    socket.send(replyPacket);
-                    logger.debug("UDP [{}] <- Ответ успешно отправлен для домена {}", clientIp, domain);
-                } catch (IOException ioe) {
-                    logger.error("UDP [{}]: Не удалось отправить успешный ответ для домена {}. Возможно, клиент разорвал соединение или фаервол блокирует UDP. Причина: {}",
-                            clientIp, domain, ioe.getMessage(), ioe);
-                }
-            } else {
-                logger.warn("UDP [{}] <- Upstream не ответил для домена {}", clientIp, domain);
-
-                try {
-                    sendRefusedResponse(socket, packet, queryData);
-                } catch (IOException ioe) {
-                    logger.error("UDP [{}]: Не удалось отправить REFUSED из-за отсутствия upstream для домена {}. Причина: {}",
-                            clientIp, domain, ioe.getMessage(), ioe);
-                }
-            }
-        }
-
-        private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, byte[] originalData) throws IOException {
-            Message query = new Message(originalData);
-            int id = query.getHeader() != null ? query.getHeader().getID() : 0;
-
-            Message response = new Message(id);
-            response.getHeader().setFlag(Flags.QR);
-            response.getHeader().setRcode(Rcode.REFUSED);
-
-            byte[] respBytes = response.toWire();
-            DatagramPacket reply = new DatagramPacket(respBytes, respBytes.length, originalPacket.getAddress(), originalPacket.getPort());
-            socket.send(reply);
-        }
-
-        private void handleTcpConnections(ServerSocket serverSocket) {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    Socket socket = serverSocket.accept();
-                    String clientIp = socket.getInetAddress().getHostAddress();
-                    logger.info("TCP: Принято соединение от {}", clientIp);
-                    workerPool.execute(() -> handleSingleTcpSession(socket));
-                } catch (IOException e) {
-                    if (!Thread.currentThread().isInterrupted()) logger.debug("TCP accept error", e);
-                }
-            }
-        }
-
-        private void handleSingleTcpSession(Socket socket) {
-            String clientIp = socket.getInetAddress().getHostAddress();
-            try (Socket s = socket; InputStream in = s.getInputStream(); OutputStream out = s.getOutputStream()) {
-                DataInputStream din = new DataInputStream(in);
-
-                while (!s.isClosed()) {
-                    int len;
-                    try {
-                        len = din.readUnsignedShort();
-                    } catch (EOFException e) {
-                        break; // Клиент закрыл соединение
-                    }
-
-                    byte[] requestData = new byte[len];
-                    din.readFully(requestData);
-
-                    Message message;
-                    try {
-                        message = new Message(requestData);
-                    } catch (WireParseException e) {
-                        logger.debug("TCP [{}]: Получен не-DNS трафик. Завершаем сессию.", clientIp);
-                        return;
-                    } catch (Exception e) {
-                        logger.warn("TCP [{}]: Ошибка чтения сообщения", clientIp, e.getMessage());
-                        continue;
-                    }
-
-                    String domain = "unknown";
-                    if (message.getQuestion() != null) {
-                        domain = message.getQuestion().getName().toString();
-                    }
-
-                    logger.info("TCP [{}] -> DNS Запрос: {}", clientIp, domain);
-
-                    if (blacklist.isBlocked(domain, clientIp)) {
-                        logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО", clientIp);
-                        Message refusedMsg = new Message(message.getHeader().getID());
-                        refusedMsg.getHeader().setFlag(Flags.QR);
-                        refusedMsg.getHeader().setRcode(Rcode.REFUSED);
-                        byte[] errBytes = refusedMsg.toWire();
-                        out.write(shortToBytes(errBytes.length));
-                        out.write(errBytes);
-                        out.flush();
-                        continue;
-                    }
-
-                    Message response = forwardToResolver(message, clientIp);
-
-                    if (response != null) {
-                        if (checkResponseBlacklist(response, domain)) {
-                            logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО (запрещенный IP в ответе)", clientIp);
-                            continue;
-                        }
-
-                        byte[] respBytes = response.toWire();
-                        out.write(shortToBytes(respBytes.length));
-                        out.write(respBytes);
-                        out.flush();
-                    }
-                }
-            } catch (IOException e) {
-                if (!(e instanceof java.nio.channels.ClosedChannelException)) {
-                    logger.debug("TCP [{}]: Ошибка сессии", clientIp, e);
-                }
-            } finally {
-                logger.info("TCP: Сессия с {} завершена", clientIp);
-            }
-        }
-
-        private Message forwardToResolver(
-                Message query,
-                String clientIp) {
-
-            String domain = query.getQuestion() != null
-                    ? query.getQuestion().getName().toString()
-                    : "unknown";
-
-            for (Map.Entry<String, SimpleResolver> entry
-                    : resolvers.entrySet()) {
-
-                String dns = entry.getKey();
-                SimpleResolver resolver = entry.getValue();
-
-                try {
-                    Message response = resolver.send(query);
-
-                    if (response != null) {
-                        logger.info(
-                                "Запрос [{}] от [{}] выполнен через {}",
-                                domain,
-                                clientIp,
-                                dns
+                Message response =
+                        forwardToResolver(
+                                message,
+                                clientIp
                         );
 
-                        return response;
-                    }
-                } catch (Exception e) {
-                    logger.trace(
-                            "Ошибка upstream {}: {}",
-                            dns,
-                            e.getMessage()
+                if (response == null) {
+                    logger.warn(
+                            "TCP [{}] <- upstream не ответил: {}",
+                            clientIp,
+                            domain
                     );
+
+                    sendTcpRefusedResponse(
+                            out,
+                            message
+                    );
+
+                    continue;
                 }
+
+                if (checkResponseBlacklist(
+                        response,
+                        domain
+                )) {
+                    logger.info(
+                            "TCP [{}] <- ответ заблокирован: {}",
+                            clientIp,
+                            domain
+                    );
+
+                    sendTcpRefusedResponse(
+                            out,
+                            message
+                    );
+
+                    continue;
+                }
+
+                byte[] responseBytes =
+                        response.toWire();
+
+                out.write(
+                        shortToBytes(
+                                responseBytes.length
+                        )
+                );
+
+                out.write(responseBytes);
+                out.flush();
             }
 
-            return null;
-        }
+        } catch (IOException e) {
+            if (!(e instanceof java.nio.channels.ClosedChannelException)) {
+                logger.debug(
+                        "TCP [{}]: ошибка сессии",
+                        clientIp,
+                        e
+                );
+            }
 
-        private DatagramPacket getFormatedReply(Message response, DatagramPacket packet) {
-            byte[] respData = response.toWire();
-            return new DatagramPacket(respData, respData.length, packet.getAddress(), packet.getPort());
+        } finally {
+            logger.info(
+                    "TCP: сессия с {} завершена",
+                    clientIp
+            );
         }
-
-        private static byte[] shortToBytes(int value) {
-            if (value < 0 || value > 0xFFFF) throw new IllegalArgumentException("Длина вне диапазона");
-            return new byte[]{(byte) ((value >> 8) & 0xFF), (byte) (value & 0xFF)};
-        }
-
     }
+
+    private void sendTcpRefusedResponse(
+            OutputStream out,
+            Message query) throws IOException {
+
+        Message refused =
+                createRefusedResponse(query);
+
+        byte[] refusedBytes =
+                refused.toWire();
+
+        out.write(
+                shortToBytes(
+                        refusedBytes.length
+                )
+        );
+
+        out.write(refusedBytes);
+        out.flush();
+    }
+
+    private Message forwardToResolver(
+            Message query,
+            String clientIp) {
+
+        String domain =
+                query.getQuestion() != null
+                        ? query
+                        .getQuestion()
+                        .getName()
+                        .toString()
+                        : "unknown";
+
+        for (Map.Entry<String, SimpleResolver> entry
+                : resolvers.entrySet()) {
+
+            String dns =
+                    entry.getKey();
+
+            SimpleResolver resolver =
+                    entry.getValue();
+
+            try {
+                Message response =
+                        resolver.send(query);
+
+                if (response != null) {
+                    logger.info(
+                            "Запрос [{}] от [{}] выполнен через {}",
+                            domain,
+                            clientIp,
+                            dns
+                    );
+
+                    return response;
+                }
+
+            } catch (Exception e) {
+                logger.trace(
+                        "Ошибка upstream {}: {}",
+                        dns,
+                        e.getMessage()
+                );
+            }
+        }
+
+        return null;
+    }
+
+    private DatagramPacket getFormattedReply(
+            Message response,
+            DatagramPacket packet) {
+
+        byte[] responseData =
+                response.toWire();
+
+        return new DatagramPacket(
+                responseData,
+                responseData.length,
+                packet.getAddress(),
+                packet.getPort()
+        );
+    }
+
+    private static byte[] shortToBytes(
+            int value) {
+
+        if (value < 0 || value > 0xFFFF) {
+            throw new IllegalArgumentException(
+                    "Длина вне диапазона: " + value
+            );
+        }
+
+        return new byte[]{
+                (byte) ((value >> 8) & 0xFF),
+                (byte) (value & 0xFF)
+        };
+    }
+}

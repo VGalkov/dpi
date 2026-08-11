@@ -74,7 +74,7 @@ public class HttpProxyServer {
             }
         }, "HttpProxy-Server-Thread-" + port);
 
-        serverThread.setDaemon(false); // ВАЖНО: JVM не завершится, пока жив этот поток
+        serverThread.setDaemon(false);
         serverThread.start();
 
         waitForSocketReady(port);
