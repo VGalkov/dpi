@@ -124,14 +124,10 @@ public final class BlacklistLoader {
                         source
                 );
 
-                List<String> rules =
-                        source.loadRules();
+                List<String> rules = source.loadRules();
 
                 if (rules == null) {
-                    logger.warn(
-                            "Источник {} вернул null вместо списка правил",
-                            source
-                    );
+                    logger.warn("Источник {} вернул null вместо списка правил", source);
                     continue;
                 }
 

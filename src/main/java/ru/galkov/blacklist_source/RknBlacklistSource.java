@@ -74,70 +74,71 @@ import java.util.zip.ZipInputStream;
         this.requestSigner = requestSigner;
     }
 
-    @Override
-    public List<String> loadRules() throws IOException {
-        validateFiles();
+        @Override
+        public List<String> loadRules() throws IOException {
+            validateFiles();
 
-        if (requestSigner == null) {
-            throw new IOException("Не задан RknRequestSigner");
+            if (requestSigner == null) {
+                throw new IOException("Не задан RknRequestSigner");
+            }
+
+            byte[] requestBytes = createRequestBytes();
+            byte[] signatureBytes;
+
+            try {
+                signatureBytes = requestSigner.sign(requestBytes);
+            } catch (Exception e) {
+                throw new IOException("Не удалось подписать XML-запрос РКН", e);
+            }
+
+            saveFile(requestFile, requestBytes);
+            saveFile(signatureFile, signatureBytes);
+
+            String requestBase64 = Base64.getEncoder().encodeToString(requestBytes);
+            String signatureBase64 = Base64.getEncoder().encodeToString(signatureBytes);
+
+            String emchdBase64 = null;
+            String emchdSignatureBase64 = null;
+
+            if (emchdEnabled) {
+                emchdBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(emchdFile));
+                emchdSignatureBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(emchdSignatureFile));
+            }
+
+            String sendRequestSoap = createSendRequestSoap(requestBase64, signatureBase64, emchdBase64, emchdFileName, emchdSignatureBase64);
+
+            Document sendResponse = postSoap(sendRequestSoap, endpoint + "sendRequest");
+
+            boolean accepted = readBoolean(sendResponse, "result");
+            String comment = readText(sendResponse, "resultComment");
+            String code = readText(sendResponse, "code");
+
+            if (!accepted || code == null || code.isBlank()) {
+                throw new IOException("РКН отклонил запрос: result=" + accepted + ", comment=" + comment);
+            }
+
+            logger.info("Запрос РКН принят, код: {}", code);
+
+            byte[] archive = waitForResult(code);
+            return parseRegisterArchive(archive);
         }
 
-        String requestXml = createRequestXml();
-        byte[] requestBytes = requestXml.getBytes(StandardCharsets.UTF_8);
 
-        byte[] signatureBytes;
+        private byte[] createRequestBytes() {
+            ZonedDateTime now = ZonedDateTime.now(ZoneId.of(timezone));
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
 
-        try {
-            signatureBytes = requestSigner.sign(requestBytes);
-        } catch (Exception e) {
-            throw new IOException("Не удалось подписать XML-запрос РКН", e);
+            String xml = "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" +
+                    "<request>" +
+                    "<requestTime>" + formatter.format(now) + "</requestTime>" +
+                    "<operatorName>" + escapeXml(operatorName) + "</operatorName>" +
+                    "<inn>" + escapeXml(inn) + "</inn>" +
+                    "<ogrn>" + escapeXml(ogrn) + "</ogrn>" +
+                    "<email>" + escapeXml(email) + "</email>" +
+                    "</request>";
+
+            return xml.getBytes(Charset.forName("windows-1251"));
         }
-
-        saveFile(requestFile, requestBytes);
-        saveFile(signatureFile, signatureBytes);
-
-        String requestBase64 = Base64.getEncoder().encodeToString(requestBytes);
-        String signatureBase64 = Base64.getEncoder().encodeToString(signatureBytes);
-
-        String emchdBase64 = null;
-        String emchdSignatureBase64 = null;
-
-        if (emchdEnabled) {
-            emchdBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(emchdFile));
-            emchdSignatureBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(emchdSignatureFile));
-        }
-
-        String sendRequestSoap = createSendRequestSoap(requestBase64, signatureBase64, emchdBase64, emchdFileName, emchdSignatureBase64);
-
-        Document sendResponse = postSoap(sendRequestSoap, "http://vigruzki.rkn.gov.ru/services/OperatorRequest/sendRequest");
-
-        boolean accepted = readBoolean(sendResponse, "result");
-        String comment = readText(sendResponse, "resultComment");
-        String code = readText(sendResponse, "code");
-
-        if (!accepted || code == null || code.isBlank()) {
-            throw new IOException("РКН отклонил запрос: result=" + accepted + ", comment=" + comment);
-        }
-
-        logger.info("Запрос РКН принят, код: {}", code);
-
-        byte[] archive = waitForResult(code);
-
-        return parseRegisterArchive(archive);
-    }
-    private String createRequestXml() {
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of(timezone));
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
-
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
-                "<request>" +
-                "<requestTime>" + formatter.format(now) + "</requestTime>" +
-                "<operatorName>" + escapeXml(operatorName) + "</operatorName>" +
-                "<inn>" + escapeXml(inn) + "</inn>" +
-                "<ogrn>" + escapeXml(ogrn) + "</ogrn>" +
-                "<email>" + escapeXml(email) + "</email>" +
-                "</request>";
-    }
 
     private static void saveFile(Path path, byte[] data) throws IOException {
         if (path == null) {
@@ -152,19 +153,24 @@ import java.util.zip.ZipInputStream;
 
         Files.write(path, data);
     }
-    private void validateFiles() throws IOException {
-        requireFile(requestFile, "Файл запроса РКН");
-        requireFile(signatureFile, "Подпись запроса РКН");
+        private void validateFiles() throws IOException {
+            if (requestFile == null) {
+                throw new IOException("Не задан путь к файлу запроса РКН");
+            }
 
-        if (emchdEnabled) {
-            requireFile(emchdFile, "Файл МЧД РКН");
-            requireFile(emchdSignatureFile, "Подпись МЧД РКН");
+            if (signatureFile == null) {
+                throw new IOException("Не задан путь к подписи запроса РКН");
+            }
 
-            if (emchdFileName == null || emchdFileName.isBlank()) {
-                throw new IOException("Не задано имя файла МЧД");
+            if (emchdEnabled) {
+                requireFile(emchdFile, "Файл МЧД РКН");
+                requireFile(emchdSignatureFile, "Подпись МЧД РКН");
+
+                if (emchdFileName == null || emchdFileName.isBlank()) {
+                    throw new IOException("Не задано имя файла МЧД");
+                }
             }
         }
-    }
     private void requireFile(
             Path path,
             String description) throws IOException {
