@@ -2,6 +2,7 @@ package ru.galkov;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.servers.BlacklistLoader;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
 
@@ -18,17 +19,19 @@ public class Main {
     private static DnsServer dnsServer;
     private static HttpProxyServer proxyServer;
     private static AppConfig config;
-
+    private static BlacklistLoader blacklist;
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
+            blacklist = new BlacklistLoader();
+
             startProxyServer();
             startDnsServer();
-        } catch (Exception e) {
-            logger.error(e.getMessage());
-            Runtime.getRuntime().exit(-1);
-        } finally {
+
             logger.info("Система запущена!");
+        } catch (Exception e) {
+            logger.error("Система не запущена", e);
+            Runtime.getRuntime().exit(-1);
         }
     }
 
@@ -36,7 +39,7 @@ public class Main {
         if (dnsServer == null && config.getBoolean("dns.start")) {
             synchronized (DnsServer.class) {
                 if (dnsServer == null) {
-                    dnsServer = new DnsServer();
+                    dnsServer = new DnsServer(blacklist);
                     dnsServer.run();
                 }
             }
@@ -49,7 +52,10 @@ public class Main {
                 if (proxyServer == null) {
                     int port = getConfig().getInt("proxy.local.port");
                     logger.info("Инициализация и запуск HTTP Proxy на порту {}", port);
-                    proxyServer = new HttpProxyServer(port);
+                    proxyServer = new HttpProxyServer(
+                            getConfig().getInt("proxy.local.port"),
+                            blacklist
+                    );
                     proxyServer.start();
                 }
             }

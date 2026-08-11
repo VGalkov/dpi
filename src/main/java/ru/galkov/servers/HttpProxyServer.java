@@ -7,25 +7,30 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class HttpProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
-
+    private static BlacklistLoader blacklist;
     private final int port;
     private final ExecutorService workerPool;
-    private final BlacklistLoader blacklist;
 
     private volatile boolean running = false;
     private Thread serverThread;
 
-    public HttpProxyServer(int port) {
-        this.port = port;
-        this.workerPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2);
-        this.blacklist = new BlacklistLoader();
-    }
+    public HttpProxyServer(
+            int port,
+            BlacklistLoader blacklist) {
 
+        this.port = port;
+        this.blacklist = Objects.requireNonNull(blacklist);
+
+        this.workerPool = Executors.newFixedThreadPool(
+                Runtime.getRuntime().availableProcessors() * 2
+        );
+    }
     public void start() {
         if (running) {
             logger.warn("Прокси сервер уже запущен на порту {}", port);

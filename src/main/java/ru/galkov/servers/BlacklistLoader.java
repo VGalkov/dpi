@@ -80,38 +80,42 @@ public class BlacklistLoader {
     }
 
     public boolean isBlocked(String host, String clientIp) {
+        return isBlockedIp(clientIp) ||
+                isBlockedDomain(host);
+    }
+
+    public boolean isBlockedDomain(String domain) {
         load();
 
-        if (!loaded || (domains.isEmpty() && ips.isEmpty())) return false;
+        String normalized = HostNormalizer.normalizeHost(domain);
 
-        if (clientIp != null && !clientIp.isEmpty()) {
-            String ipClean = clientIp;
-            if (ipClean.contains("/")) ipClean = ipClean.split("/")[0];
-            if (ips.contains(ipClean.toLowerCase())) {
-                logger.debug("BLOCKED [IP]: Клиент {} заблокирован", clientIp);
-                return true;
-            }
+        if (normalized == null) {
+            return false;
         }
 
-        if (host != null && !host.isEmpty()) {
-            String hClean = host.toLowerCase();
+        String current = normalized;
 
-            if (hClean.contains(":")) hClean = hClean.split(":")[0];
-
-            if (hClean.endsWith(".")) hClean = hClean.substring(0, hClean.length() - 1);
-
-            if (domains.contains(hClean)) {
-                logger.info("BLOCKED [Domain]: Точное совпадение {}", hClean);
+        while (true) {
+            if (domains.contains(current)) {
                 return true;
             }
 
-            for (String blocked : domains) {
-                if (hClean.endsWith("." + blocked)) {
-                    logger.info("BLOCKED [Subdomain]: {} совпадает с правилом {}", hClean, blocked);
-                    return true;
-                }
+            int dot = current.indexOf('.');
+
+            if (dot < 0) {
+                return false;
             }
+
+            current = current.substring(dot + 1);
         }
-        return false;
+    }
+
+    public boolean isBlockedIp(String ip) {
+        load();
+
+        String normalized = HostNormalizer.normalizeIp(ip);
+
+        return normalized != null &&
+                ips.contains(normalized);
     }
 }

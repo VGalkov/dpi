@@ -125,11 +125,24 @@ public final class AppConfig {
     }
 
     public List<String> getList(String key) {
-        String raw = get(key);
-        if (raw.trim().isEmpty()) return Collections.emptyList();
+        String raw = get(key).trim();
+
+        if (raw.isEmpty()) {
+            return Collections.emptyList();
+        }
 
         String[] parts = raw.split("\\s*,\\s*");
-        return Arrays.asList(parts);
+        List<String> result = new ArrayList<String>();
+
+        for (String part : parts) {
+            String value = part.trim();
+
+            if (!value.isEmpty() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+
+        return Collections.unmodifiableList(result);
     }
 
     public Set<String> getSet(String key) {

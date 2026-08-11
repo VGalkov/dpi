@@ -279,16 +279,25 @@ public class ProxyHandler implements Runnable {
     private String readLine(InputStream in) throws IOException {
         StringBuilder sb = new StringBuilder();
         int c;
+
         while ((c = in.read()) != -1) {
             if (c == '\n') {
-                if (!sb.toString().isEmpty() && sb.charAt(sb.length() - 1) == '\r') {
-                    sb.setLength(sb.length() - 1);
+                int length = sb.length();
+
+                if (length > 0 &&
+                        sb.charAt(length - 1) == '\r') {
+                    sb.setLength(length - 1);
                 }
+
                 return sb.toString();
             }
+
             sb.append((char) c);
         }
-        return !sb.isEmpty() ? sb.toString() : null;
+
+        return sb.length() > 0
+                ? sb.toString()
+                : null;
     }
 
     private void sendError(OutputStream out, int code, String message) throws IOException {
