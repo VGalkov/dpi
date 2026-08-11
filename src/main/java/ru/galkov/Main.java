@@ -30,35 +30,34 @@ public class Main {
             List<BlacklistSource> sources =
                     new ArrayList<BlacklistSource>();
 
-            sources.add(
-                    new FileBlacklistSource(
-                            new File(
-                                    getConfig().get(
-                                            "blacklist.local.file"
-                                    )
-                            )
-                    )
+            sources.add(new FileBlacklistSource(new File(getConfig().get("blacklist.local.file"))));
+
+            boolean adguardEnabled = getConfig().getBoolean("blacklist.adguard.enabled");
+            String adguardUrl = getConfig().get("blacklist.adguard.url");
+
+            logger.info(
+                    "AdGuard blacklist: enabled={}, url={}",
+                    adguardEnabled,
+                    adguardUrl
             );
-            if (getConfig().getBoolean("blacklist.adguard.enabled")) {
-                sources.add(
+
+            if (adguardEnabled) {
+                AdguardBlacklistSource adguardSource =
                         new AdguardBlacklistSource(
-                                getConfig().get("blacklist.adguard.url"),
+                                adguardUrl,
                                 getConfig().getInt("blacklist.adguard.connect-timeout"),
                                 getConfig().getInt("blacklist.adguard.read-timeout")
-                        )
-                );
+                        );
+
+                sources.add(adguardSource);
+
+                logger.info("Источник AdGuard добавлен: {}", adguardSource);
             }
 
 
             if (getConfig().getBoolean("blacklist.rkn.enabled")) {
                 sources.add(
-                        new FileBlacklistSource(
-                                new File(
-                                        getConfig().get(
-                                                "blacklist.rkn.file"
-                                        )
-                                )
-                        )
+                        new FileBlacklistSource(new File(getConfig().get("blacklist.rkn.file")))
                 );
                 //sources.add(new RknBlacklistSource(...));
             }

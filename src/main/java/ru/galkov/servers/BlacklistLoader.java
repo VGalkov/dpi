@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -98,11 +97,8 @@ public final class BlacklistLoader {
 
             try {
                 loadInternal();
-            } catch (IOException e) {
-                logger.error("Ошибка загрузки {}", FILE_NAME, e);
-
-                // Fail-closed для загрузчика означает:
-                // старые правила не заменяются частично загруженными.
+            } catch (Exception e) {
+                logger.error("Критическая ошибка загрузки blacklist", e);
                 snapshot.set(BlacklistSnapshot.empty());
             } finally {
                 loaded = true;
@@ -110,60 +106,219 @@ public final class BlacklistLoader {
         }
     }
 
-    private void loadInternal() throws IOException {
-        Set<String> domains = new HashSet<>();
-        Set<String> ips = new HashSet<>();
+    private void loadInternal() {
+        Set<String> newDomains =
+                new HashSet<String>();
 
-        try (InputStream input = openBlacklist();
-             BufferedReader reader = new BufferedReader(
-                     new InputStreamReader(input, StandardCharsets.UTF_8))) {
+        Set<String> newIps =
+                new HashSet<String>();
 
-            String line;
-            int lineNumber = 0;
+        int loadedSources = 0;
+        int totalRules = 0;
 
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
+        for (BlacklistSource source : sources) {
+            try {
+                logger.info(
+                        "Загрузка blacklist из источника: {}",
+                        source
+                );
 
-                String value = line.trim();
+                List<String> rules =
+                        source.loadRules();
 
-                if (value.isEmpty() || value.startsWith("#")) {
+                if (rules == null) {
+                    logger.warn(
+                            "Источник {} вернул null вместо списка правил",
+                            source
+                    );
                     continue;
                 }
 
-                value = removeInlineComment(value);
-                value = HostNormalizer.removeTrailingDot(value);
+                logger.info(
+                        "Источник {} вернул правил: {}",
+                        source,
+                        rules.size()
+                );
 
-                if (isIp(value)) {
-                    String ip = HostNormalizer.normalizeIp(value);
-                    if (ip != null) {
-                        ips.add(ip);
-                    } else {
-                        logger.warn("Некорректный IP в строке {}: {}",
-                                Optional.of(lineNumber), value);
+                loadedSources++;
+
+                for (String rawRule : rules) {
+                    String rule =
+                            normalizeRule(rawRule);
+
+                    if (rule == null) {
+                        continue;
                     }
-                } else {
-                    String domain = HostNormalizer.normalizeHost(value);
-                    if (domain != null) {
-                        domains.add(domain);
+
+                    if (isIpLiteral(rule)) {
+                        String ip =
+                                normalizeIp(rule);
+
+                        if (ip != null) {
+                            newIps.add(ip);
+                            totalRules++;
+                        } else {
+                            logger.debug(
+                                    "Пропущен некорректный IP: {}",
+                                    rule
+                            );
+                        }
+
                     } else {
-                        logger.warn("Некорректное правило в строке {}: {}",
-                                Optional.of(lineNumber), value);
+                        String domain =
+                                normalizeDomain(rule);
+
+                        if (domain != null) {
+                            newDomains.add(domain);
+                            totalRules++;
+                        } else {
+                            logger.debug(
+                                    "Пропущено некорректное доменное правило: {}",
+                                    rule
+                            );
+                        }
                     }
                 }
+
+            } catch (Exception e) {
+                logger.error(
+                        "Не удалось загрузить blacklist " +
+                                "из источника {}",
+                        source,
+                        e
+                );
             }
         }
 
-        snapshot.set(new BlacklistSnapshot(
+        /*
+         * Set.copyOf() не используется, поскольку проект
+         * собирается под Java 8.
+         */
+        Set<String> immutableDomains =
                 Collections.unmodifiableSet(
-                        new HashSet<String>(domains)
-                ),
+                        new HashSet<String>(newDomains)
+                );
+
+        Set<String> immutableIps =
                 Collections.unmodifiableSet(
-                        new HashSet<String>(ips)
+                        new HashSet<String>(newIps)
+                );
+
+        snapshot.set(
+                new BlacklistSnapshot(
+                        immutableDomains,
+                        immutableIps
                 )
-        ));
-        logger.info("Blacklist загружен: доменов " + domains.size() + ", IP " + ips.size());
+        );
+
+        logger.info(
+                "Blacklist загружен: источников {}, " +
+                        "правил {}, доменов {}, IP {}",
+                loadedSources,
+                totalRules,
+                immutableDomains.size(),
+                immutableIps.size()
+        );
     }
 
+    private static String normalizeRule(
+            String value) {
+
+        if (value == null) {
+            return null;
+        }
+
+        String result =
+                value.trim();
+
+        if (result.isEmpty() ||
+                result.startsWith("#") ||
+                result.startsWith("!")) {
+            return null;
+        }
+
+        int commentIndex =
+                result.indexOf('#');
+
+        if (commentIndex >= 0) {
+            result =
+                    result.substring(
+                            0,
+                            commentIndex
+                    ).trim();
+        }
+
+        return result.isEmpty()
+                ? null
+                : result;
+    }
+    private static boolean isIpLiteral(
+            String value) {
+
+        if (value == null ||
+                value.isEmpty()) {
+            return false;
+        }
+
+        if (value.indexOf(':') >= 0) {
+            return true;
+        }
+
+        return isIpv4Literal(value);
+    }
+
+    private static boolean isIpv4Literal(
+            String value) {
+
+        String[] parts =
+                value.split("\\.", -1);
+
+        if (parts.length != 4) {
+            return false;
+        }
+
+        for (String part : parts) {
+            if (part.isEmpty()) {
+                return false;
+            }
+
+            for (int i = 0;
+                 i < part.length();
+                 i++) {
+
+                if (!Character.isDigit(
+                        part.charAt(i))) {
+                    return false;
+                }
+            }
+
+            try {
+                int number =
+                        Integer.parseInt(part);
+
+                if (number < 0 ||
+                        number > 255) {
+                    return false;
+                }
+
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static String normalizeDomain(
+            String value) {
+
+        return HostNormalizer.normalizeHost(value);
+    }
+    private static String normalizeIp(
+            String value) {
+
+        return HostNormalizer.normalizeIp(value);
+    }
     private InputStream openBlacklist() throws IOException {
         URL resource = getClass()
                 .getClassLoader()
