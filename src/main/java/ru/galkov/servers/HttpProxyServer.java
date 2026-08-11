@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -31,18 +32,19 @@ public class HttpProxyServer {
                 Runtime.getRuntime().availableProcessors() * 2
         );
     }
+
     public void start() {
         if (running) {
-            logger.warn("Прокси сервер уже запущен на порту {}", port);
+            logger.warn("Прокси сервер уже запущен на порту {}", Optional.of(port));
             return;
         }
 
         running = true;
-        logger.info("Инициализация HTTP прокси на порту {}", port);
+        logger.info("Инициализация HTTP прокси на порту {}", Optional.of(port));
 
         serverThread = new Thread(() -> {
             try (ServerSocket serverSocket = new ServerSocket(port)) {
-                logger.info("HTTP Proxy успешно начал слушать порт {}", port);
+                logger.info("HTTP Proxy успешно начал слушать порт {}", Optional.of(port));
 
                 while (running) {
                     Socket clientSocket;
@@ -53,20 +55,20 @@ public class HttpProxyServer {
                             logger.debug("Прием соединений остановлен корректно.");
                             break;
                         }
-                        logger.error("Ошибка при попытке принять соединение на порту {}", port, e);
+                        logger.error("Ошибка при попытке принять соединение на порту {}", Optional.of(port), e);
                         continue;
                     }
 
                     String clientIp = clientSocket.getInetAddress().getHostAddress();
-                    logger.trace("Принято соединение от {} на порт {}", clientIp, port);
+                    logger.trace("Принято соединение от " + clientIp + " на порт " + port);
 
                     workerPool.execute(new ProxyHandler(clientSocket, clientIp, blacklist));
                 }
             } catch (IOException e) {
                 if (running) {
-                    logger.error("Не удалось запустить HTTP Proxy на порту {}. Порт занят или нет прав доступа.", port, e);
+                    logger.error("Не удалось запустить HTTP Proxy на порту {}. Порт занят или нет прав доступа.", Optional.of(port), e);
                 } else {
-                    logger.info("HTTP Proxy корректно остановлен на порту {}", port);
+                    logger.info("HTTP Proxy корректно остановлен на порту {}", Optional.of(port));
                 }
             } finally {
                 workerPool.shutdown();

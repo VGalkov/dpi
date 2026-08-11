@@ -7,6 +7,7 @@ import ru.galkov.servers.*;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 
 /**
@@ -38,8 +39,7 @@ public class Main {
                             )
                     )
             );
-            if (getConfig().getBoolean(
-                    "blacklist.adguard.enabled")) {
+            if (getConfig().getBoolean("blacklist.adguard.enabled")) {
                 sources.add(
                         new AdguardBlacklistSource(
                                 getConfig().get("blacklist.adguard.url"),
@@ -50,9 +50,7 @@ public class Main {
             }
 
 
-            if (getConfig().getBoolean(
-                    "blacklist.rkn.enabled")) {
-
+            if (getConfig().getBoolean("blacklist.rkn.enabled")) {
                 sources.add(
                         new FileBlacklistSource(
                                 new File(
@@ -96,7 +94,7 @@ public class Main {
             synchronized (HttpProxyServer.class) {
                 if (proxyServer == null) {
                     int port = getConfig().getInt("proxy.local.port");
-                    logger.info("Инициализация и запуск HTTP Proxy на порту {}", port);
+                    logger.info("Инициализация и запуск HTTP Proxy на порту {}", Optional.of(port));
                     proxyServer = new HttpProxyServer(
                             getConfig().getInt("proxy.local.port"),
                             blacklist

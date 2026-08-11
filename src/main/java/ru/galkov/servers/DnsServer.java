@@ -36,15 +36,19 @@ public class DnsServer {
     private final Map<String, SimpleResolver> resolvers;
 
     public DnsServer(BlacklistLoader blacklist) {
-        this.blacklist = Objects.requireNonNull(blacklist);
-        this.resolvers = createResolvers();
+        this.blacklist =
+                Objects.requireNonNull(blacklist);
+
+        this.resolvers =
+                createResolvers();
     }
 
     private Map<String, SimpleResolver> createResolvers() {
         Map<String, SimpleResolver> result =
                 new LinkedHashMap<String, SimpleResolver>();
 
-        int timeout = getConfig().getInt("dns.timeout");
+        int timeout =
+                getConfig().getInt("dns.timeout");
 
         List<String> dnsServers =
                 getConfig().getList("dns.list");
@@ -108,7 +112,8 @@ public class DnsServer {
         );
 
         for (Record record : records) {
-            Name name = record.getName();
+            Name name =
+                    record.getName();
 
             if (name != null &&
                     blacklist.isBlockedDomain(
@@ -128,10 +133,11 @@ public class DnsServer {
                 ARecord aRecord =
                         (ARecord) record;
 
-                String ip = aRecord
-                        .getAddress()
-                        .getHostAddress()
-                        .toLowerCase(Locale.ROOT);
+                String ip =
+                        aRecord
+                                .getAddress()
+                                .getHostAddress()
+                                .toLowerCase(Locale.ROOT);
 
                 if (blacklist.isBlockedIp(ip)) {
                     logger.info(
@@ -147,10 +153,11 @@ public class DnsServer {
                 AAAARecord aaaaRecord =
                         (AAAARecord) record;
 
-                String ip = aaaaRecord
-                        .getAddress()
-                        .getHostAddress()
-                        .toLowerCase(Locale.ROOT);
+                String ip =
+                        aaaaRecord
+                                .getAddress()
+                                .getHostAddress()
+                                .toLowerCase(Locale.ROOT);
 
                 if (blacklist.isBlockedIp(ip)) {
                     logger.info(
@@ -183,10 +190,7 @@ public class DnsServer {
         int port =
                 getConfig().getInt("dns.local.port");
 
-        logger.info(
-                "Запуск DNS форвардера на порту {}",
-                port
-        );
+        logger.info("Запуск DNS форвардера на порту {}", Optional.of(port));
 
         try (
                 DatagramSocket udpSocket =
@@ -256,17 +260,15 @@ public class DnsServer {
             DatagramPacket packet) {
 
         String clientIp =
-                packet.getAddress().getHostAddress();
+                packet.getAddress()
+                        .getHostAddress();
 
         int len =
                 packet.getLength();
 
         if (len == 0 || len > 4096) {
-            logger.warn(
-                    "UDP [{}]: странный пакет, длина {}",
-                    clientIp,
-                    len
-            );
+            logger.warn("UDP [" + clientIp + "]: странный пакет, длина " + len);
+
             return;
         }
 
@@ -288,11 +290,8 @@ public class DnsServer {
                     new Message(queryData);
 
         } catch (WireParseException e) {
-            logger.debug(
-                    "UDP [{}]: некорректный DNS-пакет, длина {}",
-                    clientIp,
-                    len
-            );
+            logger.debug("UDP [" + clientIp + "]: некорректный DNS-пакет, длина" + len);
+
             return;
 
         } catch (Exception e) {
@@ -301,6 +300,7 @@ public class DnsServer {
                     clientIp,
                     e.getMessage()
             );
+
             return;
         }
 
@@ -321,7 +321,10 @@ public class DnsServer {
                 domain
         );
 
-        if (blacklist.isBlocked(domain, clientIp)) {
+        if (blacklist.isBlocked(
+                domain,
+                clientIp
+        )) {
             logger.info(
                     "UDP [{}] <- ЗАБЛОКИРОВАНО: {}",
                     clientIp,
@@ -354,7 +357,8 @@ public class DnsServer {
 
         if (response == null) {
             logger.warn(
-                    "UDP [{}] <- upstream не ответил для домена {}",
+                    "UDP [{}] <- upstream не ответил " +
+                            "для домена {}",
                     clientIp,
                     domain
             );
@@ -417,7 +421,8 @@ public class DnsServer {
             socket.send(replyPacket);
 
             logger.debug(
-                    "UDP [{}] <- ответ отправлен для домена {}",
+                    "UDP [{}] <- ответ отправлен " +
+                            "для домена {}",
                     clientIp,
                     domain
             );
@@ -459,7 +464,7 @@ public class DnsServer {
             Message query) {
 
         Message response =
-                query.clone();
+                (Message) query.clone();
 
         response.getHeader().setFlag(Flags.QR);
         response.getHeader().setRcode(Rcode.REFUSED);
@@ -489,7 +494,9 @@ public class DnsServer {
                         new Runnable() {
                             @Override
                             public void run() {
-                                handleSingleTcpSession(socket);
+                                handleSingleTcpSession(
+                                        socket
+                                );
                             }
                         }
                 );
@@ -514,14 +521,19 @@ public class DnsServer {
                         .getHostAddress();
 
         try (
-                Socket s = socket;
-                InputStream in = s.getInputStream();
-                OutputStream out = s.getOutputStream()
+                Socket currentSocket =
+                        socket;
+
+                InputStream input =
+                        currentSocket.getInputStream();
+
+                OutputStream output =
+                        currentSocket.getOutputStream()
         ) {
             DataInputStream dataInput =
-                    new DataInputStream(in);
+                    new DataInputStream(input);
 
-            while (!s.isClosed()) {
+            while (!currentSocket.isClosed()) {
                 int len;
 
                 try {
@@ -537,6 +549,7 @@ public class DnsServer {
                             "TCP [{}]: получен пакет нулевой длины",
                             clientIp
                     );
+
                     break;
                 }
 
@@ -556,6 +569,7 @@ public class DnsServer {
                             "TCP [{}]: получен некорректный DNS-пакет",
                             clientIp
                     );
+
                     return;
 
                 } catch (Exception e) {
@@ -564,6 +578,7 @@ public class DnsServer {
                             clientIp,
                             e.getMessage()
                     );
+
                     continue;
                 }
 
@@ -595,7 +610,7 @@ public class DnsServer {
                     );
 
                     sendTcpRefusedResponse(
-                            out,
+                            output,
                             message
                     );
 
@@ -616,7 +631,7 @@ public class DnsServer {
                     );
 
                     sendTcpRefusedResponse(
-                            out,
+                            output,
                             message
                     );
 
@@ -634,7 +649,7 @@ public class DnsServer {
                     );
 
                     sendTcpRefusedResponse(
-                            out,
+                            output,
                             message
                     );
 
@@ -644,14 +659,14 @@ public class DnsServer {
                 byte[] responseBytes =
                         response.toWire();
 
-                out.write(
+                output.write(
                         shortToBytes(
                                 responseBytes.length
                         )
                 );
 
-                out.write(responseBytes);
-                out.flush();
+                output.write(responseBytes);
+                output.flush();
             }
 
         } catch (IOException e) {
@@ -672,7 +687,7 @@ public class DnsServer {
     }
 
     private void sendTcpRefusedResponse(
-            OutputStream out,
+            OutputStream output,
             Message query) throws IOException {
 
         Message refused =
@@ -681,14 +696,14 @@ public class DnsServer {
         byte[] refusedBytes =
                 refused.toWire();
 
-        out.write(
+        output.write(
                 shortToBytes(
                         refusedBytes.length
                 )
         );
 
-        out.write(refusedBytes);
-        out.flush();
+        output.write(refusedBytes);
+        output.flush();
     }
 
     private Message forwardToResolver(
@@ -741,7 +756,7 @@ public class DnsServer {
 
     private DatagramPacket getFormattedReply(
             Message response,
-            DatagramPacket packet) {
+            DatagramPacket requestPacket) {
 
         byte[] responseData =
                 response.toWire();
@@ -749,15 +764,16 @@ public class DnsServer {
         return new DatagramPacket(
                 responseData,
                 responseData.length,
-                packet.getAddress(),
-                packet.getPort()
+                requestPacket.getAddress(),
+                requestPacket.getPort()
         );
     }
 
     private static byte[] shortToBytes(
             int value) {
 
-        if (value < 0 || value > 0xFFFF) {
+        if (value < 0 ||
+                value > 0xFFFF) {
             throw new IllegalArgumentException(
                     "Длина вне диапазона: " + value
             );

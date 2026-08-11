@@ -70,7 +70,8 @@ public class ProxyHandler implements Runnable {
         } finally {
             try {
                 if (clientSocket != null) clientSocket.close();
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+            }
         }
     }
 
@@ -90,7 +91,7 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        logger.info("{} -> CONNECT {}:{}", clientIp, host, port);
+        logger.info(clientIp + " -> CONNECT " + host + ":" + port);
 
         if (blacklist != null && blacklist.isBlocked(host, clientIp)) {
             sendError(clientOut, 403, "Forbidden");
@@ -102,7 +103,7 @@ public class ProxyHandler implements Runnable {
             remoteSocket = new Socket(host, port);
         } catch (IOException e) {
             sendError(clientOut, 502, "Bad Gateway");
-            logger.error("Failed to connect to {}:{}", host, port, e);
+            logger.error("Failed to connect to " + host + ":" + port + " " + e.getMessage());
             return;
         }
 
@@ -133,7 +134,8 @@ public class ProxyHandler implements Runnable {
             } else if (lowerLine.startsWith("content-length: ")) {
                 try {
                     contentLength = Long.parseLong(line.substring(15).trim());
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException ignored) {
+                }
             }
         }
         headersBuilder.append("\r\n");
@@ -235,8 +237,14 @@ public class ProxyHandler implements Runnable {
             } catch (IOException e) {
                 logger.debug("Tunnel thread 1 ended: {}", e.getMessage());
             } finally {
-                try { if (in != null) in.close(); } catch (IOException ignored) {}
-                try { if (out != null) out.close(); } catch (IOException ignored) {}
+                try {
+                    if (in != null) in.close();
+                } catch (IOException ignored) {
+                }
+                try {
+                    if (out != null) out.close();
+                } catch (IOException ignored) {
+                }
             }
         });
 
@@ -255,8 +263,14 @@ public class ProxyHandler implements Runnable {
             } catch (IOException e) {
                 logger.debug("Tunnel thread 2 ended: {}", e.getMessage());
             } finally {
-                try { if (in != null) in.close(); } catch (IOException ignored) {}
-                try { if (out != null) out.close(); } catch (IOException ignored) {}
+                try {
+                    if (in != null) in.close();
+                } catch (IOException ignored) {
+                }
+                try {
+                    if (out != null) out.close();
+                } catch (IOException ignored) {
+                }
             }
         });
 
@@ -272,8 +286,14 @@ public class ProxyHandler implements Runnable {
             Thread.currentThread().interrupt();
         }
 
-        try { client.close(); } catch (IOException ignored) {}
-        try { remote.close(); } catch (IOException ignored) {}
+        try {
+            client.close();
+        } catch (IOException ignored) {
+        }
+        try {
+            remote.close();
+        } catch (IOException ignored) {
+        }
     }
 
     private String readLine(InputStream in) throws IOException {

@@ -3,104 +3,48 @@ package ru.galkov.servers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.net.InetAddress;
+import java.io.*;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class BlacklistLoader {
-
     private static final Logger logger =
             LoggerFactory.getLogger(BlacklistLoader.class);
-
     private final List<BlacklistSource> sources;
+    private static final String FILE_NAME = "blacklist.txt";
 
-    private volatile Set<String> domains =
-            Collections.emptySet();
+    private final AtomicReference<BlacklistSnapshot>
+            snapshot =
+            new AtomicReference<BlacklistSnapshot>(
+                    BlacklistSnapshot.empty()
+            );
 
-    private volatile Set<String> ips =
-            Collections.emptySet();
+    private volatile boolean loaded;
+
 
     public BlacklistLoader(
             List<BlacklistSource> sources) {
 
-        this.sources = Collections.unmodifiableList(
-                new ArrayList<BlacklistSource>(sources)
-        );
-    }
-
-    public synchronized void load() {
-        Set<String> newDomains =
-                new HashSet<String>();
-
-        Set<String> newIps =
-                new HashSet<String>();
-
-        int sourceCount = 0;
-        int ruleCount = 0;
-
-        for (BlacklistSource source : sources) {
-            try {
-                List<String> rules =
-                        source.loadRules();
-
-                sourceCount++;
-
-                for (String rawRule : rules) {
-                    String rule =
-                            normalizeRule(rawRule);
-
-                    if (rule == null) {
-                        continue;
-                    }
-
-                    if (isIpLiteral(rule)) {
-                        String ip =
-                                normalizeIp(rule);
-
-                        if (ip != null) {
-                            newIps.add(ip);
-                            ruleCount++;
-                        }
-                    } else {
-                        String domain =
-                                normalizeDomain(rule);
-
-                        if (domain != null) {
-                            newDomains.add(domain);
-                            ruleCount++;
-                        }
-                    }
-                }
-
-            } catch (IOException e) {
-                logger.error(
-                        "Не удалось загрузить blacklist из источника {}",
-                        source,
-                        e
-                );
-            }
+        if (sources == null) {
+            throw new IllegalArgumentException(
+                    "Список источников blacklist " +
+                            "не может быть null"
+            );
         }
 
-        /*
-         * Меняем ссылки только после полной обработки
-         * всех источников. Часть старого списка не смешивается
-         * с частично загруженным новым.
-         */
-        domains = Collections.unmodifiableSet(
-                newDomains
-        );
+        this.sources =
+                Collections.unmodifiableList(
+                        new ArrayList<BlacklistSource>(
+                                sources
+                        )
+                );
+    }
 
-        ips = Collections.unmodifiableSet(
-                newIps
-        );
-
-        logger.info(
-                "Blacklist загружен: источников {}, правил {}, доменов {}, IP {}",
-                sourceCount,
-                ruleCount,
-                domains.size(),
-                ips.size()
-        );
+    public BlacklistSnapshot snapshot() {
+        ensureLoaded();
+        return snapshot.get();
     }
 
     public boolean isBlocked(
@@ -111,124 +55,145 @@ public final class BlacklistLoader {
                 isBlockedDomain(host);
     }
 
-    public boolean isBlockedDomain(
-            String domain) {
-
-        String normalized =
-                normalizeDomain(domain);
-
-        if (normalized == null) {
-            return false;
-        }
-
-        String current = normalized;
-
-        while (true) {
-            if (domains.contains(current)) {
-                return true;
-            }
-
-            int dot =
-                    current.indexOf('.');
-
-            if (dot < 0) {
-                return false;
-            }
-
-            current =
-                    current.substring(dot + 1);
-        }
-    }
-
     public boolean isBlockedIp(
             String ip) {
 
-        String normalized =
-                normalizeIp(ip);
+        BlacklistSnapshot rules =
+                snapshot();
 
-        return normalized != null &&
-                ips.contains(normalized);
+        String normalizedIp =
+                HostNormalizer.normalizeIp(ip);
+
+        return normalizedIp != null &&
+                rules.ips().contains(normalizedIp);
     }
 
-    private static String normalizeRule(
-            String value) {
-
-        if (value == null) {
-            return null;
-        }
-
-        String result =
-                value.trim();
-
-        if (result.isEmpty() ||
-                result.startsWith("#")) {
-            return null;
-        }
-
-        while (result.endsWith(".")) {
-            result = result.substring(
-                    0,
-                    result.length() - 1
-            );
-        }
-
-        return result;
+    public void load() {
+        ensureLoaded();
     }
 
-    private static String normalizeDomain(
-            String value) {
+    public boolean isBlockedDomain(
+            String domain) {
 
-        if (value == null) {
-            return null;
-        }
+        BlacklistSnapshot rules =
+                snapshot();
 
-        String domain =
-                value.trim()
-                        .toLowerCase(Locale.ROOT);
+        String normalizedDomain =
+                HostNormalizer.normalizeHost(domain);
 
-        while (domain.endsWith(".")) {
-            domain = domain.substring(
-                    0,
-                    domain.length() - 1
-            );
-        }
-
-        if (domain.isEmpty() ||
-                domain.contains(":") ||
-                domain.contains("/") ||
-                domain.contains(" ")) {
-            return null;
-        }
-
-        return domain;
+        return normalizedDomain != null &&
+                rules.matchesDomain(normalizedDomain);
     }
 
-    private static String normalizeIp(
-            String value) {
 
-        if (value == null) {
-            return null;
+    private void ensureLoaded() {
+        if (loaded) {
+            return;
         }
 
-        String ip =
-                value.trim();
+        synchronized (this) {
+            if (loaded) {
+                return;
+            }
 
-        if (!isIpLiteral(ip)) {
-            return null;
-        }
+            try {
+                loadInternal();
+            } catch (IOException e) {
+                logger.error("Ошибка загрузки {}", FILE_NAME, e);
 
-        try {
-            return InetAddress
-                    .getByName(ip)
-                    .getHostAddress()
-                    .toLowerCase(Locale.ROOT);
-
-        } catch (Exception e) {
-            return null;
+                // Fail-closed для загрузчика означает:
+                // старые правила не заменяются частично загруженными.
+                snapshot.set(BlacklistSnapshot.empty());
+            } finally {
+                loaded = true;
+            }
         }
     }
 
-    private static boolean isIpLiteral(
+    private void loadInternal() throws IOException {
+        Set<String> domains = new HashSet<>();
+        Set<String> ips = new HashSet<>();
+
+        try (InputStream input = openBlacklist();
+             BufferedReader reader = new BufferedReader(
+                     new InputStreamReader(input, StandardCharsets.UTF_8))) {
+
+            String line;
+            int lineNumber = 0;
+
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+
+                String value = line.trim();
+
+                if (value.isEmpty() || value.startsWith("#")) {
+                    continue;
+                }
+
+                value = removeInlineComment(value);
+                value = HostNormalizer.removeTrailingDot(value);
+
+                if (isIp(value)) {
+                    String ip = HostNormalizer.normalizeIp(value);
+                    if (ip != null) {
+                        ips.add(ip);
+                    } else {
+                        logger.warn("Некорректный IP в строке {}: {}",
+                                Optional.of(lineNumber), value);
+                    }
+                } else {
+                    String domain = HostNormalizer.normalizeHost(value);
+                    if (domain != null) {
+                        domains.add(domain);
+                    } else {
+                        logger.warn("Некорректное правило в строке {}: {}",
+                                Optional.of(lineNumber), value);
+                    }
+                }
+            }
+        }
+
+        snapshot.set(new BlacklistSnapshot(
+                Collections.unmodifiableSet(
+                        new HashSet<String>(domains)
+                ),
+                Collections.unmodifiableSet(
+                        new HashSet<String>(ips)
+                )
+        ));
+        logger.info("Blacklist загружен: доменов " + domains.size() + ", IP " + ips.size());
+    }
+
+    private InputStream openBlacklist() throws IOException {
+        URL resource = getClass()
+                .getClassLoader()
+                .getResource(FILE_NAME);
+
+        if (resource != null) {
+            logger.info("Blacklist найден в classpath: {}",
+                    resource.toExternalForm());
+            return resource.openStream();
+        }
+
+        File file = new File(FILE_NAME);
+        if (file.isFile()) {
+            logger.info("Blacklist найден на диске: {}",
+                    file.getAbsolutePath());
+            return new FileInputStream(file);
+        }
+
+        throw new FileNotFoundException(
+                "Файл blacklist.txt не найден");
+    }
+
+    private static String removeInlineComment(String value) {
+        int index = value.indexOf('#');
+        return index >= 0
+                ? value.substring(0, index).trim()
+                : value;
+    }
+
+    private static boolean isIp(
             String value) {
 
         if (value == null ||
@@ -236,14 +201,20 @@ public final class BlacklistLoader {
             return false;
         }
 
+        /*
+         * IPv6 содержит двоеточие.
+         */
         if (value.indexOf(':') >= 0) {
             return true;
         }
 
-        return isIpv4Literal(value);
+        /*
+         * IPv4 проверяем строго:
+         * четыре числовые части от 0 до 255.
+         */
+        return isIpv4(value);
     }
-
-    private static boolean isIpv4Literal(
+    private static boolean isIpv4(
             String value) {
 
         String[] parts =
@@ -258,7 +229,10 @@ public final class BlacklistLoader {
                 return false;
             }
 
-            for (int i = 0; i < part.length(); i++) {
+            for (int i = 0;
+                 i < part.length();
+                 i++) {
+
                 if (!Character.isDigit(
                         part.charAt(i))) {
                     return false;
@@ -281,4 +255,5 @@ public final class BlacklistLoader {
 
         return true;
     }
+
 }
