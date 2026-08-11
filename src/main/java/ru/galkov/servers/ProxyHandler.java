@@ -55,7 +55,7 @@ public class ProxyHandler implements Runnable {
             String target = st.nextToken();
 
             if ("CONNECT".equals(method)) {
-                handleConnect(clientOut, target);
+                handleConnect(clientIn, clientOut, target);
             } else if ("GET".equals(method) || "POST".equals(method)
                     || "HEAD".equals(method) || "PUT".equals(method)
                     || "DELETE".equals(method)) {
@@ -75,46 +75,210 @@ public class ProxyHandler implements Runnable {
         }
     }
 
-    private void handleConnect(OutputStream clientOut, String target) throws IOException {
-        int colonIndex = target.lastIndexOf(':');
-        if (colonIndex == -1) {
-            sendError(clientOut, 400, "Bad Request (missing port)");
+    private void handleConnect(
+            InputStream clientIn,
+            OutputStream clientOut,
+            String target) throws IOException {
+
+        /*
+         * Сначала дочитываем все HTTP-заголовки CONNECT-запроса.
+         *
+         * После первой строки обычно приходят:
+         *
+         * Host: www.google.com:443
+         * User-Agent: curl/8.21.0
+         * Proxy-Connection: Keep-Alive
+         *
+         * Заголовки заканчиваются пустой строкой.
+         * Если их не прочитать, они попадут внутрь TLS-туннеля.
+         */
+        String line;
+
+        while ((line = readLine(clientIn)) != null) {
+            if (line.isEmpty()) {
+                break;
+            }
+        }
+
+        if (line == null) {
+            sendError(
+                    clientOut,
+                    400,
+                    "Incomplete CONNECT request"
+            );
             return;
         }
 
-        String host = target.substring(0, colonIndex);
+        int colonIndex =
+                target.lastIndexOf(':');
+
+        if (colonIndex <= 0 ||
+                colonIndex == target.length() - 1) {
+
+            sendError(
+                    clientOut,
+                    400,
+                    "Bad Request (invalid host and port)"
+            );
+            return;
+        }
+
+        String host =
+                target.substring(
+                        0,
+                        colonIndex
+                );
+
+        String portText =
+                target.substring(
+                        colonIndex + 1
+                );
+
         int port;
+
         try {
-            port = Integer.parseInt(target.substring(colonIndex + 1));
+            port =
+                    Integer.parseInt(portText);
+
         } catch (NumberFormatException e) {
-            sendError(clientOut, 400, "Invalid port");
+            sendError(
+                    clientOut,
+                    400,
+                    "Invalid port"
+            );
             return;
         }
 
-        logger.info(clientIp + " -> CONNECT " + host + ":" + port);
+        if (port < 1 ||
+                port > 65535) {
 
-        if (blacklist != null && blacklist.isBlocked(host, clientIp)) {
-            sendError(clientOut, 403, "Forbidden");
+            sendError(
+                    clientOut,
+                    400,
+                    "Invalid port"
+            );
             return;
         }
 
-        Socket remoteSocket;
+        /*
+         * Для IPv6 вида [2001:db8::1]:443
+         * убираем квадратные скобки.
+         */
+        if (host.startsWith("[") &&
+                host.endsWith("]")) {
+
+            host =
+                    host.substring(
+                            1,
+                            host.length() - 1
+                    );
+        }
+
+        if (host.isEmpty()) {
+            sendError(
+                    clientOut,
+                    400,
+                    "Empty host"
+            );
+            return;
+        }
+
+        logger.info(
+                "{} -> CONNECT {}:{}",
+                clientIp,
+                host,
+                port
+        );
+
+        /*
+         * Проверяем домен или IP до подключения.
+         * Порт в blacklist не передаётся, поэтому правило
+         * блокирует этот host на любом порту.
+         */
+        if (blacklist != null &&
+                blacklist.isBlocked(
+                        host,
+                        clientIp
+                )) {
+
+            logger.info(
+                    "{} <- CONNECT заблокирован: {}:{}",
+                    clientIp,
+                    host,
+                    port
+            );
+
+            sendError(
+                    clientOut,
+                    403,
+                    "Forbidden"
+            );
+
+            return;
+        }
+
+        Socket remoteSocket =
+                new Socket();
+
         try {
-            remoteSocket = new Socket(host, port);
+            remoteSocket.connect(
+                    new java.net.InetSocketAddress(
+                            host,
+                            port
+                    ),
+                    10000
+            );
+
+            remoteSocket.setTcpNoDelay(true);
+            clientSocket.setTcpNoDelay(true);
+
         } catch (IOException e) {
-            sendError(clientOut, 502, "Bad Gateway");
-            logger.error("Failed to connect to " + host + ":" + port + " " + e.getMessage());
+            try {
+                remoteSocket.close();
+            } catch (IOException ignored) {
+            }
+
+            sendError(
+                    clientOut,
+                    502,
+                    "Bad Gateway"
+            );
+
+            logger.error(
+                    "{} -> Не удалось подключиться к {}:{}",
+                    clientIp,
+                    host,
+                    port,
+                    e
+            );
+
             return;
         }
 
-        String response = "HTTP/1.1 200 Connection established\r\n" +
-                "Proxy-Agent: MyProxy\r\n" +
-                "\r\n";
-        clientOut.write(response.getBytes(StandardCharsets.ISO_8859_1));
+        String response =
+                "HTTP/1.1 200 Connection established\r\n" +
+                        "Proxy-Agent: MyProxy\r\n" +
+                        "\r\n";
+
+        clientOut.write(
+                response.getBytes(
+                        StandardCharsets.ISO_8859_1
+                )
+        );
+
         clientOut.flush();
 
-        runTunnel(clientSocket, remoteSocket);
+        logger.info(
+                "{} <- CONNECT туннель установлен: {}:{}",
+                clientIp,
+                host,
+                port
+        );
 
+        runTunnel(
+                clientSocket,
+                remoteSocket
+        );
     }
 
     private void handleHttp(InputStream clientIn, OutputStream clientOut, String firstLine, String target, String method) throws IOException {
@@ -221,78 +385,118 @@ public class ProxyHandler implements Runnable {
         remoteSocket.close();
     }
 
-    private void runTunnel(Socket client, Socket remote) {
-        Thread t1 = new Thread(() -> {
-            InputStream in = null;
-            OutputStream out = null;
-            try {
-                in = client.getInputStream();
-                out = remote.getOutputStream();
-                byte[] buf = new byte[8192];
-                int len;
-                while ((len = in.read(buf)) != -1) {
-                    out.write(buf, 0, len);
-                    out.flush(); // Важно для Windows/curl
-                }
-            } catch (IOException e) {
-                logger.debug("Tunnel thread 1 ended: {}", e.getMessage());
-            } finally {
-                try {
-                    if (in != null) in.close();
-                } catch (IOException ignored) {
-                }
-                try {
-                    if (out != null) out.close();
-                } catch (IOException ignored) {
-                }
-            }
-        });
+    private void runTunnel(
+            final Socket client,
+            final Socket remote) {
 
-        Thread t2 = new Thread(() -> {
-            InputStream in = null;
-            OutputStream out = null;
-            try {
-                in = remote.getInputStream();
-                out = client.getOutputStream();
-                byte[] buf = new byte[8192];
-                int len;
-                while ((len = in.read(buf)) != -1) {
-                    out.write(buf, 0, len);
-                    out.flush();
-                }
-            } catch (IOException e) {
-                logger.debug("Tunnel thread 2 ended: {}", e.getMessage());
-            } finally {
-                try {
-                    if (in != null) in.close();
-                } catch (IOException ignored) {
-                }
-                try {
-                    if (out != null) out.close();
-                } catch (IOException ignored) {
-                }
-            }
-        });
+        Thread clientToRemote =
+                new Thread(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                pipe(
+                                        client,
+                                        remote,
+                                        "client -> remote"
+                                );
+                            }
+                        },
+                        "Proxy-Tunnel-ClientToRemote"
+                );
 
-        t1.setDaemon(true);
-        t2.setDaemon(true);
-        t1.start();
-        t2.start();
+        Thread remoteToClient =
+                new Thread(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                pipe(
+                                        remote,
+                                        client,
+                                        "remote -> client"
+                                );
+                            }
+                        },
+                        "Proxy-Tunnel-RemoteToClient"
+                );
+
+        clientToRemote.setDaemon(true);
+        remoteToClient.setDaemon(true);
+
+        clientToRemote.start();
+        remoteToClient.start();
 
         try {
-            t1.join();
-            t2.join();
+            clientToRemote.join();
+            remoteToClient.join();
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+
+            closeQuietly(client);
+            closeQuietly(remote);
+
+        } finally {
+            closeQuietly(client);
+            closeQuietly(remote);
+        }
+    }
+
+    private void closeQuietly(
+            Socket socket) {
+
+        if (socket == null) {
+            return;
         }
 
         try {
-            client.close();
-        } catch (IOException ignored) {
+            socket.close();
+
+        } catch (IOException e) {
+            logger.trace(
+                    "Ошибка закрытия tunnel socket: {}",
+                    e.getMessage()
+            );
         }
+    }
+
+    private void pipe(
+            Socket source,
+            Socket destination,
+            String direction) {
+
+        byte[] buffer =
+                new byte[8192];
+
+        logger.info(
+                "Tunnel {}: поток запущен, source={}, destination={}",
+                direction,
+                source.getRemoteSocketAddress(),
+                destination.getRemoteSocketAddress()
+        );
+
+        long totalBytes = 0L;
         try {
-            remote.close();
-        } catch (IOException ignored) {
+            InputStream input = source.getInputStream();
+            OutputStream output = destination.getOutputStream();
+
+            int length;
+            while ((length = input.read(buffer)) != -1) {
+                output.write(buffer, 0, length);
+                output.flush();
+
+                totalBytes += length;
+                logger.info(
+                        "Tunnel {}: передано {} байт, всего {}",
+                        direction,
+                        length,
+                        totalBytes
+                );
+            }
+
+            logger.info("Tunnel {}: EOF, всего передано {} байт", direction, totalBytes);
+
+        } catch (IOException e) {
+            logger.info("Tunnel {}: остановлен после {} байт: {}", direction, totalBytes, e.getMessage());
         }
     }
 
@@ -304,20 +508,16 @@ public class ProxyHandler implements Runnable {
             if (c == '\n') {
                 int length = sb.length();
 
-                if (length > 0 &&
-                        sb.charAt(length - 1) == '\r') {
+                if (length > 0 && sb.charAt(length - 1) == '\r') {
                     sb.setLength(length - 1);
                 }
-
                 return sb.toString();
             }
 
             sb.append((char) c);
         }
 
-        return sb.length() > 0
-                ? sb.toString()
-                : null;
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     private void sendError(OutputStream out, int code, String message) throws IOException {

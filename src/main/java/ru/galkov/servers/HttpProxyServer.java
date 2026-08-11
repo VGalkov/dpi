@@ -14,7 +14,7 @@ import java.util.concurrent.Executors;
 
 public class HttpProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
-    private static BlacklistLoader blacklist;
+    private final BlacklistLoader blacklist;
     private final int port;
     private final ExecutorService workerPool;
 
@@ -26,7 +26,7 @@ public class HttpProxyServer {
             BlacklistLoader blacklist) {
 
         this.port = port;
-        HttpProxyServer.blacklist = Objects.requireNonNull(blacklist);
+        this.blacklist = Objects.requireNonNull(blacklist);
 
         this.workerPool = Executors.newFixedThreadPool(
                 Runtime.getRuntime().availableProcessors() * 2
