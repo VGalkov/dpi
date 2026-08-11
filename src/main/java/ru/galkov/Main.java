@@ -2,14 +2,16 @@ package ru.galkov;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.servers.BlacklistLoader;
-import ru.galkov.servers.DnsServer;
-import ru.galkov.servers.HttpProxyServer;
+import ru.galkov.servers.*;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 
 /**
  * Galkov V A s0506777@yandex.ru
- *
+ * <p>
  * nslookup.exe www.ssr.ru 10.0.3.10
  * .\curl -v -x http://127.0.0.1:8888 https://www.google.com
  * .\curl -v -x http://127.0.0.1:8888 http://example.com
@@ -20,10 +22,53 @@ public class Main {
     private static HttpProxyServer proxyServer;
     private static AppConfig config;
     private static BlacklistLoader blacklist;
+
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
-            blacklist = new BlacklistLoader();
+            List<BlacklistSource> sources =
+                    new ArrayList<BlacklistSource>();
+
+            sources.add(
+                    new FileBlacklistSource(
+                            new File(
+                                    getConfig().get(
+                                            "blacklist.local.file"
+                                    )
+                            )
+                    )
+            );
+            if (getConfig().getBoolean(
+                    "blacklist.adguard.enabled")) {
+                sources.add(
+                        new AdguardBlacklistSource(
+                                getConfig().get("blacklist.adguard.url"),
+                                getConfig().getInt("blacklist.adguard.connect-timeout"),
+                                getConfig().getInt("blacklist.adguard.read-timeout")
+                        )
+                );
+            }
+
+
+            if (getConfig().getBoolean(
+                    "blacklist.rkn.enabled")) {
+
+                sources.add(
+                        new FileBlacklistSource(
+                                new File(
+                                        getConfig().get(
+                                                "blacklist.rkn.file"
+                                        )
+                                )
+                        )
+                );
+                //sources.add(new RknBlacklistSource(...));
+            }
+
+            blacklist =
+                    new BlacklistLoader(sources);
+
+            blacklist.load();
 
             startProxyServer();
             startDnsServer();
