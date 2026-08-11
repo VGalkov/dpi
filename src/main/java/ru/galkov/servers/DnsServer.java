@@ -330,7 +330,6 @@
                         out.write(shortToBytes(respBytes.length));
                         out.write(respBytes);
                         out.flush();
-                    } else {
                     }
                 }
             } catch (IOException e) {
@@ -391,7 +390,4 @@
             return new byte[]{(byte) ((value >> 8) & 0xFF), (byte) (value & 0xFF)};
         }
 
-        public void stop() {
-            workerPool.shutdownNow();
-        }
     }

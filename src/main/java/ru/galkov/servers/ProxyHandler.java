@@ -55,7 +55,7 @@ public class ProxyHandler implements Runnable {
             String target = st.nextToken();
 
             if ("CONNECT".equals(method)) {
-                handleConnect(clientIn, clientOut, target);
+                handleConnect(clientOut, target);
             } else if ("GET".equals(method) || "POST".equals(method)
                     || "HEAD".equals(method) || "PUT".equals(method)
                     || "DELETE".equals(method)) {
@@ -74,7 +74,7 @@ public class ProxyHandler implements Runnable {
         }
     }
 
-    private void handleConnect(InputStream clientIn, OutputStream clientOut, String target) throws IOException {
+    private void handleConnect(OutputStream clientOut, String target) throws IOException {
         int colonIndex = target.lastIndexOf(':');
         if (colonIndex == -1) {
             sendError(clientOut, 400, "Bad Request (missing port)");

@@ -38,7 +38,9 @@ public class BlacklistLoader {
                     inputStream = new FileInputStream(file);
                     found = true;
                     logger.info("Blacklist найден в рабочей директории: {}", file.getAbsolutePath());
-                } catch (FileNotFoundException e) {}
+                } catch (FileNotFoundException e) {
+                    logger.warn("Файл blacklist.txt не найден.{}", e.getMessage());
+                }
             } else {
                 logger.warn("Файл blacklist.txt не найден. Фильтрация отключена.");
                 loaded = true;
