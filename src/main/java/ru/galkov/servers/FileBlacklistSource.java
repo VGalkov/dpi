@@ -9,44 +9,30 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class FileBlacklistSource
-        implements BlacklistSource {
+public final class FileBlacklistSource implements BlacklistSource {
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(
-                    FileBlacklistSource.class
-            );
+    private static final Logger logger = LoggerFactory.getLogger(FileBlacklistSource.class);
 
     private final File file;
 
     public FileBlacklistSource(File file) {
         if (file == null) {
-            throw new IllegalArgumentException(
-                    "Файл blacklist не может быть null"
-            );
+            throw new IllegalArgumentException("Файл blacklist не может быть null");
         }
 
         this.file = file;
     }
 
     @Override
-    public List<String> loadRules()
-            throws IOException {
+    public List<String> loadRules() throws IOException {
 
-        List<String> rules =
-                new ArrayList<String>();
+        List<String> rules = new ArrayList<String>();
 
         try (
-                InputStream input =
-                        openInputStream();
+                InputStream input = openInputStream();
 
                 BufferedReader reader =
-                        new BufferedReader(
-                                new InputStreamReader(
-                                        input,
-                                        StandardCharsets.UTF_8
-                                )
-                        )
+                        new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
         ) {
             String line;
             int lineNumber = 0;
@@ -54,8 +40,7 @@ public final class FileBlacklistSource
             while ((line = reader.readLine()) != null) {
                 lineNumber++;
 
-                String value =
-                        normalizeLine(line);
+                String value = normalizeLine(line);
 
                 if (value == null) {
                     continue;

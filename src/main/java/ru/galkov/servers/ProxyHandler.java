@@ -80,18 +80,6 @@ public class ProxyHandler implements Runnable {
             OutputStream clientOut,
             String target) throws IOException {
 
-        /*
-         * Сначала дочитываем все HTTP-заголовки CONNECT-запроса.
-         *
-         * После первой строки обычно приходят:
-         *
-         * Host: www.google.com:443
-         * User-Agent: curl/8.21.0
-         * Proxy-Connection: Keep-Alive
-         *
-         * Заголовки заканчиваются пустой строкой.
-         * Если их не прочитать, они попадут внутрь TLS-туннеля.
-         */
         String line;
 
         while ((line = readLine(clientIn)) != null) {
@@ -109,11 +97,9 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        int colonIndex =
-                target.lastIndexOf(':');
+        int colonIndex = target.lastIndexOf(':');
 
-        if (colonIndex <= 0 ||
-                colonIndex == target.length() - 1) {
+        if (colonIndex <= 0 || colonIndex == target.length() - 1) {
 
             sendError(
                     clientOut,
@@ -123,55 +109,27 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        String host =
-                target.substring(
-                        0,
-                        colonIndex
-                );
+        String host = target.substring(0, colonIndex);
 
-        String portText =
-                target.substring(
-                        colonIndex + 1
-                );
+        String portText = target.substring(colonIndex + 1);
 
         int port;
 
         try {
-            port =
-                    Integer.parseInt(portText);
+            port = Integer.parseInt(portText);
 
         } catch (NumberFormatException e) {
-            sendError(
-                    clientOut,
-                    400,
-                    "Invalid port"
-            );
+            sendError(clientOut, 400, "Invalid port");
             return;
         }
 
-        if (port < 1 ||
-                port > 65535) {
-
-            sendError(
-                    clientOut,
-                    400,
-                    "Invalid port"
-            );
+        if (port < 1 || port > 65535) {
+            sendError(clientOut, 400, "Invalid port");
             return;
         }
 
-        /*
-         * Для IPv6 вида [2001:db8::1]:443
-         * убираем квадратные скобки.
-         */
-        if (host.startsWith("[") &&
-                host.endsWith("]")) {
-
-            host =
-                    host.substring(
-                            1,
-                            host.length() - 1
-                    );
+        if (host.startsWith("[") && host.endsWith("]")) {
+            host = host.substring(1, host.length() - 1);
         }
 
         if (host.isEmpty()) {
@@ -268,12 +226,7 @@ public class ProxyHandler implements Runnable {
 
         clientOut.flush();
 
-        logger.info(
-                "{} <- CONNECT туннель установлен: {}:{}",
-                clientIp,
-                host,
-                port
-        );
+        logger.info("{} <- CONNECT туннель установлен: {}:{}", clientIp, host, port);
 
         runTunnel(
                 clientSocket,
@@ -474,7 +427,7 @@ public class ProxyHandler implements Runnable {
                 destination.getRemoteSocketAddress()
         );
 
-        long totalBytes = 0L;
+        //long totalBytes = 0L;
         try {
             InputStream input = source.getInputStream();
             OutputStream output = destination.getOutputStream();
@@ -484,19 +437,14 @@ public class ProxyHandler implements Runnable {
                 output.write(buffer, 0, length);
                 output.flush();
 
-                totalBytes += length;
-                logger.info(
-                        "Tunnel {}: передано {} байт, всего {}",
-                        direction,
-                        length,
-                        totalBytes
-                );
+                //totalBytes += length;
+                //logger.info("Tunnel {}: передано {} байт, всего {}", direction, length, totalBytes);
             }
 
-            logger.info("Tunnel {}: EOF, всего передано {} байт", direction, totalBytes);
+            // logger.info("Tunnel {}: EOF, всего передано {} байт", direction, totalBytes);
 
         } catch (IOException e) {
-            logger.info("Tunnel {}: остановлен после {} байт: {}", direction, totalBytes, e.getMessage());
+          //  logger.info("Tunnel {}: остановлен после {} байт: {}", direction, totalBytes, e.getMessage());
         }
     }
 

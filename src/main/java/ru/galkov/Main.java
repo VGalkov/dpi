@@ -5,10 +5,10 @@ import org.slf4j.LoggerFactory;
 import ru.galkov.servers.*;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-
 
 /**
  * Galkov V A s0506777@yandex.ru
@@ -23,23 +23,23 @@ public class Main {
     private static HttpProxyServer proxyServer;
     private static AppConfig config;
     private static BlacklistLoader blacklist;
-
+    static RknRequestSigner requestSigner;
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
-            List<BlacklistSource> sources =
-                    new ArrayList<BlacklistSource>();
+            List<BlacklistSource> sources = new ArrayList<BlacklistSource>();
 
-            sources.add(new FileBlacklistSource(new File(getConfig().get("blacklist.local.file"))));
+
+            if (getConfig().getBoolean("blacklist.local.enabled")) {
+                FileBlacklistSource fileBlacklistSource = new FileBlacklistSource(new File(getConfig().get("blacklist.local.file")));
+                sources.add(fileBlacklistSource);
+                logger.info("Источник LocalFile добавлен: {}", fileBlacklistSource);
+            }
 
             boolean adguardEnabled = getConfig().getBoolean("blacklist.adguard.enabled");
             String adguardUrl = getConfig().get("blacklist.adguard.url");
 
-            logger.info(
-                    "AdGuard blacklist: enabled={}, url={}",
-                    adguardEnabled,
-                    adguardUrl
-            );
+            logger.info("AdGuard blacklist: enabled={}, url={}", adguardEnabled, adguardUrl);
 
             if (adguardEnabled) {
                 AdguardBlacklistSource adguardSource =
@@ -50,21 +50,21 @@ public class Main {
                         );
 
                 sources.add(adguardSource);
-
                 logger.info("Источник AdGuard добавлен: {}", adguardSource);
             }
 
 
             if (getConfig().getBoolean("blacklist.rkn.enabled")) {
-                sources.add(
-                        new FileBlacklistSource(new File(getConfig().get("blacklist.rkn.file")))
+                RknBlacklistSource rknBlacklistSource = new RknBlacklistSource(
+                        getConfig().get("blacklist.rkn.endpoint"),
+                        Path.of(getConfig().get("blacklist.rkn.request-file")), Path.of(getConfig().get("blacklist.rkn.signature-file")), getConfig().getBoolean("blacklist.rkn.emchd-enabled"), Path.of(getConfig().get("blacklist.rkn.emchd-file")), getConfig().get("blacklist.rkn.emchd-file-name"), Path.of(getConfig().get("blacklist.rkn.emchd-signature-file")), getConfig().getInt("blacklist.rkn.poll-interval-seconds"), getConfig().getInt("blacklist.rkn.poll-timeout-seconds"), getConfig().getInt("blacklist.rkn.connect-timeout"), getConfig().getInt("blacklist.rkn.read-timeout"), getConfig().get("rkn.operator-name"), getConfig().get("rkn.inn"), getConfig().get("rkn.ogrn"), getConfig().get("rkn.email"), getConfig().get("rkn.timezone"),
+                        requestSigner
                 );
-                //sources.add(new RknBlacklistSource(...));
+                sources.add(rknBlacklistSource);
+                logger.info("Источник РКН добавлен: {}", rknBlacklistSource);
             }
 
-            blacklist =
-                    new BlacklistLoader(sources);
-
+            blacklist = new BlacklistLoader(sources);
             blacklist.load();
 
             startProxyServer();
@@ -94,10 +94,7 @@ public class Main {
                 if (proxyServer == null) {
                     int port = getConfig().getInt("proxy.local.port");
                     logger.info("Инициализация и запуск HTTP Proxy на порту {}", Optional.of(port));
-                    proxyServer = new HttpProxyServer(
-                            getConfig().getInt("proxy.local.port"),
-                            blacklist
-                    );
+                    proxyServer = new HttpProxyServer(getConfig().getInt("proxy.local.port"), blacklist);
                     proxyServer.start();
                 }
             }

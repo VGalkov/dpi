@@ -27,7 +27,6 @@ public class HttpProxyServer {
 
         this.port = port;
         this.blacklist = Objects.requireNonNull(blacklist);
-
         this.workerPool = Executors.newFixedThreadPool(
                 Runtime.getRuntime().availableProcessors() * 2
         );

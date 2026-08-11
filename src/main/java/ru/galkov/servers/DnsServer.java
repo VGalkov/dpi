@@ -187,26 +187,21 @@ public class DnsServer {
     }
 
     public void run() {
-        int port =
-                getConfig().getInt("dns.local.port");
+        int port = getConfig().getInt("dns.local.port");
 
         logger.info("Запуск DNS форвардера на порту {}", Optional.of(port));
 
         try (
-                DatagramSocket udpSocket =
-                        new DatagramSocket(port);
+                DatagramSocket udpSocket = new DatagramSocket(port);
 
-                ServerSocket tcpListener =
-                        new ServerSocket(port)
+                ServerSocket tcpListener = new ServerSocket(port)
         ) {
             Thread tcpThread =
                     new Thread(
                             new Runnable() {
                                 @Override
                                 public void run() {
-                                    handleTcpConnections(
-                                            tcpListener
-                                    );
+                                    handleTcpConnections(tcpListener);
                                 }
                             },
                             "DnsServer-TCP-Acceptor"
@@ -229,29 +224,20 @@ public class DnsServer {
                                 .getAddress()
                                 .getHostAddress();
 
-                logger.debug(
-                        "UDP: Получен пакет от {}",
-                        clientIp
-                );
+                logger.debug("UDP: Получен пакет от {}", clientIp);
 
                 workerPool.execute(
                         new Runnable() {
                             @Override
                             public void run() {
-                                processUdpRequest(
-                                        udpSocket,
-                                        request
-                                );
+                                processUdpRequest(udpSocket, request);
                             }
                         }
                 );
             }
 
         } catch (IOException e) {
-            logger.error(
-                    "Критическая ошибка запуска DNS-сервера",
-                    e
-            );
+            logger.error("Критическая ошибка запуска DNS-сервера", e);
         }
     }
 
