@@ -1,4 +1,4 @@
-package ru.galkov.servers;
+package ru.galkov.blacklist_source;
 
 
 import java.io.IOException;

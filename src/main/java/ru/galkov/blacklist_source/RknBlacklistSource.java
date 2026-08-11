@@ -1,9 +1,10 @@
-package ru.galkov.servers;
+package ru.galkov.blacklist_source;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
+import ru.galkov.servers.RknRequestSigner;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -29,16 +30,11 @@ import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-public final class RknBlacklistSource implements BlacklistSource {
+    public final class RknBlacklistSource implements BlacklistSource {
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(RknBlacklistSource.class);
-
-    private static final String SOAP_NAMESPACE =
-            "http://schemas.xmlsoap.org/soap/envelope/";
-
-    private static final String RKN_NAMESPACE =
-            "http://vigruzki.rkn.gov.ru/OperatorRequest/";
+    private static final Logger logger = LoggerFactory.getLogger(RknBlacklistSource.class);
+    private static final String SOAP_NAMESPACE = "http://schemas.xmlsoap.org/soap/envelope/";
+    private static final String RKN_NAMESPACE = "http://vigruzki.rkn.gov.ru/OperatorRequest/";
 
     private final String endpoint;
     private final Path requestFile;
@@ -173,25 +169,14 @@ public final class RknBlacklistSource implements BlacklistSource {
             Path path,
             String description) throws IOException {
 
-        if (path == null ||
-                !Files.isRegularFile(path)) {
-
-            throw new IOException(
-                    description +
-                            " не найден: " +
-                            (path == null
-                                    ? "null"
-                                    : path.toAbsolutePath())
-            );
+        if (path == null || !Files.isRegularFile(path)) {
+            throw new IOException(description + " не найден: " + (path == null ? "null" : path.toAbsolutePath()));
         }
     }
     private byte[] waitForResult(String code) throws IOException {
 
-        long deadline =
-                System.currentTimeMillis() + Duration.ofSeconds(pollTimeoutSeconds).toMillis();
-
+        long deadline = System.currentTimeMillis() + Duration.ofSeconds(pollTimeoutSeconds).toMillis();
         String lastComment = null;
-
         while (System.currentTimeMillis() < deadline) {
             Document response =
                     postSoap(
@@ -200,11 +185,8 @@ public final class RknBlacklistSource implements BlacklistSource {
                     );
 
             boolean result = readBoolean(response, "result");
-
             String comment = readText(response, "resultComment");
-
             if (comment != null && !comment.isBlank()) {
-
                 lastComment = comment;
                 logger.info("Статус запроса РКН {}: {}", code, comment);
             }
@@ -213,27 +195,18 @@ public final class RknBlacklistSource implements BlacklistSource {
             if (archiveBase64 != null && !archiveBase64.isBlank()) {
 
                 try {
-                    return Base64
-                            .getMimeDecoder()
-                            .decode(archiveBase64);
-
+                    return Base64.getMimeDecoder().decode(archiveBase64);
                 } catch (IllegalArgumentException e) {
                     throw new IOException("РКН вернул некорректный Base64-архив", e);
                 }
             }
 
-            if (result &&
-                    archiveBase64 == null) {
-
-                logger.warn(
-                        "РКН сообщил об успешном результате, но архив отсутствует. Код запроса: {}",
-                        code
-                );
+            if (result && archiveBase64 == null) {
+                logger.warn("РКН сообщил об успешном результате, но архив отсутствует. Код запроса: {}", code);
             }
 
             try {
                 Thread.sleep(pollIntervalSeconds * 1000L);
-
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Ожидание результата РКН прервано", e);
@@ -253,8 +226,7 @@ public final class RknBlacklistSource implements BlacklistSource {
     private List<String> parseRegisterArchive(
             byte[] archiveBytes) throws IOException {
 
-        List<String> rules =
-                new ArrayList<String>();
+        List<String> rules = new ArrayList<String>();
 
         try (
                 ByteArrayInputStream input = new ByteArrayInputStream(archiveBytes);
@@ -274,7 +246,6 @@ public final class RknBlacklistSource implements BlacklistSource {
                 }
 
                 byte[] xmlBytes = readAllBytes(zip);
-
                 rules.addAll(parseRegisterXml(xmlBytes));
             }
         }
@@ -283,8 +254,7 @@ public final class RknBlacklistSource implements BlacklistSource {
         return rules;
     }
 
-    private List<String> parseRegisterXml(
-            byte[] xmlBytes) throws IOException {
+    private List<String> parseRegisterXml(byte[] xmlBytes) throws IOException {
 
         List<String> rules = new ArrayList<String>();
         Document document = parseXml(xmlBytes);
@@ -302,43 +272,30 @@ public final class RknBlacklistSource implements BlacklistSource {
                 domain = domain.substring(2);
             }
 
-            if (!domain.isBlank()) {rules.add(domain);
+            if (!domain.isBlank()) {
+                rules.add(domain);
             }
         }
 
-        NodeList ipv4 =
-                document.getElementsByTagNameNS(
-                        "*",
-                        "ip"
-                );
+        NodeList ipv4 = document.getElementsByTagNameNS("*", "ip");
 
         for (int i = 0; i < ipv4.getLength(); i++) {
 
-            String ip =
-                    ipv4.item(i)
-                            .getTextContent()
-                            .trim();
-
+            String ip = ipv4.item(i).getTextContent().trim();
             if (!ip.isBlank()) {
                 rules.add(ip);
             }
         }
 
-        NodeList ipv6 =
-                document.getElementsByTagNameNS(
-                        "*",
-                        "ipv6"
-                );
+        NodeList ipv6 = document.getElementsByTagNameNS("*", "ipv6");
 
         for (int i = 0; i < ipv6.getLength(); i++) {
 
             String ip = ipv6.item(i).getTextContent().trim();
-
             if (!ip.isBlank()) {
                 rules.add(ip);
             }
         }
-
         return rules;
     }
 
@@ -347,36 +304,14 @@ public final class RknBlacklistSource implements BlacklistSource {
 
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-
             factory.setNamespaceAware(true);
-            factory.setFeature(
-                    "http://apache.org/xml/features/disallow-doctype-decl",
-                    true
-            );
-            factory.setFeature(
-                    "http://xml.org/sax/features/external-general-entities",
-                    false
-            );
-            factory.setFeature(
-                    "http://xml.org/sax/features/external-parameter-entities",
-                    false
-            );
-            factory.setFeature(
-                    "http://apache.org/xml/features/nonvalidating/load-external-dtd",
-                    false
-            );
-            factory.setAttribute(
-                    XMLConstants.ACCESS_EXTERNAL_DTD,
-                    ""
-            );
-            factory.setAttribute(
-                    XMLConstants.ACCESS_EXTERNAL_SCHEMA,
-                    ""
-            );
-
-            DocumentBuilder builder =
-                    factory.newDocumentBuilder();
-
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            DocumentBuilder builder = factory.newDocumentBuilder();
             return builder.parse(new ByteArrayInputStream(xmlBytes));
 
         } catch (Exception e) {
@@ -388,20 +323,12 @@ public final class RknBlacklistSource implements BlacklistSource {
             String soapXml,
             String soapAction) throws IOException {
 
-        HttpURLConnection connection =
-                (HttpURLConnection)
-                        URI.create(endpoint)
-                                .toURL()
-                                .openConnection();
+        HttpURLConnection connection = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
 
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
-        connection.setConnectTimeout(
-                connectTimeoutMillis
-        );
-        connection.setReadTimeout(
-                readTimeoutMillis
-        );
+        connection.setConnectTimeout(connectTimeoutMillis);
+        connection.setReadTimeout(readTimeoutMillis);
         connection.setRequestProperty(
                 "Content-Type",
                 "text/xml; charset=utf-8"
@@ -416,26 +343,17 @@ public final class RknBlacklistSource implements BlacklistSource {
         );
 
         byte[] requestBytes = soapXml.getBytes(Charset.forName("UTF-8"));
-
         connection.getOutputStream().write(requestBytes);
-
         int status = connection.getResponseCode();
-
         InputStream responseStream =
-                status >= 400
-                        ? connection.getErrorStream()
-                        : connection.getInputStream();
+                status >= 400 ? connection.getErrorStream() : connection.getInputStream();
 
         if (responseStream == null) {
-            throw new IOException(
-                    "РКН вернул HTTP-код " + status +
-                            " без тела ответа"
-            );
+            throw new IOException("РКН вернул HTTP-код " + status + " без тела ответа");
         }
 
         try (InputStream input = responseStream) {
-            byte[] responseBytes =
-                    readAllBytes(input);
+            byte[] responseBytes = readAllBytes(input);
 
             if (status >= 400) {
                 throw new IOException(
@@ -507,56 +425,28 @@ public final class RknBlacklistSource implements BlacklistSource {
             Document document,
             String localName) {
 
-        NodeList nodes =
-                document.getElementsByTagNameNS(
-                        "*",
-                        localName
-                );
-
+        NodeList nodes = document.getElementsByTagNameNS("*", localName);
         if (nodes.getLength() == 0) {
             return null;
         }
 
-        String value =
-                nodes.item(0)
-                        .getTextContent()
-                        .trim();
-
-        return value.isEmpty()
-                ? null
-                : value;
+        String value = nodes.item(0).getTextContent().trim();
+        return value.isEmpty() ? null : value;
     }
 
-    private static boolean readBoolean(
-            Document document,
-            String localName) {
+    private static boolean readBoolean(Document document, String localName) {
 
-        String value =
-                readText(
-                        document,
-                        localName
-                );
-
+        String value = readText(document, localName);
         return Boolean.parseBoolean(value);
     }
 
-    private static byte[] readAllBytes(
-            InputStream input) throws IOException {
+    private static byte[] readAllBytes(InputStream input) throws IOException {
 
-        ByteArrayOutputStream output =
-                new ByteArrayOutputStream();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-        byte[] buffer =
-                new byte[8192];
-
+        byte[] buffer = new byte[8192];
         int count;
-
-        while ((count = input.read(buffer)) != -1) {
-            output.write(
-                    buffer,
-                    0,
-                    count
-            );
+        while ((count = input.read(buffer)) != -1) {output.write(buffer, 0, count);
         }
 
         return output.toByteArray();

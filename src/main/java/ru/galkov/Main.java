@@ -2,7 +2,14 @@ package ru.galkov;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.servers.*;
+import ru.galkov.blacklist_source.AdguardBlacklistSource;
+import ru.galkov.blacklist_source.BlacklistSource;
+import ru.galkov.blacklist_source.FileBlacklistSource;
+import ru.galkov.blacklist_source.RknBlacklistSource;
+import ru.galkov.servers.BlacklistLoader;
+import ru.galkov.servers.DnsServer;
+import ru.galkov.servers.HttpProxyServer;
+import ru.galkov.servers.RknRequestSigner;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -29,19 +36,15 @@ public class Main {
             config = AppConfig.getInstance();
             List<BlacklistSource> sources = new ArrayList<BlacklistSource>();
 
-
             if (getConfig().getBoolean("blacklist.local.enabled")) {
                 FileBlacklistSource fileBlacklistSource = new FileBlacklistSource(new File(getConfig().get("blacklist.local.file")));
                 sources.add(fileBlacklistSource);
                 logger.info("Источник LocalFile добавлен: {}", fileBlacklistSource);
             }
 
-            boolean adguardEnabled = getConfig().getBoolean("blacklist.adguard.enabled");
-            String adguardUrl = getConfig().get("blacklist.adguard.url");
-
-            logger.info("AdGuard blacklist: enabled={}, url={}", adguardEnabled, adguardUrl);
-
-            if (adguardEnabled) {
+            if (getConfig().getBoolean("blacklist.adguard.enabled")) {
+                String adguardUrl = getConfig().get("blacklist.adguard.url");
+                logger.info("AdGuard blacklist: enabled={}, url={}", getConfig().getBoolean("blacklist.adguard.enabled"), adguardUrl);
                 AdguardBlacklistSource adguardSource =
                         new AdguardBlacklistSource(
                                 adguardUrl,
@@ -51,6 +54,22 @@ public class Main {
 
                 sources.add(adguardSource);
                 logger.info("Источник AdGuard добавлен: {}", adguardSource);
+            }
+
+            if (getConfig().getBoolean("blacklist.mvps_hosts.enabled")) {
+                String mvpsHostsUrl = getConfig().get("blacklist.mvps_hosts.url");
+                logger.info("MVPS Hosts blacklist: enabled={}, url={}",
+                        getConfig().getBoolean("blacklist.mvps_hosts.enabled"), mvpsHostsUrl
+                );
+                AdguardBlacklistSource mvpsHostsSource =
+                        new AdguardBlacklistSource(
+                                mvpsHostsUrl,
+                                getConfig().getInt("blacklist.adguard.connect-timeout"),
+                                getConfig().getInt("blacklist.adguard.read-timeout")
+                        );
+
+                sources.add(mvpsHostsSource);
+                logger.info("Источник MVPS Hosts добавлен: {}", mvpsHostsSource);
             }
 
 
@@ -66,10 +85,8 @@ public class Main {
 
             blacklist = new BlacklistLoader(sources);
             blacklist.load();
-
             startProxyServer();
             startDnsServer();
-
             logger.info("Система запущена!");
         } catch (Exception e) {
             logger.error("Система не запущена", e);

@@ -2,6 +2,7 @@ package ru.galkov.servers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.blacklist_source.BlacklistSource;
 
 import java.io.*;
 import java.net.URL;
