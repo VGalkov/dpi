@@ -8,7 +8,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-
+/**
+ * s0506777@yandex.ru Galkov V.A.
+ */
 public final class FileBlacklistSource implements BlacklistSource {
 
     private static final Logger logger = LoggerFactory.getLogger(FileBlacklistSource.class);
@@ -16,9 +18,8 @@ public final class FileBlacklistSource implements BlacklistSource {
     private final File file;
 
     public FileBlacklistSource(File file) {
-        if (file == null) {
+        if (file == null)
             throw new IllegalArgumentException("Файл blacklist не может быть null");
-        }
 
         this.file = file;
     }
@@ -97,9 +98,6 @@ public final class FileBlacklistSource implements BlacklistSource {
 
     @Override
     public String toString() {
-        return "FileBlacklistSource{" +
-                "file=" +
-                file.getAbsolutePath() +
-                '}';
+        return "FileBlacklistSource{file=" + file.getAbsolutePath() + '}';
     }
 }

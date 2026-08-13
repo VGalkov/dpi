@@ -9,7 +9,9 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.StringTokenizer;
-
+/**
+ * s0506777@yandex.ru Galkov V.A.
+ */
 public class ProxyHandler implements Runnable {
     private final Socket clientSocket;
     private final String clientIp;
@@ -25,8 +27,8 @@ public class ProxyHandler implements Runnable {
 
     @Override
     public void run() {
-        InputStream clientIn = null;
-        OutputStream clientOut = null;
+        InputStream clientIn;
+        OutputStream clientOut;
 
         try {
             clientIn = clientSocket.getInputStream();
@@ -39,7 +41,6 @@ public class ProxyHandler implements Runnable {
             }
 
             logger.trace("{} -> Request: {}", clientIp, firstLine);
-
             StringTokenizer st = new StringTokenizer(firstLine);
             if (!st.hasMoreTokens()) {
                 sendError(clientOut, 400, "Bad Request");
@@ -47,7 +48,6 @@ public class ProxyHandler implements Runnable {
             }
 
             String method = st.nextToken().toUpperCase();
-
             if (!st.hasMoreTokens()) {
                 sendError(clientOut, 400, "Bad Request (no target)");
                 return;
@@ -78,12 +78,9 @@ public class ProxyHandler implements Runnable {
     private void handleConnect(InputStream clientIn, OutputStream clientOut, String target) throws IOException {
 
         String line;
+        while ((line = readLine(clientIn)) != null)
+            if (line.isEmpty()) break;
 
-        while ((line = readLine(clientIn)) != null) {
-            if (line.isEmpty()) {
-                break;
-            }
-        }
 
         if (line == null) {
             sendError(
@@ -95,14 +92,12 @@ public class ProxyHandler implements Runnable {
         }
 
         int colonIndex = target.lastIndexOf(':');
-
         if (colonIndex <= 0 || colonIndex == target.length() - 1) {
             sendError(clientOut, 400, "Bad Request (invalid host and port)");
             return;
         }
 
         String host = target.substring(0, colonIndex);
-
         String portText = target.substring(colonIndex + 1);
 
         int port;
@@ -120,9 +115,8 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        if (host.startsWith("[") && host.endsWith("]")) {
+        if (host.startsWith("[") && host.endsWith("]"))
             host = host.substring(1, host.length() - 1);
-        }
 
         if (host.isEmpty()) {
             sendError(clientOut, 400, "Empty host");
@@ -132,11 +126,8 @@ public class ProxyHandler implements Runnable {
         logger.info("{} -> CONNECT {}:{}", clientIp, host, port);
 
         if (blacklist != null && blacklist.isBlocked(host, clientIp)) {
-
             logger.info("{} <- CONNECT заблокирован: {}:{}", clientIp, host, port);
-
             sendError(clientOut, 403, "Forbidden");
-
             return;
         }
 
@@ -144,7 +135,6 @@ public class ProxyHandler implements Runnable {
 
         try {
             remoteSocket.connect(new java.net.InetSocketAddress(host, port), 10000);
-
             remoteSocket.setTcpNoDelay(true);
             clientSocket.setTcpNoDelay(true);
 
@@ -155,9 +145,7 @@ public class ProxyHandler implements Runnable {
             }
 
             sendError(clientOut, 502, "Bad Gateway");
-
             logger.error("{} -> Не удалось подключиться к {}:{}", clientIp, host, port, e);
-
             return;
         }
 
@@ -175,14 +163,12 @@ public class ProxyHandler implements Runnable {
     private void handleHttp(InputStream clientIn, OutputStream clientOut, String firstLine, String target, String method) throws IOException {
         StringBuilder headersBuilder = new StringBuilder();
         headersBuilder.append(firstLine).append("\r\n");
-
         String line;
         String hostHeader = null;
         long contentLength = -1;
 
         while ((line = readLine(clientIn)) != null && !line.isEmpty()) {
             headersBuilder.append(line).append("\r\n");
-
             String lowerLine = line.toLowerCase();
             if (lowerLine.startsWith("host: ")) {
                 hostHeader = line.substring(5).trim();
@@ -206,15 +192,13 @@ public class ProxyHandler implements Runnable {
             }
         }
 
-        String finalHost = null;
+        String finalHost;
         int finalPort = 80;
 
         if (hostHeader != null) {
             String[] parts = hostHeader.split(":", 2);
             finalHost = parts[0];
-            if (parts.length > 1) {
-                finalPort = Integer.parseInt(parts[1]);
-            }
+            if (parts.length > 1) finalPort = Integer.parseInt(parts[1]);
         } else {
             java.net.URL url;
             if (target.startsWith("http://") || target.startsWith("https://")) {
@@ -247,7 +231,7 @@ public class ProxyHandler implements Runnable {
 
         OutputStream remoteOut = remoteSocket.getOutputStream();
 
-        String path = target;
+        String path;
         if (!target.startsWith("http://") && !target.startsWith("https://")) {
             path = target;
         } else {
@@ -272,7 +256,6 @@ public class ProxyHandler implements Runnable {
             clientOut.write(buffer, 0, len);
         }
         clientOut.flush();
-
         remoteSocket.close();
     }
 
@@ -306,13 +289,9 @@ public class ProxyHandler implements Runnable {
         }
     }
 
-    private void closeQuietly(
-            Socket socket) {
+    private void closeQuietly(Socket socket) {
 
-        if (socket == null) {
-            return;
-        }
-
+        if (socket == null) return;
         try {
             socket.close();
 
@@ -322,9 +301,7 @@ public class ProxyHandler implements Runnable {
     }
 
     private void pipe(Socket source, Socket destination, String direction) {
-
         byte[] buffer = new byte[8192];
-
         logger.info(
                 "Tunnel {}: поток запущен, source={}, destination={}",
                 direction,
@@ -335,7 +312,6 @@ public class ProxyHandler implements Runnable {
         try {
             InputStream input = source.getInputStream();
             OutputStream output = destination.getOutputStream();
-
             int length;
             while ((length = input.read(buffer)) != -1) {
                 output.write(buffer, 0, length);
@@ -354,10 +330,8 @@ public class ProxyHandler implements Runnable {
         while ((c = in.read()) != -1) {
             if (c == '\n') {
                 int length = sb.length();
-
-                if (length > 0 && sb.charAt(length - 1) == '\r') {
+                if (length > 0 && sb.charAt(length - 1) == '\r')
                     sb.setLength(length - 1);
-                }
                 return sb.toString();
             }
 

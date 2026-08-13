@@ -10,7 +10,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-
+/**
+ * s0506777@yandex.ru Galkov V.A.
+ */
 public final class BlacklistLoader {
     private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
     private final List<BlacklistSource> sources;
@@ -127,9 +129,7 @@ public final class BlacklistLoader {
     }
 
     private static String normalizeRule(String value) {
-        if (value == null) {
-            return null;
-        }
+        if (value == null) return null;
 
         String result = value.trim();
 
@@ -145,31 +145,20 @@ public final class BlacklistLoader {
     }
 
     private static boolean isIpLiteral(String value) {
-        if (value == null || value.isEmpty())
-            return false;
-
-        if (value.indexOf(':') >= 0)
-            return true;
-
+        if (value == null || value.isEmpty()) return false;
+        if (value.indexOf(':') >= 0) return true;
         return isIpv4Literal(value);
     }
 
     private static boolean isIpv4Literal(String value) {
         String[] parts = value.split("\\.", -1);
-
-        if (parts.length != 4) {
-            return false;
-        }
+        if (parts.length != 4) return false;
 
         for (String part : parts) {
-            if (part.isEmpty()) {
-                return false;
-            }
+            if (part.isEmpty()) return false;
 
             for (int i = 0; i < part.length(); i++) {
-                if (!Character.isDigit(part.charAt(i))) {
-                    return false;
-                }
+                if (!Character.isDigit(part.charAt(i))) return false;
             }
 
             try {
@@ -181,7 +170,6 @@ public final class BlacklistLoader {
                 return false;
             }
         }
-
         return true;
     }
 

@@ -12,7 +12,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-
+/**
+ * s0506777@yandex.ru Galkov V.A.
+ */
 public final class AdguardBlacklistSource implements BlacklistSource {
     private static final Logger logger = LoggerFactory.getLogger(AdguardBlacklistSource.class);
     private final String url;
@@ -20,7 +22,6 @@ public final class AdguardBlacklistSource implements BlacklistSource {
     private final int readTimeout;
 
     public AdguardBlacklistSource(String url, int connectTimeout, int readTimeout) {
-
         this.url = url;
         this.connectTimeout = connectTimeout;
         this.readTimeout = readTimeout;
@@ -30,36 +31,26 @@ public final class AdguardBlacklistSource implements BlacklistSource {
     public List<String> loadRules() throws IOException {
 
         logger.info("Начинается загрузка AdGuard blacklist: {}", url);
-
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(connectTimeout);
         connection.setReadTimeout(readTimeout);
         connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
-
         int status = connection.getResponseCode();
-
         logger.info("Ответ AdGuard: HTTP {}", status);
-
-        if (status != HttpURLConnection.HTTP_OK) {
+        if (status != HttpURLConnection.HTTP_OK)
             throw new IOException("AdGuard вернул HTTP-код " + status);
-        }
 
         List<String> rules = new ArrayList<>();
-
         try (
                 InputStream input = connection.getInputStream();
-
                 BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
         ) {
             String line;
             while ((line = reader.readLine()) != null) {
                 String value = normalizeLine(line);
-
-                if (value != null) {
+                if (value != null)
                     rules.add(value);
-                }
             }
 
         } finally {
@@ -71,46 +62,32 @@ public final class AdguardBlacklistSource implements BlacklistSource {
     }
 
     private String normalizeLine(String line) {
-
-        if (line == null) {
-            return null;
-        }
-
+        if (line == null) return null;
         String value = line.trim();
-
-        if (value.isEmpty() || value.startsWith("#") || value.startsWith("!")) {
+        if (value.isEmpty() || value.startsWith("#") || value.startsWith("!"))
             return null;
-        }
 
         String[] parts = value.split("\\s+");
-
-        if (parts.length >= 2 && looksLikeIp(parts[0])) {
+        if (parts.length >= 2 && looksLikeIp(parts[0]))
             value = parts[1];
-        }
+
 
         if (value.startsWith("||")) {
             value = value.substring(2);
-
             int separator = value.indexOf('^');
-            if (separator >= 0) {
+            if (separator >= 0)
                 value = value.substring(0, separator);
-            }
         }
-
 
         int slash = value.indexOf('/');
-
-        if (slash >= 0) {
+        if (slash >= 0)
             value = value.substring(0, slash);
-        }
 
         value = value.trim();
-
         return value.isEmpty() ? null : value;
     }
 
     private boolean looksLikeIp(String value) {
-
         return value.indexOf('.') >= 0 || value.indexOf(':') >= 0;
     }
 

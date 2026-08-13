@@ -69,9 +69,8 @@ public final class AppConfig {
                 }
             }
 
-            if (raw.isEmpty()) {
+            if (raw.isEmpty())
                 throw new IOException("⚠️ Конфиг не найден на диске или внутри JAR!");
-            }
 
         } catch (IOException e) {
             logger.error("❌ Ошибка загрузки конфигурации", e);
@@ -116,18 +115,15 @@ public final class AppConfig {
 
     public String get(String key) {
         String val = props.getProperty(key);
-        if (val == null) {
+        if (val == null)
             throw new IllegalStateException("Ключ '" + key + "' не найден в application.properties");
-        }
         return val;
     }
 
     public List<String> getList(String key) {
         String raw = get(key).trim();
-
-        if (raw.isEmpty()) {
+        if (raw.isEmpty())
             return Collections.emptyList();
-        }
 
         String[] parts = raw.split("\\s*,\\s*");
         List<String> result = new ArrayList<String>();
@@ -135,9 +131,8 @@ public final class AppConfig {
         for (String part : parts) {
             String value = part.trim();
 
-            if (!value.isEmpty() && !result.contains(value)) {
+            if (!value.isEmpty() && !result.contains(value))
                 result.add(value);
-            }
         }
 
         return Collections.unmodifiableList(result);

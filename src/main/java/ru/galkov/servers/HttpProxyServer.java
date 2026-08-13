@@ -13,7 +13,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
+/**
+ * s0506777@yandex.ru Galkov V.A.
+ */
 public class HttpProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
     private final BlacklistLoader blacklist;
@@ -23,9 +25,7 @@ public class HttpProxyServer {
     private volatile boolean running = false;
     private Thread serverThread;
 
-    public HttpProxyServer(
-            int port,
-            BlacklistLoader blacklist) {
+    public HttpProxyServer(int port, BlacklistLoader blacklist) {
 
         this.port = port;
         this.blacklist = Objects.requireNonNull(blacklist);

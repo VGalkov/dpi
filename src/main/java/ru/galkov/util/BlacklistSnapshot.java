@@ -4,7 +4,9 @@ import ru.galkov.DomainTrie;
 
 import java.util.Collections;
 import java.util.Set;
-
+/**
+ * s0506777@yandex.ru Galkov V.A.
+ */
 public final class BlacklistSnapshot {
 
     private final DomainTrie domainTrie;
@@ -15,16 +17,10 @@ public final class BlacklistSnapshot {
         this.ips = ips;
     }
 
-    /**
-     * Проверяет, заблокирован ли домен (включая поддомены).
-     */
     public boolean matchesDomain(String domain) {
         return domainTrie.isBlocked(domain);
     }
 
-    /**
-     * Проверяет, заблокирован ли IP.
-     */
     public boolean containsIp(String ip) {
         return ips.contains(ip);
     }

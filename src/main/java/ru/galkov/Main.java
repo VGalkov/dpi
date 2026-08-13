@@ -35,12 +35,17 @@ public class Main {
             config = AppConfig.getInstance();
             List<BlacklistSource> sources = new ArrayList<BlacklistSource>();
 
+
+
+            //1
             if (getConfig().getBoolean("blacklist.local.enabled")) {
                 FileBlacklistSource fileBlacklistSource = new FileBlacklistSource(new File(getConfig().get("blacklist.local.file")));
                 sources.add(fileBlacklistSource);
                 logger.info("Источник LocalFile добавлен: {}", fileBlacklistSource);
             }
 
+
+            //2
             if (getConfig().getBoolean("blacklist.adguard.enabled")) {
                 String adguardUrl = getConfig().get("blacklist.adguard.url");
                 logger.info("AdGuard blacklist: enabled={}, url={}", getConfig().getBoolean("blacklist.adguard.enabled"), adguardUrl);
@@ -55,6 +60,8 @@ public class Main {
                 logger.info("Источник AdGuard добавлен: {}", adguardSource);
             }
 
+
+            //3
             if (getConfig().getBoolean("blacklist.mvps_hosts.enabled")) {
                 String mvpsHostsUrl = getConfig().get("blacklist.mvps_hosts.url");
                 logger.info("MVPS Hosts blacklist: enabled={}, url={}",
@@ -71,7 +78,7 @@ public class Main {
                 logger.info("Источник MVPS Hosts добавлен: {}", mvpsHostsSource);
             }
 
-
+            //4
             if (getConfig().getBoolean("blacklist.rkn.enabled")) {
                 RknBlacklistSource rknBlacklistSource = new RknBlacklistSource(
                         Path.of(getConfig().get("blacklist.rkn.xml-file"))
@@ -80,11 +87,14 @@ public class Main {
                 logger.info("Источник РКН добавлен: {}", rknBlacklistSource);
             }
 
+
+
+
             blacklist = new BlacklistLoader(sources);
             blacklist.load();
             startProxyServer();
             startDnsServer();
-            logger.info("Система запущена!");
+            logger.info("Система запущена!"); //TODO поправить startDnsServer, а то сюда не доезжаем.
         } catch (Exception e) {
             logger.error("Система не запущена", e);
             Runtime.getRuntime().exit(-1);

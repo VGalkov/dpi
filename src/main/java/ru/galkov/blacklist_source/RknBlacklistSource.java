@@ -15,17 +15,17 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-
+/**
+ * s0506777@yandex.ru Galkov V.A.
+ */
 public final class RknBlacklistSource implements BlacklistSource {
 
     private static final Logger logger = LoggerFactory.getLogger(RknBlacklistSource.class);
-
     private final Path xmlFile;
 
     public RknBlacklistSource(Path xmlFile) {
-        if (xmlFile == null || !Files.isRegularFile(xmlFile)) {
+        if (xmlFile == null || !Files.isRegularFile(xmlFile))
             throw new IllegalArgumentException("Файл XML РКН не задан или не найден: " + xmlFile);
-        }
         this.xmlFile = xmlFile;
     }
 
@@ -40,7 +40,6 @@ public final class RknBlacklistSource implements BlacklistSource {
         List<String> rules = new ArrayList<>();
         Document document = parseXml(xmlBytes);
 
-        // Извлекаем все <content> элементы
         NodeList contentNodes = document.getElementsByTagNameNS("*", "content");
 
         for (int c = 0; c < contentNodes.getLength(); c++) {
@@ -100,8 +99,6 @@ public final class RknBlacklistSource implements BlacklistSource {
 
     @Override
     public String toString() {
-        return "RknBlacklistSource{" +
-                "xmlFile=" + xmlFile +
-                '}';
+        return "RknBlacklistSource{xmlFile=" + xmlFile + '}';
     }
 }

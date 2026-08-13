@@ -5,17 +5,15 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
+ * s0506777@yandex.ru Galkov V.A.
  * Префиксное дерево для быстрой проверки доменов.
  * Домены хранятся в обратном порядке (com → google → mail).
+ * * Пример: "mail.google.com" → com → google → mail (blocked=true)
  */
 public final class DomainTrie {
 
     private final Node root = new Node();
 
-    /**
-     * Добавляет домен в дерево.
-     * Пример: "mail.google.com" → com → google → mail (blocked=true)
-     */
     public void addDomain(String domain) {
         if (domain == null || domain.isEmpty()) {
             return;
