@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xbill.DNS.*;
 import org.xbill.DNS.Record;
+import ru.galkov.util.BlacklistLoader;
 
 import java.io.*;
 import java.net.*;

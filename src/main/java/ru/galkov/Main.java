@@ -6,9 +6,9 @@ import ru.galkov.blacklist_source.AdguardBlacklistSource;
 import ru.galkov.blacklist_source.BlacklistSource;
 import ru.galkov.blacklist_source.FileBlacklistSource;
 import ru.galkov.blacklist_source.RknBlacklistSource;
-import ru.galkov.servers.BlacklistLoader;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
+import ru.galkov.util.BlacklistLoader;
 
 import java.io.File;
 import java.nio.file.Path;

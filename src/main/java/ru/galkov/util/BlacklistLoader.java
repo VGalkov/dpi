@@ -1,4 +1,4 @@
-package ru.galkov.servers;
+package ru.galkov.util;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

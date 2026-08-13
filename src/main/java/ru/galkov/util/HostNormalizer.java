@@ -1,4 +1,4 @@
-package ru.galkov.servers;
+package ru.galkov.util;
 
 import java.net.InetAddress;
 import java.util.Locale;
