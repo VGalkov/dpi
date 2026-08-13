@@ -8,58 +8,39 @@ public final class HostNormalizer {
     private HostNormalizer() {
     }
 
-    public static String normalizeHost(
-            String value) {
+    public static String normalizeHost(String value) {
 
-        if (value == null ||
-                value.trim().isEmpty()) {
+        if (value == null || value.trim().isEmpty()) {
             return null;
         }
 
-        String host =
-                value.trim()
-                        .toLowerCase(Locale.ROOT);
+        String host = value.trim().toLowerCase(Locale.ROOT);
 
-        host =
-                removeTrailingDot(host);
+        host = removeTrailingDot(host);
 
         if (host.isEmpty()) {
             return null;
         }
 
-        /*
-         * IPv6 не является доменным именем.
-         */
         if (host.indexOf(':') >= 0) {
             return null;
         }
 
-        /*
-         * В доменное правило не должен попадать
-         * пробел или URL с путем.
-         */
-        if (host.indexOf(' ') >= 0 ||
-                host.indexOf('/') >= 0) {
+        if (host.indexOf(' ') >= 0 || host.indexOf('/') >= 0) {
             return null;
         }
 
         return host;
     }
 
-    public static String normalizeIp(
-            String value) {
+    public static String normalizeIp(String value) {
 
-        if (value == null ||
-                value.trim().isEmpty()) {
+        if (value == null || value.trim().isEmpty()) {
             return null;
         }
 
-        String ip =
-                value.trim();
+        String ip = value.trim();
 
-        /*
-         * CIDR пока не поддерживаем.
-         */
         if (ip.indexOf('/') >= 0) {
             return null;
         }
@@ -69,46 +50,35 @@ public final class HostNormalizer {
         }
 
         try {
-            return InetAddress
-                    .getByName(ip)
-                    .getHostAddress()
-                    .toLowerCase(Locale.ROOT);
+            return InetAddress.getByName(ip).getHostAddress().toLowerCase(Locale.ROOT);
 
         } catch (Exception e) {
             return null;
         }
     }
 
-    public static String removeTrailingDot(
-            String value) {
+    public static String removeTrailingDot(String value) {
 
         if (value == null) {
             return null;
         }
 
-        String result =
-                value;
+        String result = value;
 
         while (result.endsWith(".")) {
-            result =
-                    result.substring(
-                            0,
-                            result.length() - 1
-                    );
+            result = result.substring(0, result.length() - 1);
         }
 
         return result;
     }
 
-    private static boolean looksLikeIp(
-            String value) {
+    private static boolean looksLikeIp(String value) {
 
         if (value.indexOf(':') >= 0) {
             return true;
         }
 
-        String[] parts =
-                value.split("\\.", -1);
+        String[] parts = value.split("\\.", -1);
 
         if (parts.length != 4) {
             return false;
@@ -119,22 +89,17 @@ public final class HostNormalizer {
                 return false;
             }
 
-            for (int i = 0;
-                 i < part.length();
-                 i++) {
+            for (int i = 0; i < part.length(); i++) {
 
-                if (!Character.isDigit(
-                        part.charAt(i))) {
+                if (!Character.isDigit(part.charAt(i))) {
                     return false;
                 }
             }
 
             try {
-                int number =
-                        Integer.parseInt(part);
+                int number = Integer.parseInt(part);
 
-                if (number < 0 ||
-                        number > 255) {
+                if (number < 0 || number > 255) {
                     return false;
                 }
 

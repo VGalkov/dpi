@@ -9,7 +9,6 @@ import ru.galkov.blacklist_source.RknBlacklistSource;
 import ru.galkov.servers.BlacklistLoader;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
-import ru.galkov.servers.RknRequestSigner;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -30,7 +29,7 @@ public class Main {
     private static HttpProxyServer proxyServer;
     private static AppConfig config;
     private static BlacklistLoader blacklist;
-    static RknRequestSigner requestSigner;
+
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
@@ -75,9 +74,7 @@ public class Main {
 
             if (getConfig().getBoolean("blacklist.rkn.enabled")) {
                 RknBlacklistSource rknBlacklistSource = new RknBlacklistSource(
-                        getConfig().get("blacklist.rkn.endpoint"),
-                        Path.of(getConfig().get("blacklist.rkn.request-file")), Path.of(getConfig().get("blacklist.rkn.signature-file")), getConfig().getBoolean("blacklist.rkn.emchd-enabled"), Path.of(getConfig().get("blacklist.rkn.emchd-file")), getConfig().get("blacklist.rkn.emchd-file-name"), Path.of(getConfig().get("blacklist.rkn.emchd-signature-file")), getConfig().getInt("blacklist.rkn.poll-interval-seconds"), getConfig().getInt("blacklist.rkn.poll-timeout-seconds"), getConfig().getInt("blacklist.rkn.connect-timeout"), getConfig().getInt("blacklist.rkn.read-timeout"), getConfig().get("rkn.operator-name"), getConfig().get("rkn.inn"), getConfig().get("rkn.ogrn"), getConfig().get("rkn.email"), getConfig().get("rkn.timezone"),
-                        requestSigner
+                        Path.of(getConfig().get("blacklist.rkn.xml-file"))
                 );
                 sources.add(rknBlacklistSource);
                 logger.info("Источник РКН добавлен: {}", rknBlacklistSource);

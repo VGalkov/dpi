@@ -75,10 +75,7 @@ public class ProxyHandler implements Runnable {
         }
     }
 
-    private void handleConnect(
-            InputStream clientIn,
-            OutputStream clientOut,
-            String target) throws IOException {
+    private void handleConnect(InputStream clientIn, OutputStream clientOut, String target) throws IOException {
 
         String line;
 
@@ -100,12 +97,7 @@ public class ProxyHandler implements Runnable {
         int colonIndex = target.lastIndexOf(':');
 
         if (colonIndex <= 0 || colonIndex == target.length() - 1) {
-
-            sendError(
-                    clientOut,
-                    400,
-                    "Bad Request (invalid host and port)"
-            );
+            sendError(clientOut, 400, "Bad Request (invalid host and port)");
             return;
         }
 
@@ -133,59 +125,25 @@ public class ProxyHandler implements Runnable {
         }
 
         if (host.isEmpty()) {
-            sendError(
-                    clientOut,
-                    400,
-                    "Empty host"
-            );
+            sendError(clientOut, 400, "Empty host");
             return;
         }
 
-        logger.info(
-                "{} -> CONNECT {}:{}",
-                clientIp,
-                host,
-                port
-        );
+        logger.info("{} -> CONNECT {}:{}", clientIp, host, port);
 
-        /*
-         * Проверяем домен или IP до подключения.
-         * Порт в blacklist не передаётся, поэтому правило
-         * блокирует этот host на любом порту.
-         */
-        if (blacklist != null &&
-                blacklist.isBlocked(
-                        host,
-                        clientIp
-                )) {
+        if (blacklist != null && blacklist.isBlocked(host, clientIp)) {
 
-            logger.info(
-                    "{} <- CONNECT заблокирован: {}:{}",
-                    clientIp,
-                    host,
-                    port
-            );
+            logger.info("{} <- CONNECT заблокирован: {}:{}", clientIp, host, port);
 
-            sendError(
-                    clientOut,
-                    403,
-                    "Forbidden"
-            );
+            sendError(clientOut, 403, "Forbidden");
 
             return;
         }
 
-        Socket remoteSocket =
-                new Socket();
+        Socket remoteSocket = new Socket();
 
         try {
-            remoteSocket.connect(
-                    new java.net.InetSocketAddress(
-                            host,
-                            port
-                    ),
-                    10000
-            );
+            remoteSocket.connect(new java.net.InetSocketAddress(host, port), 10000);
 
             remoteSocket.setTcpNoDelay(true);
             clientSocket.setTcpNoDelay(true);
@@ -196,19 +154,9 @@ public class ProxyHandler implements Runnable {
             } catch (IOException ignored) {
             }
 
-            sendError(
-                    clientOut,
-                    502,
-                    "Bad Gateway"
-            );
+            sendError(clientOut, 502, "Bad Gateway");
 
-            logger.error(
-                    "{} -> Не удалось подключиться к {}:{}",
-                    clientIp,
-                    host,
-                    port,
-                    e
-            );
+            logger.error("{} -> Не удалось подключиться к {}:{}", clientIp, host, port, e);
 
             return;
         }
@@ -218,20 +166,10 @@ public class ProxyHandler implements Runnable {
                         "Proxy-Agent: MyProxy\r\n" +
                         "\r\n";
 
-        clientOut.write(
-                response.getBytes(
-                        StandardCharsets.ISO_8859_1
-                )
-        );
-
+        clientOut.write(response.getBytes(StandardCharsets.ISO_8859_1));
         clientOut.flush();
-
         logger.info("{} <- CONNECT туннель установлен: {}:{}", clientIp, host, port);
-
-        runTunnel(
-                clientSocket,
-                remoteSocket
-        );
+        runTunnel(clientSocket, remoteSocket);
     }
 
     private void handleHttp(InputStream clientIn, OutputStream clientOut, String firstLine, String target, String method) throws IOException {
@@ -338,39 +276,13 @@ public class ProxyHandler implements Runnable {
         remoteSocket.close();
     }
 
-    private void runTunnel(
-            final Socket client,
-            final Socket remote) {
+    private void runTunnel(final Socket client, final Socket remote) {
 
         Thread clientToRemote =
-                new Thread(
-                        new Runnable() {
-                            @Override
-                            public void run() {
-                                pipe(
-                                        client,
-                                        remote,
-                                        "client -> remote"
-                                );
-                            }
-                        },
-                        "Proxy-Tunnel-ClientToRemote"
-                );
+                new Thread(() -> pipe(client, remote, "client -> remote"), "Proxy-Tunnel-ClientToRemote");
 
         Thread remoteToClient =
-                new Thread(
-                        new Runnable() {
-                            @Override
-                            public void run() {
-                                pipe(
-                                        remote,
-                                        client,
-                                        "remote -> client"
-                                );
-                            }
-                        },
-                        "Proxy-Tunnel-RemoteToClient"
-                );
+                new Thread(() -> pipe(remote, client, "remote -> client"), "Proxy-Tunnel-RemoteToClient");
 
         clientToRemote.setDaemon(true);
         remoteToClient.setDaemon(true);
@@ -405,20 +317,13 @@ public class ProxyHandler implements Runnable {
             socket.close();
 
         } catch (IOException e) {
-            logger.trace(
-                    "Ошибка закрытия tunnel socket: {}",
-                    e.getMessage()
-            );
+            logger.trace("Ошибка закрытия tunnel socket: {}", e.getMessage());
         }
     }
 
-    private void pipe(
-            Socket source,
-            Socket destination,
-            String direction) {
+    private void pipe(Socket source, Socket destination, String direction) {
 
-        byte[] buffer =
-                new byte[8192];
+        byte[] buffer = new byte[8192];
 
         logger.info(
                 "Tunnel {}: поток запущен, source={}, destination={}",
@@ -427,7 +332,6 @@ public class ProxyHandler implements Runnable {
                 destination.getRemoteSocketAddress()
         );
 
-        //long totalBytes = 0L;
         try {
             InputStream input = source.getInputStream();
             OutputStream output = destination.getOutputStream();
@@ -436,15 +340,10 @@ public class ProxyHandler implements Runnable {
             while ((length = input.read(buffer)) != -1) {
                 output.write(buffer, 0, length);
                 output.flush();
-
-                //totalBytes += length;
-                //logger.info("Tunnel {}: передано {} байт, всего {}", direction, length, totalBytes);
             }
 
-            // logger.info("Tunnel {}: EOF, всего передано {} байт", direction, totalBytes);
+        } catch (IOException ignored) {
 
-        } catch (IOException e) {
-          //  logger.info("Tunnel {}: остановлен после {} байт: {}", direction, totalBytes, e.getMessage());
         }
     }
 
@@ -465,7 +364,7 @@ public class ProxyHandler implements Runnable {
             sb.append((char) c);
         }
 
-        return sb.length() > 0 ? sb.toString() : null;
+        return !sb.isEmpty() ? sb.toString() : null;
     }
 
     private void sendError(OutputStream out, int code, String message) throws IOException {

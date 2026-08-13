@@ -59,7 +59,7 @@ public class HttpProxyServer {
                     }
 
                     String clientIp = clientSocket.getInetAddress().getHostAddress();
-                    logger.trace("Принято соединение от " + clientIp + " на порт " + port);
+                    logger.trace("Принято соединение от {} на порт {}", clientIp, port);
 
                     workerPool.execute(new ProxyHandler(clientSocket, clientIp, blacklist));
                 }
@@ -78,10 +78,10 @@ public class HttpProxyServer {
         serverThread.setDaemon(false);
         serverThread.start();
 
-        waitForSocketReady(port);
+        waitForSocketReady();
     }
 
-    private void waitForSocketReady(int port) {
+    private void waitForSocketReady() {
         long timeout = System.currentTimeMillis() + 5000; // 5 секунд таймаут
         while (System.currentTimeMillis() < timeout) {
             try {

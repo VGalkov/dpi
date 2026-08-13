@@ -30,129 +30,69 @@ public final class FileBlacklistSource implements BlacklistSource {
 
         try (
                 InputStream input = openInputStream();
-
-                BufferedReader reader =
-                        new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
+                BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
         ) {
             String line;
-            int lineNumber = 0;
 
             while ((line = reader.readLine()) != null) {
-                lineNumber++;
-
                 String value = normalizeLine(line);
-
                 if (value == null) {
                     continue;
                 }
-
                 rules.add(value);
             }
 
-            logger.info(
-                    "Локальный blacklist загружен: {}, правил {}",
-                    file.getPath(),
-                    rules.size()
-            );
-
+            logger.info("Локальный blacklist загружен: {}, правил {}", file.getPath(), rules.size());
             return rules;
         }
     }
 
-    private InputStream openInputStream()
-            throws IOException {
+    private InputStream openInputStream() throws IOException {
 
-        /*
-         * Сначала ищем файл на диске.
-         * Путь может быть абсолютным или относительным.
-         */
         if (file.isFile()) {
-            logger.info(
-                    "Blacklist найден на диске: {}",
-                    file.getAbsolutePath()
-            );
-
+            logger.info("Blacklist найден на диске: {}", file.getAbsolutePath());
             return new FileInputStream(file);
         }
 
-        /*
-         * Затем ищем файл в classpath.
-         * Это позволяет читать blacklist.txt
-         * из src/main/resources или из JAR.
-         */
-        String resourceName =
-                file.getPath()
-                        .replace('\\', '/');
+        String resourceName = file.getPath().replace('\\', '/');
 
         while (resourceName.startsWith("/")) {
-            resourceName =
-                    resourceName.substring(1);
+            resourceName = resourceName.substring(1);
         }
 
-        ClassLoader classLoader =
-                FileBlacklistSource.class
-                        .getClassLoader();
+        ClassLoader classLoader = FileBlacklistSource.class.getClassLoader();
 
-        URL resource =
-                classLoader.getResource(
-                        resourceName
-                );
+        URL resource = classLoader.getResource(resourceName);
 
         if (resource != null) {
-            logger.info(
-                    "Blacklist найден в classpath: {}",
-                    resource.toExternalForm()
-            );
-
+            logger.info("Blacklist найден в classpath: {}", resource.toExternalForm());
             return resource.openStream();
         }
 
-        throw new FileNotFoundException(
-                "Blacklist не найден на диске или в classpath: " +
-                        file.getAbsolutePath()
+        throw new FileNotFoundException("Blacklist не найден на диске или в classpath: " + file.getAbsolutePath()
         );
     }
 
-    private String normalizeLine(
-            String line) {
+    private String normalizeLine(String line) {
 
         if (line == null) {
             return null;
         }
 
-        String value =
-                line.trim();
+        String value = line.trim();
 
-        /*
-         * Пустые строки и строки-комментарии
-         * полностью игнорируются.
-         */
-        if (value.isEmpty() ||
-                value.startsWith("#")) {
+        if (value.isEmpty() || value.startsWith("#")) {
             return null;
         }
 
-        /*
-         * Удаляем комментарий только начиная
-         * с символа #.
-         *
-         * Формат:
-         * example.com # пояснение
-         */
-        int commentIndex =
-                value.indexOf('#');
+
+        int commentIndex = value.indexOf('#');
 
         if (commentIndex >= 0) {
-            value =
-                    value.substring(
-                            0,
-                            commentIndex
-                    ).trim();
+            value = value.substring(0, commentIndex).trim();
         }
 
-        return value.isEmpty()
-                ? null
-                : value;
+        return value.isEmpty() ? null : value;
     }
 
     @Override

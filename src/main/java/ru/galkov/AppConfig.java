@@ -16,10 +16,8 @@ import java.util.*;
  */
 public final class AppConfig {
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
-
     private static final String DEFAULT_PATH = "application.properties";
-
-    private Properties props;
+    private final Properties props;
 
     private AppConfig(String path) throws IOException {
         this.props = load(path);
