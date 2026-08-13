@@ -7,37 +7,43 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class HttpProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
-
+    private final BlacklistLoader blacklist;
     private final int port;
     private final ExecutorService workerPool;
-    private final BlacklistLoader blacklist;
 
     private volatile boolean running = false;
     private Thread serverThread;
 
-    public HttpProxyServer(int port) {
+    public HttpProxyServer(
+            int port,
+            BlacklistLoader blacklist) {
+
         this.port = port;
-        this.workerPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2);
-        this.blacklist = new BlacklistLoader();
+        this.blacklist = Objects.requireNonNull(blacklist);
+        this.workerPool = Executors.newFixedThreadPool(
+                Runtime.getRuntime().availableProcessors() * 2
+        );
     }
 
     public void start() {
         if (running) {
-            logger.warn("Прокси сервер уже запущен на порту {}", port);
+            logger.warn("Прокси сервер уже запущен на порту {}", Optional.of(port));
             return;
         }
 
         running = true;
-        logger.info("Инициализация HTTP прокси на порту {}", port);
+        logger.info("Инициализация HTTP прокси на порту {}", Optional.of(port));
 
         serverThread = new Thread(() -> {
             try (ServerSocket serverSocket = new ServerSocket(port)) {
-                logger.info("HTTP Proxy успешно начал слушать порт {}", port);
+                logger.info("HTTP Proxy успешно начал слушать порт {}", Optional.of(port));
 
                 while (running) {
                     Socket clientSocket;
@@ -48,7 +54,7 @@ public class HttpProxyServer {
                             logger.debug("Прием соединений остановлен корректно.");
                             break;
                         }
-                        logger.error("Ошибка при попытке принять соединение на порту {}", port, e);
+                        logger.error("Ошибка при попытке принять соединение на порту {}", Optional.of(port), e);
                         continue;
                     }
 
@@ -59,9 +65,9 @@ public class HttpProxyServer {
                 }
             } catch (IOException e) {
                 if (running) {
-                    logger.error("Не удалось запустить HTTP Proxy на порту {}. Порт занят или нет прав доступа.", port, e);
+                    logger.error("Не удалось запустить HTTP Proxy на порту {}. Порт занят или нет прав доступа.", Optional.of(port), e);
                 } else {
-                    logger.info("HTTP Proxy корректно остановлен на порту {}", port);
+                    logger.info("HTTP Proxy корректно остановлен на порту {}", Optional.of(port));
                 }
             } finally {
                 workerPool.shutdown();
@@ -69,13 +75,13 @@ public class HttpProxyServer {
             }
         }, "HttpProxy-Server-Thread-" + port);
 
-        serverThread.setDaemon(false); // ВАЖНО: JVM не завершится, пока жив этот поток
+        serverThread.setDaemon(false);
         serverThread.start();
 
-        waitForSocketReady(port);
+        waitForSocketReady();
     }
 
-    private void waitForSocketReady(int port) {
+    private void waitForSocketReady() {
         long timeout = System.currentTimeMillis() + 5000; // 5 секунд таймаут
         while (System.currentTimeMillis() < timeout) {
             try {

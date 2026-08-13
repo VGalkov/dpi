@@ -16,10 +16,8 @@ import java.util.*;
  */
 public final class AppConfig {
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
-
     private static final String DEFAULT_PATH = "application.properties";
-
-    private Properties props;
+    private final Properties props;
 
     private AppConfig(String path) throws IOException {
         this.props = load(path);
@@ -125,11 +123,24 @@ public final class AppConfig {
     }
 
     public List<String> getList(String key) {
-        String raw = get(key);
-        if (raw.trim().isEmpty()) return Collections.emptyList();
+        String raw = get(key).trim();
+
+        if (raw.isEmpty()) {
+            return Collections.emptyList();
+        }
 
         String[] parts = raw.split("\\s*,\\s*");
-        return Arrays.asList(parts);
+        List<String> result = new ArrayList<String>();
+
+        for (String part : parts) {
+            String value = part.trim();
+
+            if (!value.isEmpty() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+
+        return Collections.unmodifiableList(result);
     }
 
     public Set<String> getSet(String key) {

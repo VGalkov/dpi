@@ -2,11 +2,13 @@ package ru.galkov.servers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.io.*;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.StringTokenizer;
-import java.io.*;
 
 public class ProxyHandler implements Runnable {
     private final Socket clientSocket;
@@ -68,50 +70,106 @@ public class ProxyHandler implements Runnable {
         } finally {
             try {
                 if (clientSocket != null) clientSocket.close();
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+            }
         }
     }
 
     private void handleConnect(InputStream clientIn, OutputStream clientOut, String target) throws IOException {
+
+        String line;
+
+        while ((line = readLine(clientIn)) != null) {
+            if (line.isEmpty()) {
+                break;
+            }
+        }
+
+        if (line == null) {
+            sendError(
+                    clientOut,
+                    400,
+                    "Incomplete CONNECT request"
+            );
+            return;
+        }
+
         int colonIndex = target.lastIndexOf(':');
-        if (colonIndex == -1) {
-            sendError(clientOut, 400, "Bad Request (missing port)");
+
+        if (colonIndex <= 0 || colonIndex == target.length() - 1) {
+            sendError(clientOut, 400, "Bad Request (invalid host and port)");
             return;
         }
 
         String host = target.substring(0, colonIndex);
+
+        String portText = target.substring(colonIndex + 1);
+
         int port;
+
         try {
-            port = Integer.parseInt(target.substring(colonIndex + 1));
+            port = Integer.parseInt(portText);
+
         } catch (NumberFormatException e) {
             sendError(clientOut, 400, "Invalid port");
+            return;
+        }
+
+        if (port < 1 || port > 65535) {
+            sendError(clientOut, 400, "Invalid port");
+            return;
+        }
+
+        if (host.startsWith("[") && host.endsWith("]")) {
+            host = host.substring(1, host.length() - 1);
+        }
+
+        if (host.isEmpty()) {
+            sendError(clientOut, 400, "Empty host");
             return;
         }
 
         logger.info("{} -> CONNECT {}:{}", clientIp, host, port);
 
         if (blacklist != null && blacklist.isBlocked(host, clientIp)) {
+
+            logger.info("{} <- CONNECT заблокирован: {}:{}", clientIp, host, port);
+
             sendError(clientOut, 403, "Forbidden");
+
             return;
         }
 
-        Socket remoteSocket;
+        Socket remoteSocket = new Socket();
+
         try {
-            remoteSocket = new Socket(host, port);
+            remoteSocket.connect(new java.net.InetSocketAddress(host, port), 10000);
+
+            remoteSocket.setTcpNoDelay(true);
+            clientSocket.setTcpNoDelay(true);
+
         } catch (IOException e) {
+            try {
+                remoteSocket.close();
+            } catch (IOException ignored) {
+            }
+
             sendError(clientOut, 502, "Bad Gateway");
-            logger.error("Failed to connect to {}:{}", host, port, e);
+
+            logger.error("{} -> Не удалось подключиться к {}:{}", clientIp, host, port, e);
+
             return;
         }
 
-        String response = "HTTP/1.1 200 Connection established\r\n" +
-                "Proxy-Agent: MyProxy\r\n" +
-                "\r\n";
+        String response =
+                "HTTP/1.1 200 Connection established\r\n" +
+                        "Proxy-Agent: MyProxy\r\n" +
+                        "\r\n";
+
         clientOut.write(response.getBytes(StandardCharsets.ISO_8859_1));
         clientOut.flush();
-
+        logger.info("{} <- CONNECT туннель установлен: {}:{}", clientIp, host, port);
         runTunnel(clientSocket, remoteSocket);
-
     }
 
     private void handleHttp(InputStream clientIn, OutputStream clientOut, String firstLine, String target, String method) throws IOException {
@@ -131,7 +189,8 @@ public class ProxyHandler implements Runnable {
             } else if (lowerLine.startsWith("content-length: ")) {
                 try {
                     contentLength = Long.parseLong(line.substring(15).trim());
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException ignored) {
+                }
             }
         }
         headersBuilder.append("\r\n");
@@ -217,75 +276,94 @@ public class ProxyHandler implements Runnable {
         remoteSocket.close();
     }
 
-    private void runTunnel(Socket client, Socket remote) {
-        Thread t1 = new Thread(() -> {
-            InputStream in = null;
-            OutputStream out = null;
-            try {
-                in = client.getInputStream();
-                out = remote.getOutputStream();
-                byte[] buf = new byte[8192];
-                int len;
-                while ((len = in.read(buf)) != -1) {
-                    out.write(buf, 0, len);
-                    out.flush(); // Важно для Windows/curl
-                }
-            } catch (IOException e) {
-                logger.debug("Tunnel thread 1 ended: {}", e.getMessage());
-            } finally {
-                try { if (in != null) in.close(); } catch (IOException ignored) {}
-                try { if (out != null) out.close(); } catch (IOException ignored) {}
-            }
-        });
+    private void runTunnel(final Socket client, final Socket remote) {
 
-        Thread t2 = new Thread(() -> {
-            InputStream in = null;
-            OutputStream out = null;
-            try {
-                in = remote.getInputStream();
-                out = client.getOutputStream();
-                byte[] buf = new byte[8192];
-                int len;
-                while ((len = in.read(buf)) != -1) {
-                    out.write(buf, 0, len);
-                    out.flush();
-                }
-            } catch (IOException e) {
-                logger.debug("Tunnel thread 2 ended: {}", e.getMessage());
-            } finally {
-                try { if (in != null) in.close(); } catch (IOException ignored) {}
-                try { if (out != null) out.close(); } catch (IOException ignored) {}
-            }
-        });
+        Thread clientToRemote =
+                new Thread(() -> pipe(client, remote, "client -> remote"), "Proxy-Tunnel-ClientToRemote");
 
-        t1.setDaemon(true);
-        t2.setDaemon(true);
-        t1.start();
-        t2.start();
+        Thread remoteToClient =
+                new Thread(() -> pipe(remote, client, "remote -> client"), "Proxy-Tunnel-RemoteToClient");
+
+        clientToRemote.setDaemon(true);
+        remoteToClient.setDaemon(true);
+
+        clientToRemote.start();
+        remoteToClient.start();
 
         try {
-            t1.join();
-            t2.join();
+            clientToRemote.join();
+            remoteToClient.join();
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+
+            closeQuietly(client);
+            closeQuietly(remote);
+
+        } finally {
+            closeQuietly(client);
+            closeQuietly(remote);
+        }
+    }
+
+    private void closeQuietly(
+            Socket socket) {
+
+        if (socket == null) {
+            return;
         }
 
-        try { client.close(); } catch (IOException ignored) {}
-        try { remote.close(); } catch (IOException ignored) {}
+        try {
+            socket.close();
+
+        } catch (IOException e) {
+            logger.trace("Ошибка закрытия tunnel socket: {}", e.getMessage());
+        }
+    }
+
+    private void pipe(Socket source, Socket destination, String direction) {
+
+        byte[] buffer = new byte[8192];
+
+        logger.info(
+                "Tunnel {}: поток запущен, source={}, destination={}",
+                direction,
+                source.getRemoteSocketAddress(),
+                destination.getRemoteSocketAddress()
+        );
+
+        try {
+            InputStream input = source.getInputStream();
+            OutputStream output = destination.getOutputStream();
+
+            int length;
+            while ((length = input.read(buffer)) != -1) {
+                output.write(buffer, 0, length);
+                output.flush();
+            }
+
+        } catch (IOException ignored) {
+
+        }
     }
 
     private String readLine(InputStream in) throws IOException {
         StringBuilder sb = new StringBuilder();
         int c;
+
         while ((c = in.read()) != -1) {
             if (c == '\n') {
-                if (!sb.toString().isEmpty() && sb.charAt(sb.length() - 1) == '\r') {
-                    sb.setLength(sb.length() - 1);
+                int length = sb.length();
+
+                if (length > 0 && sb.charAt(length - 1) == '\r') {
+                    sb.setLength(length - 1);
                 }
                 return sb.toString();
             }
+
             sb.append((char) c);
         }
+
         return !sb.isEmpty() ? sb.toString() : null;
     }
 
