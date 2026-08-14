@@ -621,19 +621,8 @@ public class ProxyHandler implements Runnable {
 
         HttpHeaders headers = readHttpHeaders(clientIn, firstLine);
 
-        if (headers.transferEncodingPresent) {
-            sendError(clientOut, 501, "Transfer-Encoding Not Implemented");
-            return;
-        }
-
         if (headers.expectContinuePresent) {
             sendError(clientOut, 417, "Expectation Failed");
-            return;
-        }
-
-        byte[] body = readRequestBody(clientIn, clientOut, headers.contentLength);
-
-        if (body == null) {
             return;
         }
 
@@ -672,20 +661,26 @@ public class ProxyHandler implements Runnable {
 
             remoteOut.write(finalRequest.getBytes(StandardCharsets.ISO_8859_1));
 
-            if (body.length > 0) {
-                remoteOut.write(body);
+            if (headers.chunked) {
+                relayChunkedRequestBody(clientIn, remoteOut);
+            } else if (headers.contentLength > 0) {
+                if (headers.contentLength > maxBodyBytes) {
+                    logger.info("{} {} {} {}",
+                            LogFields.kv("event", "PROXY_HTTP_BODY_TOO_LARGE"),
+                            LogFields.kv("client", clientIp),
+                            LogFields.kv("size", headers.contentLength),
+                            LogFields.kv("limit", maxBodyBytes));
+
+                    sendError(clientOut, 413, "Payload Too Large");
+                    return;
+                }
+
+                relayFixedRequestBody(clientIn, remoteOut, headers.contentLength);
             }
 
             remoteOut.flush();
 
-            byte[] buffer = new byte[8192];
-            int length;
-
-            while ((length = remoteIn.read(buffer)) != -1) {
-                clientOut.write(buffer, 0, length);
-            }
-
-            clientOut.flush();
+            relayHttpResponse(remoteIn, clientOut);
 
         } catch (SocketTimeoutException e) {
             logger.info("{} {} {} {}",
@@ -704,7 +699,7 @@ public class ProxyHandler implements Runnable {
         int totalHeaderBytes = firstLine.length() + 2;
         String hostHeader = null;
         Long contentLength = null;
-        boolean transferEncodingPresent = false;
+        boolean chunked = false;
         boolean expectContinuePresent = false;
 
         String line;
@@ -712,9 +707,8 @@ public class ProxyHandler implements Runnable {
         while ((line = readLine(clientIn, maxHeaderBytes)) != null && !line.isEmpty()) {
             totalHeaderBytes += line.length() + 2;
 
-            if (totalHeaderBytes > maxHeaderBytes) {
+            if (totalHeaderBytes > maxHeaderBytes)
                 throw new RequestTooLargeException("HTTP headers exceed " + maxHeaderBytes + " bytes");
-            }
 
             headersBuilder.append(line).append("\r\n");
 
@@ -725,26 +719,28 @@ public class ProxyHandler implements Runnable {
             } else if (lowerLine.startsWith("content-length:")) {
                 Long parsedLength = parseContentLength(line.substring(15).trim());
 
-                if (parsedLength == null) {
+                if (parsedLength == null)
                     throw new IOException("Invalid Content-Length");
-                }
 
-                if (contentLength != null && contentLength.longValue() != parsedLength.longValue()) {
+                if (contentLength != null && contentLength.longValue() != parsedLength.longValue())
                     throw new IOException("Conflicting Content-Length headers");
-                }
 
                 contentLength = parsedLength;
+
             } else if (lowerLine.startsWith("transfer-encoding:")) {
-                transferEncodingPresent = true;
+                String value = line.substring(18).trim().toLowerCase(Locale.ROOT);
+
+                if (value.contains("chunked"))
+                    chunked = true;
+
             } else if (lowerLine.startsWith("expect:")
                     && lowerLine.substring(7).trim().equals("100-continue")) {
                 expectContinuePresent = true;
             }
         }
 
-        if (line == null) {
+        if (line == null)
             throw new IOException("Incomplete HTTP request headers");
-        }
 
         headersBuilder.append("\r\n");
 
@@ -752,7 +748,7 @@ public class ProxyHandler implements Runnable {
                 headersBuilder.toString(),
                 hostHeader,
                 contentLength == null ? 0L : contentLength,
-                transferEncodingPresent,
+                chunked,
                 expectContinuePresent
         );
     }
@@ -1040,15 +1036,15 @@ public class ProxyHandler implements Runnable {
         private final String rawHeaders;
         private final String hostHeader;
         private final long contentLength;
-        private final boolean transferEncodingPresent;
+        private final boolean chunked;
         private final boolean expectContinuePresent;
 
         private HttpHeaders(String rawHeaders, String hostHeader, long contentLength,
-                            boolean transferEncodingPresent, boolean expectContinuePresent) {
+                            boolean chunked, boolean expectContinuePresent) {
             this.rawHeaders = rawHeaders;
             this.hostHeader = hostHeader;
             this.contentLength = contentLength;
-            this.transferEncodingPresent = transferEncodingPresent;
+            this.chunked = chunked;
             this.expectContinuePresent = expectContinuePresent;
         }
     }
@@ -1057,5 +1053,226 @@ public class ProxyHandler implements Runnable {
         private RequestTooLargeException(String message) {
             super(message);
         }
+    }
+
+    private void relayChunkedRequestBody(InputStream clientIn, OutputStream remoteOut) throws IOException {
+        byte[] buffer = new byte[8192];
+        long totalBytes = 0;
+
+        while (true) {
+            String chunkSizeLine = readLine(clientIn, 64);
+
+            if (chunkSizeLine == null)
+                throw new IOException("Unexpected end of chunked request body");
+
+            int semicolon = chunkSizeLine.indexOf(';');
+            String sizePart = semicolon >= 0 ? chunkSizeLine.substring(0, semicolon).trim() : chunkSizeLine.trim();
+
+            int chunkSize;
+
+            try {
+                chunkSize = Integer.parseInt(sizePart, 16);
+            } catch (NumberFormatException e) {
+                throw new IOException("Invalid chunk size: " + sizePart);
+            }
+
+            if (chunkSize < 0)
+                throw new IOException("Negative chunk size: " + chunkSize);
+
+            if (chunkSize == 0) {
+                readAndDiscardTrailers(clientIn);
+                break;
+            }
+
+            if (totalBytes + chunkSize > maxBodyBytes) {
+                logger.info("{} {} {} {}",
+                        LogFields.kv("event", "PROXY_HTTP_BODY_TOO_LARGE"),
+                        LogFields.kv("client", clientIp),
+                        LogFields.kv("size", totalBytes + chunkSize),
+                        LogFields.kv("limit", maxBodyBytes));
+
+                throw new RequestTooLargeException("Chunked body exceeds " + maxBodyBytes + " bytes");
+            }
+
+            int remaining = chunkSize;
+
+            while (remaining > 0) {
+                int toRead = Math.min(remaining, buffer.length);
+                int read = clientIn.read(buffer, 0, toRead);
+
+                if (read == -1)
+                    throw new IOException("Unexpected end of chunked request body");
+
+                remoteOut.write(buffer, 0, read);
+                remaining -= read;
+            }
+
+            totalBytes += chunkSize;
+
+            readLine(clientIn, 2);
+        }
+    }
+
+    private void readAndDiscardTrailers(InputStream clientIn) throws IOException {
+        String line;
+
+        while ((line = readLine(clientIn, maxHeaderBytes)) != null && !line.isEmpty()) {
+        }
+    }
+
+    private void relayFixedRequestBody(InputStream clientIn, OutputStream remoteOut, long contentLength)
+            throws IOException {
+
+        byte[] buffer = new byte[8192];
+        long remaining = contentLength;
+
+        while (remaining > 0) {
+            int toRead = (int) Math.min(remaining, buffer.length);
+            int read = clientIn.read(buffer, 0, toRead);
+
+            if (read == -1)
+                throw new IOException("Unexpected end of request body");
+
+            remoteOut.write(buffer, 0, read);
+            remaining -= read;
+        }
+    }
+
+    private void relayHttpResponse(InputStream remoteIn, OutputStream clientOut) throws IOException {
+        String statusLine = readLine(remoteIn, maxHeaderBytes);
+
+        if (statusLine == null) {
+            logger.warn("Empty response from upstream");
+            return;
+        }
+
+        writeLine(clientOut, statusLine);
+
+        long contentLength = -1;
+        boolean chunked = false;
+        boolean connectionClose = false;
+        String line;
+
+        while ((line = readLine(remoteIn, maxHeaderBytes)) != null && !line.isEmpty()) {
+            writeLine(clientOut, line);
+
+            String lower = line.toLowerCase(Locale.ROOT);
+
+            if (lower.startsWith("content-length:")) {
+                String value = line.substring(15).trim();
+                Long parsed = parseContentLength(value);
+
+                if (parsed != null)
+                    contentLength = parsed;
+
+            } else if (lower.startsWith("transfer-encoding:")) {
+                String value = line.substring(18).trim().toLowerCase(Locale.ROOT);
+
+                if (value.contains("chunked"))
+                    chunked = true;
+
+            } else if (lower.startsWith("connection:")) {
+                String value = line.substring(11).trim().toLowerCase(Locale.ROOT);
+
+                if (value.contains("close"))
+                    connectionClose = true;
+            }
+        }
+
+        if (line == null)
+            return;
+
+        writeLine(clientOut, "");
+
+        if (chunked) {
+            relayChunkedResponseBody(remoteIn, clientOut);
+        } else if (contentLength >= 0) {
+            relayFixedResponseBody(remoteIn, clientOut, contentLength);
+        } else {
+            relayUntilEof(remoteIn, clientOut);
+        }
+
+        clientOut.flush();
+    }
+
+    private void relayChunkedResponseBody(InputStream remoteIn, OutputStream clientOut) throws IOException {
+        byte[] buffer = new byte[8192];
+
+        while (true) {
+            String chunkSizeLine = readLine(remoteIn, 64);
+
+            if (chunkSizeLine == null)
+                break;
+
+            writeLine(clientOut, chunkSizeLine);
+
+            int semicolon = chunkSizeLine.indexOf(';');
+            String sizePart = semicolon >= 0 ? chunkSizeLine.substring(0, semicolon).trim() : chunkSizeLine.trim();
+
+            int chunkSize;
+
+            try {
+                chunkSize = Integer.parseInt(sizePart, 16);
+            } catch (NumberFormatException e) {
+                break;
+            }
+
+            if (chunkSize < 0)
+                break;
+
+            if (chunkSize == 0) {
+                String trailerLine;
+
+                while ((trailerLine = readLine(remoteIn, maxHeaderBytes)) != null && !trailerLine.isEmpty())
+                    writeLine(clientOut, trailerLine);
+
+                break;
+            }
+
+            int remaining = chunkSize;
+
+            while (remaining > 0) {
+                int toRead = Math.min(remaining, buffer.length);
+                int read = remoteIn.read(buffer, 0, toRead);
+
+                if (read == -1)
+                    throw new IOException("Unexpected end of chunked response body");
+
+                clientOut.write(buffer, 0, read);
+                remaining -= read;
+            }
+        }
+    }
+
+    private void relayFixedResponseBody(InputStream remoteIn, OutputStream clientOut, long contentLength)
+            throws IOException {
+
+        byte[] buffer = new byte[8192];
+        long remaining = contentLength;
+
+        while (remaining > 0) {
+            int toRead = (int) Math.min(remaining, buffer.length);
+            int read = remoteIn.read(buffer, 0, toRead);
+
+            if (read == -1)
+                throw new IOException("Unexpected end of response body");
+
+            clientOut.write(buffer, 0, read);
+            remaining -= read;
+        }
+    }
+
+    private void relayUntilEof(InputStream remoteIn, OutputStream clientOut) throws IOException {
+        byte[] buffer = new byte[8192];
+        int length;
+
+        while ((length = remoteIn.read(buffer)) != -1)
+            clientOut.write(buffer, 0, length);
+    }
+
+    private void writeLine(OutputStream out, String line) throws IOException {
+        out.write(line.getBytes(StandardCharsets.ISO_8859_1));
+        out.write('\r');
+        out.write('\n');
     }
 }
