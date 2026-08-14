@@ -663,6 +663,14 @@ public class DnsServer {
 
                 if (response != null) {
                     logger.info("Запрос [{}] от [{}] выполнен через {}", domain, clientIp, dns);
+
+                    if (response.getHeader().getFlag(Flags.TC)) {
+                        logger.info("Запрос [{}] от [{}]: получен truncated ответ (TC=1), делаем TCP fallback к {}",
+                                domain, clientIp, dns);
+
+                        response = forwardToResolverTcp(query, resolver, dns);
+                    }
+
                     return response;
                 }
 
@@ -673,7 +681,26 @@ public class DnsServer {
 
         return null;
     }
+    private Message forwardToResolverTcp(Message query, SimpleResolver resolver, String dns) {
+        try {
+            resolver.setTCP(true);
+            Message tcpResponse = resolver.send(query);
+            resolver.setTCP(false);
 
+            if (tcpResponse != null) {
+                logger.info("Запрос [{}]: TCP fallback через {} успешен", getQuestionName(query), dns);
+            }
+
+            return tcpResponse;
+
+        } catch (Exception e) {
+            logger.warn("Запрос [{}]: TCP fallback через {} не удался: {}",
+                    getQuestionName(query), dns, e.getMessage());
+
+            resolver.setTCP(false);
+            return null;
+        }
+    }
     private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, Message query) throws IOException {
         Message response = createRefusedResponse(query);
         byte[] responseBytes = response.toWire();
