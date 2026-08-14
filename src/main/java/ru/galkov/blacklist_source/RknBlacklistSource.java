@@ -3,8 +3,10 @@ package ru.galkov.blacklist_source;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import ru.galkov.util.LogFields;
+import ru.galkov.util.BlacklistRule;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -16,8 +18,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class RknBlacklistSource implements BlacklistSource {
 
@@ -31,54 +34,95 @@ public final class RknBlacklistSource implements BlacklistSource {
     }
 
     @Override
-    public List<String> loadRules() throws IOException {
+    public List<BlacklistRule> loadRules() throws IOException {
         byte[] xmlBytes = Files.readAllBytes(xmlFile);
-        logger.info("{} {}", LogFields.kv("event", "RKN_SOURCE_READ"), LogFields.kv("file", xmlFile.toAbsolutePath()));
+        logger.info("Чтение реестра РКН из файла: {}", xmlFile.toAbsolutePath());
         return parseRegisterXml(xmlBytes);
     }
 
-    private List<String> parseRegisterXml(byte[] xmlBytes) throws IOException {
-        List<String> rules = new ArrayList<>();
+    private List<BlacklistRule> parseRegisterXml(byte[] xmlBytes) throws IOException {
+        List<BlacklistRule> rules = new ArrayList<>();
         Document document = parseXml(xmlBytes);
 
         NodeList contentNodes = document.getElementsByTagNameNS("*", "content");
 
         for (int c = 0; c < contentNodes.getLength(); c++) {
-            var content = contentNodes.item(c);
-            var children = content.getChildNodes();
+            Node content = contentNodes.item(c);
+            NodeList children = content.getChildNodes();
+
+            String contentId = extractContentId(content);
+            String blockType = extractBlockType(content);
 
             for (int i = 0; i < children.getLength(); i++) {
-                var node = children.item(i);
+                Node node = children.item(i);
                 String tagName = node.getNodeName();
 
-                switch (tagName) {
-                    case "domain" -> {
-                        String domain = node.getTextContent().trim().toLowerCase(Locale.ROOT);
-                        if (domain.startsWith("*.")) {
-                            domain = domain.substring(2);
-                        }
-                        if (!domain.isBlank()) {
-                            rules.add(domain);
-                        }
+                if ("domain".equals(tagName)) {
+                    String domain = node.getTextContent().trim().toLowerCase(Locale.ROOT);
+                    if (domain.startsWith("*.")) {
+                        domain = domain.substring(2);
                     }
-                    case "ip" -> {
-                        String ip = node.getTextContent().trim();
-                        if (!ip.isBlank()) {
-                            rules.add(ip);
-                        }
+                    if (!domain.isBlank()) {
+                        rules.add(new BlacklistRule(
+                                BlacklistRule.RuleType.DOMAIN,
+                                domain,
+                                "RKN",
+                                contentId,
+                                blockType
+                        ));
                     }
-                    case "ipv6" -> {
-                        String ipv6 = node.getTextContent().trim();
-                        if (!ipv6.isBlank()) {
-                            rules.add(ipv6);
-                        }
+                } else if ("ip".equals(tagName)) {
+                    String ip = node.getTextContent().trim();
+                    if (!ip.isBlank()) {
+                        rules.add(new BlacklistRule(
+                                BlacklistRule.RuleType.IP,
+                                ip,
+                                "RKN",
+                                contentId,
+                                blockType
+                        ));
+                    }
+                } else if ("ipv6".equals(tagName)) {
+                    String ipv6 = node.getTextContent().trim();
+                    if (!ipv6.isBlank()) {
+                        rules.add(new BlacklistRule(
+                                BlacklistRule.RuleType.IP,
+                                ipv6,
+                                "RKN",
+                                contentId,
+                                blockType
+                        ));
                     }
                 }
             }
         }
 
-        logger.info("{} {}", LogFields.kv("event", "RKN_SOURCE_RULES_EXTRACTED"), LogFields.kv("rules", rules.size()));
+        logger.info("Из файла РКН извлечено правил: {}", rules.size());
         return rules;
+    }
+
+    private String extractContentId(Node content) {
+        NamedNodeMap attributes = content.getAttributes();
+
+        if (attributes == null)
+            return null;
+
+        Node idAttr = attributes.getNamedItem("id");
+
+        return idAttr != null ? idAttr.getNodeValue() : null;
+    }
+
+    private String extractBlockType(Node content) {
+        NodeList children = content.getChildNodes();
+
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+
+            if ("blockType".equals(node.getNodeName()))
+                return node.getTextContent().trim();
+        }
+
+        return null;
     }
 
     private Document parseXml(byte[] xmlBytes) throws IOException {

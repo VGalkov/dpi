@@ -2,6 +2,7 @@ package ru.galkov.blacklist_source;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.util.BlacklistRule;
 import ru.galkov.util.LogFields;
 
 import java.io.*;
@@ -26,9 +27,8 @@ public final class FileBlacklistSource implements BlacklistSource {
     }
 
     @Override
-    public List<String> loadRules() throws IOException {
-
-        List<String> rules = new ArrayList<String>();
+    public List<BlacklistRule> loadRules() throws IOException {
+        List<BlacklistRule> rules = new ArrayList<>();
 
         try (
                 InputStream input = openInputStream();
@@ -37,21 +37,41 @@ public final class FileBlacklistSource implements BlacklistSource {
             String line;
 
             while ((line = reader.readLine()) != null) {
-                String value = normalizeLine(line);
-                if (value == null) {
+                BlacklistRule rule = parseLine(line);
+                if (rule == null)
                     continue;
-                }
-                rules.add(value);
+                rules.add(rule);
             }
 
-            logger.info("{} {} {}",
-                    LogFields.kv("event", "FILE_SOURCE_LOADED"),
-                    LogFields.kv("file", file.getPath()),
-                    LogFields.kv("rules", rules.size()));
+            logger.info("Локальный blacklist загружен: {}, правил {}", file.getPath(), rules.size());
             return rules;
         }
     }
+    private BlacklistRule parseLine(String line) {
+        if (line == null)
+            return null;
 
+        String value = line.trim();
+
+        if (value.isEmpty() || value.startsWith("#"))
+            return null;
+
+        int commentIndex = value.indexOf('#');
+
+        if (commentIndex >= 0)
+            value = value.substring(0, commentIndex).trim();
+
+        if (value.isEmpty())
+            return null;
+
+        return new BlacklistRule(
+                BlacklistRule.RuleType.DOMAIN,
+                value,
+                "LocalFile",
+                null,
+                null
+        );
+    }
     private InputStream openInputStream() throws IOException {
 
         if (file.isFile()) {

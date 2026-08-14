@@ -2,7 +2,7 @@ package ru.galkov.blacklist_source;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.util.LogFields;
+import ru.galkov.util.BlacklistRule;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -29,40 +29,39 @@ public final class AdguardBlacklistSource implements BlacklistSource {
     }
 
     @Override
-    public List<String> loadRules() throws IOException {
-
-        logger.info("{} {}", LogFields.kv("event", "ADGUARD_SOURCE_LOAD_START"), LogFields.kv("url", url));
+    public List<BlacklistRule> loadRules() throws IOException {
+        logger.info("Начинается загрузка AdGuard blacklist: {}", url);
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(connectTimeout);
         connection.setReadTimeout(readTimeout);
         connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
         int status = connection.getResponseCode();
-        logger.info("{} {}", LogFields.kv("event", "ADGUARD_SOURCE_HTTP_STATUS"), LogFields.kv("status", status));
+        logger.info("Ответ AdGuard: HTTP {}", status);
         if (status != HttpURLConnection.HTTP_OK)
             throw new IOException("AdGuard вернул HTTP-код " + status);
 
-        List<String> rules = new ArrayList<>();
+        List<BlacklistRule> rules = new ArrayList<>();
         try (
                 InputStream input = connection.getInputStream();
                 BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
         ) {
             String line;
             while ((line = reader.readLine()) != null) {
-                String value = normalizeLine(line);
-                if (value != null)
-                    rules.add(value);
+                BlacklistRule rule = parseLine(line);
+                if (rule != null)
+                    rules.add(rule);
             }
 
         } finally {
             connection.disconnect();
         }
 
-        logger.info("{} {}", LogFields.kv("event", "ADGUARD_SOURCE_LOADED"), LogFields.kv("rules", rules.size()));
+        logger.info("AdGuard blacklist загружен: правил {}", rules.size());
         return rules;
     }
 
-    private String normalizeLine(String line) {
+    private BlacklistRule parseLine(String line) {
         if (line == null) return null;
         String value = line.trim();
         if (value.isEmpty() || value.startsWith("#") || value.startsWith("!"))
@@ -71,7 +70,6 @@ public final class AdguardBlacklistSource implements BlacklistSource {
         String[] parts = value.split("\\s+");
         if (parts.length >= 2 && looksLikeIp(parts[0]))
             value = parts[1];
-
 
         if (value.startsWith("||")) {
             value = value.substring(2);
@@ -85,7 +83,15 @@ public final class AdguardBlacklistSource implements BlacklistSource {
             value = value.substring(0, slash);
 
         value = value.trim();
-        return value.isEmpty() ? null : value;
+        if (value.isEmpty()) return null;
+
+        return new BlacklistRule(
+                BlacklistRule.RuleType.DOMAIN,
+                value,
+                "AdGuard",
+                null,
+                null
+        );
     }
 
     private boolean looksLikeIp(String value) {

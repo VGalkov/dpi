@@ -107,8 +107,9 @@ public final class BlacklistLoader implements AutoCloseable {
         for (BlacklistSource source : sources) {
             try {
                 long startedAt = System.currentTimeMillis();
-                logger.info("{} {}", LogFields.kv("event", "BLACKLIST_SOURCE_LOAD_START"), LogFields.kv("source", source));
-                List<String> rules = source.loadRules();
+                logger.info("Загрузка blacklist из источника: {}", source);
+                List<BlacklistRule> rules = source.loadRules();
+
                 if (rules == null) {
                     logger.warn("Источник {} вернул null вместо списка правил", source);
                     continue;
@@ -117,60 +118,69 @@ public final class BlacklistLoader implements AutoCloseable {
                 int sourceAcceptedRules = 0;
                 int sourceInvalidRules = 0;
 
-                for (String rawRule : rules) {
-                    String rule = normalizeRule(rawRule);
-
-                    if (rule == null) {
+                for (BlacklistRule rule : rules) {
+                    if (rule == null || rule.getValue() == null) {
                         sourceInvalidRules++;
                         continue;
                     }
 
-                    if (isIpLiteral(rule)) {
-                        String ip = HostNormalizer.normalizeIp(rule);
+                    String normalizedValue = normalizeRule(rule.getValue());
+
+                    if (normalizedValue == null) {
+                        sourceInvalidRules++;
+                        continue;
+                    }
+
+                    if (isIpLiteral(normalizedValue)) {
+                        String ip = HostNormalizer.normalizeIp(normalizedValue);
 
                         if (ip == null) {
                             sourceInvalidRules++;
-                            logger.debug("Источник {}: пропущен некорректный IP: {}", source, rule);
+                            logger.debug("Источник {}: пропущен некорректный IP: {}", source, normalizedValue);
                             continue;
                         }
 
                         if (!newIps.add(ip))
                             duplicateIps++;
+
                         sourceAcceptedRules++;
                         totalRules++;
                         continue;
                     }
 
-                    String domain = HostNormalizer.normalizeHost(rule);
+                    String domain = HostNormalizer.normalizeHost(normalizedValue);
 
                     if (domain == null) {
                         sourceInvalidRules++;
-                        logger.debug("Источник {}: пропущено некорректное доменное правило: {}", source, rule);
+                        logger.debug("Источник {}: пропущено некорректное доменное правило: {}", source, normalizedValue);
                         continue;
                     }
 
                     if (domain.startsWith("*.")) {
                         String subdomain = domain.substring(2);
                         newDomainTrie.addDomain(subdomain, DomainTrie.MatchType.WILDCARD);
-                    } else if (isSubtreeRule(rule, source)) {
+                    } else if (isSubtreeRule(normalizedValue, source)) {
                         newDomainTrie.addDomain(domain, DomainTrie.MatchType.SUBTREE);
                     } else {
                         newDomainTrie.addDomain(domain, DomainTrie.MatchType.EXACT);
                     }
+
                     sourceAcceptedRules++;
                     totalRules++;
                 }
 
                 loadedSources++;
                 invalidRules += sourceInvalidRules;
+
                 long durationMillis = System.currentTimeMillis() - startedAt;
-                logger.info("{} {} {} {} {} {}",
-                        LogFields.kv("event", "BLACKLIST_SOURCE_LOADED"),
-                        LogFields.kv("source", source),
-                        LogFields.kv("rulesReceived", rules.size()),
-                        LogFields.kv("rulesAccepted", sourceAcceptedRules),
-                        LogFields.kv("rulesInvalid", sourceInvalidRules),
-                        LogFields.kv("durationMs", durationMillis));
+                logger.info(
+                        "Источник blacklist загружен: source={}, получено={}, принято={}, некорректно={}, время={} мс",
+                        source,
+                        rules.size(),
+                        sourceAcceptedRules,
+                        sourceInvalidRules,
+                        durationMillis
+                );
 
             } catch (Exception e) {
                 logger.error("Не удалось загрузить blacklist из источника {}", source, e);
