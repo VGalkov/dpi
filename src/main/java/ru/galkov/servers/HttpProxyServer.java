@@ -4,7 +4,6 @@ package ru.galkov.servers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.BlacklistLoader;
-import ru.galkov.util.ProxyHandler;
 
 import java.io.IOException;
 import java.net.ServerSocket;

@@ -1,7 +1,9 @@
-package ru.galkov.util;
+package ru.galkov.servers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.util.BlacklistLoader;
+import ru.galkov.util.HostNormalizer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -15,15 +17,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.StringTokenizer;
 
+import static ru.galkov.Main.getConfig;
+
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506774@yandex.ru) Galkov V.A.
  */
 public class ProxyHandler implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(ProxyHandler.class);
 
-    private static final int CONNECT_TIMEOUT_MILLIS = 10000;
-    private static final int TLS_HELLO_TIMEOUT_MILLIS = 10000;
     private static final int MAX_TLS_RECORD_LENGTH = 18432;
     private static final int MAX_TLS_CLIENT_HELLO_LENGTH = 65536;
 
@@ -31,19 +33,35 @@ public class ProxyHandler implements Runnable {
     private final String clientIp;
     private final BlacklistLoader blacklist;
 
+    private final int connectTimeoutMillis;
+    private final int clientReadTimeoutMillis;
+    private final int remoteReadTimeoutMillis;
+    private final int maxHeaderBytes;
+    private final long maxBodyBytes;
+
     public ProxyHandler(Socket clientSocket, String clientIp, BlacklistLoader blacklist) {
         this.clientSocket = clientSocket;
         this.clientIp = clientIp;
         this.blacklist = blacklist;
+        this.connectTimeoutMillis = getConfig().getInt("proxy.connect-timeout-millis");
+        this.clientReadTimeoutMillis = getConfig().getInt("proxy.client-read-timeout-millis");
+        this.remoteReadTimeoutMillis = getConfig().getInt("proxy.remote-read-timeout-millis");
+        this.maxHeaderBytes = getConfig().getInt("proxy.max-header-bytes");
+        this.maxBodyBytes = getConfig().getLong("proxy.max-body-bytes");
+
+        validateLimits();
     }
 
     @Override
     public void run() {
         try {
+            clientSocket.setSoTimeout(clientReadTimeoutMillis);
+
             InputStream clientIn = clientSocket.getInputStream();
             OutputStream clientOut = clientSocket.getOutputStream();
 
-            String firstLine = readLine(clientIn);
+            String firstLine = readLine(clientIn, maxHeaderBytes);
+
             if (firstLine == null || firstLine.isEmpty()) {
                 logger.debug("{} -> Empty request", clientIp);
                 return;
@@ -52,12 +70,14 @@ public class ProxyHandler implements Runnable {
             logger.trace("{} -> Request: {}", clientIp, firstLine);
 
             StringTokenizer tokens = new StringTokenizer(firstLine);
+
             if (!tokens.hasMoreTokens()) {
                 sendError(clientOut, 400, "Bad Request");
                 return;
             }
 
             String method = tokens.nextToken().toUpperCase(Locale.ROOT);
+
             if (!tokens.hasMoreTokens()) {
                 sendError(clientOut, 400, "Bad Request (no target)");
                 return;
@@ -78,6 +98,14 @@ public class ProxyHandler implements Runnable {
 
             sendError(clientOut, 501, "Not Implemented");
 
+        } catch (RequestTooLargeException e) {
+            logger.info("{} <- HTTP request header is too large: {}", clientIp, e.getMessage());
+            sendErrorQuietly(431, "Request Header Fields Too Large");
+
+        } catch (SocketTimeoutException e) {
+            logger.info("{} <- HTTP connection timeout: {}", clientIp, e.getMessage());
+            sendErrorQuietly(408, "Request Timeout");
+
         } catch (IOException e) {
             if (!(e instanceof java.net.SocketException)) {
                 logger.warn("Network error for client {}: {}", clientIp, e.getMessage());
@@ -87,10 +115,33 @@ public class ProxyHandler implements Runnable {
         }
     }
 
+    private void validateLimits() {
+        if (connectTimeoutMillis <= 0) {
+            throw new IllegalArgumentException("proxy.connect-timeout-millis должен быть больше 0");
+        }
+
+        if (clientReadTimeoutMillis <= 0) {
+            throw new IllegalArgumentException("proxy.client-read-timeout-millis должен быть больше 0");
+        }
+
+        if (remoteReadTimeoutMillis <= 0) {
+            throw new IllegalArgumentException("proxy.remote-read-timeout-millis должен быть больше 0");
+        }
+
+        if (maxHeaderBytes < 1024) {
+            throw new IllegalArgumentException("proxy.max-header-bytes должен быть не меньше 1024");
+        }
+
+        if (maxBodyBytes < 0) {
+            throw new IllegalArgumentException("proxy.max-body-bytes не может быть отрицательным");
+        }
+    }
+
     private void handleConnect(InputStream clientIn, OutputStream clientOut, String target) throws IOException {
         readAndDiscardHeaders(clientIn);
 
         HostAndPort hostAndPort = parseConnectTarget(target);
+
         if (hostAndPort == null) {
             sendError(clientOut, 400, "Bad Request (invalid host and port)");
             return;
@@ -102,7 +153,7 @@ public class ProxyHandler implements Runnable {
         logger.info("{} -> CONNECT {}:{}", clientIp, host, port);
 
         if (isBlockedHostOrIp(host)) {
-            logger.info("{} <- CONNECT заблокирован по host/IP: {}:{}", clientIp, host, port);
+            logger.info("{} <- CONNECT blocked by host/IP: {}:{}", clientIp, host, port);
             sendError(clientOut, 403, "Forbidden");
             return;
         }
@@ -110,7 +161,8 @@ public class ProxyHandler implements Runnable {
         Socket remoteSocket = new Socket();
 
         try {
-            remoteSocket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MILLIS);
+            remoteSocket.connect(new InetSocketAddress(host, port), connectTimeoutMillis);
+            remoteSocket.setSoTimeout(remoteReadTimeoutMillis);
             remoteSocket.setTcpNoDelay(true);
             clientSocket.setTcpNoDelay(true);
 
@@ -124,9 +176,11 @@ public class ProxyHandler implements Runnable {
             clientOut.flush();
 
             byte[] clientHelloBytes = readInitialTlsHandshake(clientIn);
+
             if (clientHelloBytes == null) {
-                logger.warn("{} -> CONNECT {}:{}: TLS ClientHello не получен, SNI не проверен",
+                logger.warn("{} -> CONNECT {}:{}: TLS ClientHello not received, SNI not checked",
                         clientIp, host, port);
+
                 runTunnel(clientSocket, remoteSocket);
                 return;
             }
@@ -137,21 +191,32 @@ public class ProxyHandler implements Runnable {
                 logger.info("{} -> CONNECT {}:{}: SNI={}", clientIp, host, port, sniHost);
 
                 if (blacklist != null && blacklist.isBlockedDomain(sniHost)) {
-                    logger.info("{} <- CONNECT заблокирован по SNI: {}", clientIp, sniHost);
+                    logger.info("{} <- CONNECT blocked by SNI: {}", clientIp, sniHost);
                     closeQuietly(remoteSocket);
                     return;
                 }
             } else {
-                logger.warn("{} -> CONNECT {}:{}: SNI отсутствует или ClientHello не разобран",
+                logger.warn("{} -> CONNECT {}:{}: SNI missing or ClientHello cannot be parsed",
                         clientIp, host, port);
             }
 
             OutputStream remoteOut = remoteSocket.getOutputStream();
+
             remoteOut.write(clientHelloBytes);
             remoteOut.flush();
 
-            logger.info("{} <- CONNECT туннель установлен: {}:{}", clientIp, host, port);
+            logger.info("{} <- CONNECT tunnel established: {}:{}", clientIp, host, port);
+
             runTunnel(clientSocket, remoteSocket);
+
+        } catch (SocketTimeoutException e) {
+            closeQuietly(remoteSocket);
+
+            if (!clientSocket.isClosed()) {
+                sendError(clientOut, 504, "Gateway Timeout");
+            }
+
+            logger.info("{} -> CONNECT timeout {}:{}", clientIp, host, port);
 
         } catch (IOException e) {
             closeQuietly(remoteSocket);
@@ -160,15 +225,22 @@ public class ProxyHandler implements Runnable {
                 sendError(clientOut, 502, "Bad Gateway");
             }
 
-            logger.warn("{} -> Не удалось создать CONNECT-туннель {}:{}: {}",
+            logger.warn("{} -> Failed to create CONNECT tunnel {}:{}: {}",
                     clientIp, host, port, e.getMessage());
         }
     }
 
     private void readAndDiscardHeaders(InputStream clientIn) throws IOException {
+        int totalHeaderBytes = 0;
         String line;
 
-        while ((line = readLine(clientIn)) != null) {
+        while ((line = readLine(clientIn, maxHeaderBytes)) != null) {
+            totalHeaderBytes += line.length() + 2;
+
+            if (totalHeaderBytes > maxHeaderBytes) {
+                throw new RequestTooLargeException("CONNECT headers exceed " + maxHeaderBytes + " bytes");
+            }
+
             if (line.isEmpty()) {
                 return;
             }
@@ -195,6 +267,7 @@ public class ProxyHandler implements Runnable {
 
             host = target.substring(1, closingBracket);
             portText = target.substring(closingBracket + 2);
+
         } else {
             int colonIndex = target.lastIndexOf(':');
 
@@ -237,9 +310,10 @@ public class ProxyHandler implements Runnable {
         int originalTimeout = clientSocket.getSoTimeout();
 
         try {
-            clientSocket.setSoTimeout(TLS_HELLO_TIMEOUT_MILLIS);
+            clientSocket.setSoTimeout(Math.min(clientReadTimeoutMillis, 10000));
 
             byte[] firstHeader = readExactly(input, 5);
+
             if (firstHeader == null) {
                 return null;
             }
@@ -248,16 +322,18 @@ public class ProxyHandler implements Runnable {
             int recordLength = unsignedShort(firstHeader[3], firstHeader[4]);
 
             if (recordLength < 1 || recordLength > MAX_TLS_RECORD_LENGTH) {
-                logger.warn("{} -> TLS record имеет некорректную длину: {}", clientIp, recordLength);
+                logger.warn("{} -> TLS record has invalid length: {}", clientIp, recordLength);
                 return firstHeader;
             }
 
             byte[] firstPayload = readExactly(input, recordLength);
+
             if (firstPayload == null) {
                 return firstHeader;
             }
 
             ByteArrayOutputStream result = new ByteArrayOutputStream(5 + recordLength);
+
             result.write(firstHeader);
             result.write(firstPayload);
 
@@ -266,6 +342,7 @@ public class ProxyHandler implements Runnable {
             }
 
             int handshakeLength = getTlsHandshakeLength(firstPayload);
+
             if (handshakeLength < 0 || handshakeLength > MAX_TLS_CLIENT_HELLO_LENGTH) {
                 return result.toByteArray();
             }
@@ -275,6 +352,7 @@ public class ProxyHandler implements Runnable {
 
             while (alreadyReadHandshakeBytes < requiredHandshakeBytes) {
                 byte[] nextHeader = readExactly(input, 5);
+
                 if (nextHeader == null) {
                     break;
                 }
@@ -302,13 +380,19 @@ public class ProxyHandler implements Runnable {
                 }
 
                 alreadyReadHandshakeBytes += nextPayload.length;
+
+                if (result.size() > MAX_TLS_CLIENT_HELLO_LENGTH + 5 * 8) {
+                    logger.warn("{} -> TLS ClientHello exceeds configured maximum", clientIp);
+                    break;
+                }
             }
 
             return result.toByteArray();
 
         } catch (SocketTimeoutException e) {
-            logger.warn("{} -> Таймаут ожидания TLS ClientHello", clientIp);
+            logger.warn("{} -> Timeout waiting for TLS ClientHello", clientIp);
             return null;
+
         } finally {
             clientSocket.setSoTimeout(originalTimeout);
         }
@@ -355,7 +439,7 @@ public class ProxyHandler implements Runnable {
             int position = 4;
             int end = 4 + handshakeLength;
 
-            if (position + 2 + 32 > end) {
+            if (position + 34 > end) {
                 return null;
             }
 
@@ -367,7 +451,7 @@ public class ProxyHandler implements Runnable {
             }
 
             int sessionIdLength = unsignedByte(hello[position]);
-            position += 1;
+            position++;
 
             if (position + sessionIdLength > end) {
                 return null;
@@ -393,7 +477,7 @@ public class ProxyHandler implements Runnable {
             }
 
             int compressionMethodsLength = unsignedByte(hello[position]);
-            position += 1;
+            position++;
 
             if (position + compressionMethodsLength > end) {
                 return null;
@@ -401,11 +485,7 @@ public class ProxyHandler implements Runnable {
 
             position += compressionMethodsLength;
 
-            if (position == end) {
-                return null;
-            }
-
-            if (position + 2 > end) {
+            if (position == end || position + 2 > end) {
                 return null;
             }
 
@@ -438,7 +518,7 @@ public class ProxyHandler implements Runnable {
             return null;
 
         } catch (RuntimeException e) {
-            logger.debug("{} -> Ошибка разбора TLS ClientHello: {}", clientIp, e.getMessage());
+            logger.debug("{} -> TLS ClientHello parsing error: {}", clientIp, e.getMessage());
             return null;
         }
     }
@@ -517,54 +597,25 @@ public class ProxyHandler implements Runnable {
     private void handleHttp(InputStream clientIn, OutputStream clientOut, String firstLine,
                             String target, String method) throws IOException {
 
-        StringBuilder headersBuilder = new StringBuilder();
-        headersBuilder.append(firstLine).append("\r\n");
+        HttpHeaders headers = readHttpHeaders(clientIn, firstLine);
 
-        String line;
-        String hostHeader = null;
-        long contentLength = -1;
-
-        while ((line = readLine(clientIn)) != null && !line.isEmpty()) {
-            headersBuilder.append(line).append("\r\n");
-
-            String lowerLine = line.toLowerCase(Locale.ROOT);
-
-            if (lowerLine.startsWith("host: ")) {
-                hostHeader = line.substring(5).trim();
-            } else if (lowerLine.startsWith("content-length: ")) {
-                try {
-                    contentLength = Long.parseLong(line.substring(15).trim());
-                } catch (NumberFormatException ignored) {
-                }
-            }
+        if (headers.transferEncodingPresent) {
+            sendError(clientOut, 501, "Transfer-Encoding Not Implemented");
+            return;
         }
 
-        headersBuilder.append("\r\n");
-
-        byte[] body = new byte[0];
-
-        if (contentLength > 0) {
-            if (contentLength > Integer.MAX_VALUE) {
-                sendError(clientOut, 413, "Payload Too Large");
-                return;
-            }
-
-            body = new byte[(int) contentLength];
-
-            int totalRead = 0;
-
-            while (totalRead < contentLength) {
-                int read = clientIn.read(body, totalRead, (int) contentLength - totalRead);
-
-                if (read == -1) {
-                    break;
-                }
-
-                totalRead += read;
-            }
+        if (headers.expectContinuePresent) {
+            sendError(clientOut, 417, "Expectation Failed");
+            return;
         }
 
-        HostAndPort hostAndPort = resolveHttpTarget(hostHeader, target);
+        byte[] body = readRequestBody(clientIn, clientOut, headers.contentLength);
+
+        if (body == null) {
+            return;
+        }
+
+        HostAndPort hostAndPort = resolveHttpTarget(headers.hostHeader, target);
 
         if (hostAndPort == null) {
             sendError(clientOut, 400, "Cannot determine target host");
@@ -575,20 +626,22 @@ public class ProxyHandler implements Runnable {
         int finalPort = hostAndPort.port;
 
         if (isBlockedHostOrIp(finalHost)) {
-            logger.info("{} <- HTTP заблокирован по host/IP: {}:{}", clientIp, finalHost, finalPort);
+            logger.info("{} <- HTTP blocked by host/IP: {}:{}", clientIp, finalHost, finalPort);
             sendError(clientOut, 403, "Forbidden");
             return;
         }
 
         try (Socket remoteSocket = new Socket()) {
-            remoteSocket.connect(new InetSocketAddress(finalHost, finalPort), CONNECT_TIMEOUT_MILLIS);
+            remoteSocket.connect(new InetSocketAddress(finalHost, finalPort), connectTimeoutMillis);
+            remoteSocket.setSoTimeout(remoteReadTimeoutMillis);
 
             OutputStream remoteOut = remoteSocket.getOutputStream();
             InputStream remoteIn = remoteSocket.getInputStream();
 
             String path = extractHttpPath(target);
 
-            String finalRequest = method + " " + path + " HTTP/1.1\r\n" + headersBuilder;
+            String finalRequest = method + " " + path + " HTTP/1.1\r\n"
+                    + headers.rawHeaders;
 
             remoteOut.write(finalRequest.getBytes(StandardCharsets.ISO_8859_1));
 
@@ -606,7 +659,126 @@ public class ProxyHandler implements Runnable {
             }
 
             clientOut.flush();
+
+        } catch (SocketTimeoutException e) {
+            logger.info("{} -> HTTP upstream timeout {}:{}", clientIp, finalHost, finalPort);
+            sendError(clientOut, 504, "Gateway Timeout");
         }
+    }
+
+    private HttpHeaders readHttpHeaders(InputStream clientIn, String firstLine) throws IOException {
+        StringBuilder headersBuilder = new StringBuilder();
+        headersBuilder.append(firstLine).append("\r\n");
+
+        int totalHeaderBytes = firstLine.length() + 2;
+        String hostHeader = null;
+        Long contentLength = null;
+        boolean transferEncodingPresent = false;
+        boolean expectContinuePresent = false;
+
+        String line;
+
+        while ((line = readLine(clientIn, maxHeaderBytes)) != null && !line.isEmpty()) {
+            totalHeaderBytes += line.length() + 2;
+
+            if (totalHeaderBytes > maxHeaderBytes) {
+                throw new RequestTooLargeException("HTTP headers exceed " + maxHeaderBytes + " bytes");
+            }
+
+            headersBuilder.append(line).append("\r\n");
+
+            String lowerLine = line.toLowerCase(Locale.ROOT);
+
+            if (lowerLine.startsWith("host:")) {
+                hostHeader = line.substring(5).trim();
+            } else if (lowerLine.startsWith("content-length:")) {
+                Long parsedLength = parseContentLength(line.substring(15).trim());
+
+                if (parsedLength == null) {
+                    throw new IOException("Invalid Content-Length");
+                }
+
+                if (contentLength != null && contentLength.longValue() != parsedLength.longValue()) {
+                    throw new IOException("Conflicting Content-Length headers");
+                }
+
+                contentLength = parsedLength;
+            } else if (lowerLine.startsWith("transfer-encoding:")) {
+                transferEncodingPresent = true;
+            } else if (lowerLine.startsWith("expect:")
+                    && lowerLine.substring(7).trim().equals("100-continue")) {
+                expectContinuePresent = true;
+            }
+        }
+
+        if (line == null) {
+            throw new IOException("Incomplete HTTP request headers");
+        }
+
+        headersBuilder.append("\r\n");
+
+        return new HttpHeaders(
+                headersBuilder.toString(),
+                hostHeader,
+                contentLength == null ? 0L : contentLength,
+                transferEncodingPresent,
+                expectContinuePresent
+        );
+    }
+
+    private Long parseContentLength(String value) {
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+
+        try {
+            long contentLength = Long.parseLong(value);
+
+            if (contentLength < 0) {
+                return null;
+            }
+
+            return contentLength;
+
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private byte[] readRequestBody(InputStream clientIn, OutputStream clientOut, long contentLength)
+            throws IOException {
+
+        if (contentLength == 0) {
+            return new byte[0];
+        }
+
+        if (contentLength > maxBodyBytes) {
+            logger.info("{} <- HTTP body is too large: {} bytes, limit {} bytes",
+                    clientIp, contentLength, maxBodyBytes);
+
+            sendError(clientOut, 413, "Payload Too Large");
+            return null;
+        }
+
+        if (contentLength > Integer.MAX_VALUE) {
+            sendError(clientOut, 413, "Payload Too Large");
+            return null;
+        }
+
+        byte[] body = new byte[(int) contentLength];
+        int totalRead = 0;
+
+        while (totalRead < body.length) {
+            int read = clientIn.read(body, totalRead, body.length - totalRead);
+
+            if (read == -1) {
+                throw new IOException("Unexpected end of request body");
+            }
+
+            totalRead += read;
+        }
+
+        return body;
     }
 
     private HostAndPort resolveHttpTarget(String hostHeader, String target) {
@@ -617,7 +789,6 @@ public class ProxyHandler implements Runnable {
 
             if (target.startsWith("http://") || target.startsWith("https://")) {
                 URL url = new URL(target);
-
                 String host = url.getHost();
 
                 if (host == null || host.isEmpty()) {
@@ -705,11 +876,13 @@ public class ProxyHandler implements Runnable {
 
     private void runTunnel(final Socket client, final Socket remote) {
         Thread clientToRemote = new Thread(
-                () -> pipe(client, remote, "client -> remote"), "Proxy-Tunnel-ClientToRemote"
+                () -> pipe(client, remote, "client -> remote"),
+                "Proxy-Tunnel-ClientToRemote"
         );
 
         Thread remoteToClient = new Thread(
-                () -> pipe(remote, client, "remote -> client"), "Proxy-Tunnel-RemoteToClient"
+                () -> pipe(remote, client, "remote -> client"),
+                "Proxy-Tunnel-RemoteToClient"
         );
 
         clientToRemote.setDaemon(true);
@@ -746,43 +919,61 @@ public class ProxyHandler implements Runnable {
                 output.flush();
             }
 
+        } catch (SocketTimeoutException e) {
+            logger.debug("Tunnel {} timeout", direction);
         } catch (IOException e) {
-            logger.debug("Tunnel {} завершён: {}", direction, e.getMessage());
+            logger.debug("Tunnel {} ended: {}", direction, e.getMessage());
         }
     }
 
-    private String readLine(InputStream in) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        int c;
+    private String readLine(InputStream input, int maxLineBytes) throws IOException {
+        StringBuilder result = new StringBuilder();
 
-        while ((c = in.read()) != -1) {
-            if (c == '\n') {
-                int length = sb.length();
+        while (true) {
+            int currentByte = input.read();
 
-                if (length > 0 && sb.charAt(length - 1) == '\r') {
-                    sb.setLength(length - 1);
-                }
-
-                return sb.toString();
+            if (currentByte == -1) {
+                return result.isEmpty() ? null : result.toString();
             }
 
-            sb.append((char) c);
-        }
+            if (currentByte == '\n') {
+                int length = result.length();
 
-        return !sb.isEmpty() ? sb.toString() : null;
+                if (length > 0 && result.charAt(length - 1) == '\r') {
+                    result.setLength(length - 1);
+                }
+
+                return result.toString();
+            }
+
+            if (result.length() >= maxLineBytes) {
+                throw new RequestTooLargeException("HTTP line exceeds " + maxLineBytes + " bytes");
+            }
+
+            result.append((char) currentByte);
+        }
+    }
+
+    private void sendErrorQuietly(int code, String message) {
+        try {
+            if (!clientSocket.isClosed()) {
+                sendError(clientSocket.getOutputStream(), code, message);
+            }
+        } catch (IOException ignored) {
+        }
     }
 
     private void sendError(OutputStream out, int code, String message) throws IOException {
         String body = "<html><body><h1>" + code + " " + message + "</h1></body></html>";
 
         String response = "HTTP/1.1 " + code + " " + message + "\r\n"
-                + "Content-Type: text/html\r\n"
-                + "Content-Length: " + body.length() + "\r\n"
+                + "Content-Type: text/html; charset=UTF-8\r\n"
+                + "Content-Length: " + body.getBytes(StandardCharsets.UTF_8).length + "\r\n"
                 + "Connection: close\r\n"
                 + "\r\n"
                 + body;
 
-        out.write(response.getBytes(StandardCharsets.ISO_8859_1));
+        out.write(response.getBytes(StandardCharsets.UTF_8));
         out.flush();
     }
 
@@ -794,7 +985,7 @@ public class ProxyHandler implements Runnable {
         try {
             socket.close();
         } catch (IOException e) {
-            logger.trace("Ошибка закрытия socket: {}", e.getMessage());
+            logger.trace("Socket close error: {}", e.getMessage());
         }
     }
 
@@ -805,6 +996,29 @@ public class ProxyHandler implements Runnable {
         private HostAndPort(String host, int port) {
             this.host = host;
             this.port = port;
+        }
+    }
+
+    private static final class HttpHeaders {
+        private final String rawHeaders;
+        private final String hostHeader;
+        private final long contentLength;
+        private final boolean transferEncodingPresent;
+        private final boolean expectContinuePresent;
+
+        private HttpHeaders(String rawHeaders, String hostHeader, long contentLength,
+                            boolean transferEncodingPresent, boolean expectContinuePresent) {
+            this.rawHeaders = rawHeaders;
+            this.hostHeader = hostHeader;
+            this.contentLength = contentLength;
+            this.transferEncodingPresent = transferEncodingPresent;
+            this.expectContinuePresent = expectContinuePresent;
+        }
+    }
+
+    private static final class RequestTooLargeException extends IOException {
+        private RequestTooLargeException(String message) {
+            super(message);
         }
     }
 }
