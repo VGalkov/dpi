@@ -4,28 +4,35 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.blacklist_source.BlacklistSource;
 
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-/**
- * s0506777@yandex.ru Galkov V.A.
- */
-public final class BlacklistLoader {
-    private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
-    private final List<BlacklistSource> sources;
 
+import static ru.galkov.Main.getConfig;
+
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
+public final class BlacklistLoader implements AutoCloseable {
+
+    private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
+
+    private final List<BlacklistSource> sources;
     private final AtomicReference<BlacklistSnapshot> snapshot =
-            new AtomicReference<>(BlacklistSnapshot.empty());
+            new AtomicReference<BlacklistSnapshot>(BlacklistSnapshot.empty());
+
+    private final Object reloadLock = new Object();
 
     private volatile boolean loaded;
+    private volatile ScheduledExecutorService reloadExecutor;
 
     public BlacklistLoader(List<BlacklistSource> sources) {
-        if (sources == null) {
+        if (sources == null)
             throw new IllegalArgumentException("Список источников blacklist не может быть null");
-        }
-
         this.sources = List.copyOf(sources);
     }
 
@@ -34,35 +41,56 @@ public final class BlacklistLoader {
         return snapshot.get();
     }
 
-    public boolean isBlocked(String host, String clientIp) {
-        return isBlockedIp(clientIp) || isBlockedDomain(host);
-    }
-
     public boolean isBlockedIp(String ip) {
-        BlacklistSnapshot rules = snapshot();
         String normalizedIp = HostNormalizer.normalizeIp(ip);
-        return normalizedIp != null && rules.containsIp(normalizedIp);
-    }
-
-    public void load() {
-        ensureLoaded();
+        return normalizedIp != null && snapshot().containsIp(normalizedIp);
     }
 
     public boolean isBlockedDomain(String domain) {
-        BlacklistSnapshot rules = snapshot();
         String normalizedDomain = HostNormalizer.normalizeHost(domain);
-        return rules.matchesDomain(normalizedDomain);
+        return normalizedDomain != null && snapshot().matchesDomain(normalizedDomain);
+    }
+
+    /**
+     * Выполняет первую синхронную загрузку и запускает планировщик, если это включено в application.properties.
+     */
+    public void load() {
+        ensureLoaded();
+        startReloadScheduler();
+    }
+
+    /**
+     * Загружает источники немедленно.
+     * В отличие от первой загрузки не очищает активный blacklist при ошибке: прежний snapshot остаётся рабочим.
+     */
+    public boolean reloadNow() {
+        synchronized (reloadLock) {
+            try {
+                BlacklistSnapshot newSnapshot = buildSnapshot();
+                snapshot.set(newSnapshot);
+                loaded = true;
+
+                logger.info("Blacklist snapshot успешно атомарно обновлён");
+                return true;
+
+            } catch (Exception e) {
+                logger.error("Не удалось обновить blacklist. Предыдущий snapshot сохранён.", e);
+                return false;
+            }
+        }
     }
 
     private void ensureLoaded() {
         if (loaded) return;
-        synchronized (this) {
-            if (loaded) return;
 
+        synchronized (reloadLock) {
+            if (loaded) return;
             try {
-                loadInternal();
+                BlacklistSnapshot newSnapshot = buildSnapshot();
+                snapshot.set(newSnapshot);
+                logger.info("Blacklist впервые успешно загружен");
             } catch (Exception e) {
-                logger.error("Критическая ошибка загрузки blacklist", e);
+                logger.error("Критическая ошибка первой загрузки blacklist. Используется пустой snapshot.", e);
                 snapshot.set(BlacklistSnapshot.empty());
             } finally {
                 loaded = true;
@@ -70,15 +98,17 @@ public final class BlacklistLoader {
         }
     }
 
-    private void loadInternal() {
+    private BlacklistSnapshot buildSnapshot() {
         DomainTrie newDomainTrie = new DomainTrie();
-        Set<String> newIps = new HashSet<>();
-
+        Set<String> newIps = new HashSet<String>();
         int loadedSources = 0;
         int totalRules = 0;
+        int invalidRules = 0;
+        int duplicateIps = 0;
 
         for (BlacklistSource source : sources) {
             try {
+                long startedAt = System.currentTimeMillis();
                 logger.info("Загрузка blacklist из источника: {}", source);
                 List<String> rules = source.loadRules();
                 if (rules == null) {
@@ -86,57 +116,122 @@ public final class BlacklistLoader {
                     continue;
                 }
 
-                logger.info("Источник {} вернул правил: {}", source, rules.size());
-                loadedSources++;
+                int sourceAcceptedRules = 0;
+                int sourceInvalidRules = 0;
 
                 for (String rawRule : rules) {
                     String rule = normalizeRule(rawRule);
 
-                    if (rule == null) continue;
-                    if (isIpLiteral(rule)) {
-                        String ip = normalizeIp(rule);
-                        if (ip != null) {
-                            newIps.add(ip);
-                            totalRules++;
-                        } else {
-                            logger.debug("Пропущен некорректный IP: {}", rule);
-                        }
-                    } else {
-                        String domain = normalizeDomain(rule);
-                        if (domain != null) {
-                            newDomainTrie.addDomain(domain);
-                            totalRules++;
-                        } else {
-                            logger.debug("Пропущено некорректное доменное правило: {}", rule);
-                        }
+                    if (rule == null) {
+                        sourceInvalidRules++;
+                        continue;
                     }
+
+                    if (isIpLiteral(rule)) {
+                        String ip = HostNormalizer.normalizeIp(rule);
+
+                        if (ip == null) {
+                            sourceInvalidRules++;
+                            logger.debug("Источник {}: пропущен некорректный IP: {}", source, rule);
+                            continue;
+                        }
+
+                        if (!newIps.add(ip))
+                            duplicateIps++;
+                        sourceAcceptedRules++;
+                        totalRules++;
+                        continue;
+                    }
+
+                    String domain = HostNormalizer.normalizeHost(rule);
+
+                    if (domain == null) {
+                        sourceInvalidRules++;
+                        logger.debug("Источник {}: пропущено некорректное доменное правило: {}", source, rule);
+                        continue;
+                    }
+
+                    newDomainTrie.addDomain(domain);
+                    sourceAcceptedRules++;
+                    totalRules++;
                 }
+
+                loadedSources++;
+                invalidRules += sourceInvalidRules;
+
+                long durationMillis = System.currentTimeMillis() - startedAt;
+                logger.info(
+                        "Источник blacklist загружен: source={}, получено={}, принято={}, некорректно={}, время={} мс",
+                        source,
+                        rules.size(),
+                        sourceAcceptedRules,
+                        sourceInvalidRules,
+                        durationMillis
+                );
 
             } catch (Exception e) {
                 logger.error("Не удалось загрузить blacklist из источника {}", source, e);
             }
         }
 
-        Set<String> immutableIps = Collections.unmodifiableSet(new HashSet<>(newIps));
-        snapshot.set(new BlacklistSnapshot(newDomainTrie, immutableIps));
+        if (!sources.isEmpty() && loadedSources == 0) {
+            throw new IllegalStateException("Не удалось загрузить ни одного источника blacklist");
+        }
+
+        Set<String> immutableIps = Set.copyOf(newIps);
+        BlacklistSnapshot newSnapshot = new BlacklistSnapshot(newDomainTrie, immutableIps);
+
         logger.info(
-                "Blacklist загружен: источников {}, правил {}, IP {}",
+                "Новый blacklist snapshot собран: источников={}, правил={}, уникальных IP={}, дубликатов IP={}, некорректных правил={}",
                 loadedSources,
                 totalRules,
-                immutableIps.size()
+                immutableIps.size(),
+                duplicateIps,
+                invalidRules
         );
+
+        return newSnapshot;
+    }
+
+    private void startReloadScheduler() {
+        if (!getConfig().getBoolean("blacklist.reload.enabled")) {
+            logger.info("Периодическое обновление blacklist отключено");
+            return;
+        }
+
+        int intervalSeconds = getConfig().getInt("blacklist.reload.interval-seconds");
+
+        if (intervalSeconds <= 0) {
+            logger.warn(
+                    "Периодическое обновление blacklist отключено: некорректный интервал {}",
+                    intervalSeconds
+            );
+            return;
+        }
+
+        synchronized (reloadLock) {
+            if (reloadExecutor != null && !reloadExecutor.isShutdown())
+                return;
+
+            reloadExecutor = Executors.newSingleThreadScheduledExecutor(
+                    runnable -> {
+                        Thread thread = new Thread(runnable, "Blacklist-Reload-Thread");
+                        thread.setDaemon(true);
+                        return thread;
+                    }
+            );
+
+            reloadExecutor.scheduleWithFixedDelay(this::reloadNow, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+            logger.info("Периодическое обновление blacklist включено: каждые {} секунд", intervalSeconds);
+        }
     }
 
     private static String normalizeRule(String value) {
         if (value == null) return null;
-
         String result = value.trim();
-
-        if (result.isEmpty() || result.startsWith("#") || result.startsWith("!")) {
-            return null;
-        }
-
+        if (result.isEmpty() || result.startsWith("#") || result.startsWith("!")) return null;
         int commentIndex = result.indexOf('#');
+
         if (commentIndex >= 0)
             result = result.substring(0, commentIndex).trim();
 
@@ -152,9 +247,9 @@ public final class BlacklistLoader {
     private static boolean isIpv4Literal(String value) {
         String[] parts = value.split("\\.", -1);
         if (parts.length != 4) return false;
-
         for (String part : parts) {
             if (part.isEmpty()) return false;
+
 
             for (int i = 0; i < part.length(); i++) {
                 if (!Character.isDigit(part.charAt(i))) return false;
@@ -162,22 +257,30 @@ public final class BlacklistLoader {
 
             try {
                 int number = Integer.parseInt(part);
-                if (number < 0 || number > 255) {
+                if (number < 0 || number > 255)
                     return false;
-                }
+
             } catch (NumberFormatException e) {
                 return false;
             }
         }
+
         return true;
     }
 
-    private static String normalizeDomain(String value) {
-        return HostNormalizer.normalizeHost(value);
-    }
+    @Override
+    public void close() {
+        ScheduledExecutorService executor = reloadExecutor;
+        if (executor == null) return;
+        executor.shutdown();
 
-    private static String normalizeIp(String value) {
-        return HostNormalizer.normalizeIp(value);
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS))
+                executor.shutdownNow();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            executor.shutdownNow();
+        }
+        logger.info("Планировщик обновления blacklist остановлен");
     }
-
 }
