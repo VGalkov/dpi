@@ -1,80 +1,105 @@
 package ru.galkov.util;
 
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
- * Префиксное дерево для быстрой проверки доменов.
- * Домены хранятся в обратном порядке (com → google → mail).
- * * Пример: "mail.google.com" → com → google → mail (blocked=true)
+ *s0506777@yandex.ru Galkov V.A.
+ * DomainTrie с явными режимами правил:
+ * - EXACT: блокирует только сам домен
+ * - WILDCARD: блокирует только поддомены (*.example.org)
+ * - SUBTREE: блокирует домен и все поддомены
  */
 public final class DomainTrie {
 
-    private final Node root = new Node();
+    private final TrieNode root = new TrieNode();
 
-    public void addDomain(String domain) {
-        if (domain == null || domain.isEmpty()) {
-            return;
-        }
-
-        String[] parts = domain.split("\\.");
-        Node current = root;
-
-        // Идём с конца (TLD → поддомены)
-        for (int i = parts.length - 1; i >= 0; i--) {
-            String part = parts[i].toLowerCase(Locale.ROOT);
-            if (part.isEmpty()) {
-                continue;
-            }
-            current = child(current, part);
-        }
-
-        current.blocked = true;
+    public enum MatchType {
+        EXACT,
+        WILDCARD,
+        SUBTREE
     }
 
-    /**
-     * Проверяет, заблокирован ли домен или какой-либо его родитель.
-     * Пример: "sub.mail.google.com" проверяет com → google → mail → sub
-     */
-    public boolean isBlocked(String domain) {
-        if (domain == null || domain.isEmpty()) {
-            return false;
+    private static final class TrieNode {
+        private final Map<String, TrieNode> children = new HashMap<String, TrieNode>();
+        private boolean exactBlocked = false;
+        private boolean wildcardBlocked = false;
+        private boolean subtreeBlocked = false;
+    }
+
+    public void addDomain(String domain, MatchType matchType) {
+        if (domain == null || domain.isEmpty())
+            return;
+
+        String[] labels = splitDomain(domain);
+
+        if (labels.length == 0)
+            return;
+
+        TrieNode node = root;
+
+        for (int i = labels.length - 1; i >= 0; i--) {
+            String label = labels[i];
+
+            TrieNode child = node.children.get(label);
+
+            if (child == null) {
+                child = new TrieNode();
+                node.children.put(label, child);
+            }
+
+            node = child;
         }
 
-        String[] parts = domain.split("\\.");
-        Node current = root;
+        switch (matchType) {
+            case EXACT:
+                node.exactBlocked = true;
+                break;
+            case WILDCARD:
+                node.wildcardBlocked = true;
+                break;
+            case SUBTREE:
+                node.subtreeBlocked = true;
+                break;
+        }
+    }
 
-        // Идём с конца, проверяем каждый уровень
-        for (int i = parts.length - 1; i >= 0; i--) {
-            String part = parts[i].toLowerCase(Locale.ROOT);
-            if (part.isEmpty()) {
-                continue;
-            }
-            current = current.children.get(part);
-            if (current == null) {
+    public boolean matches(String domain) {
+        if (domain == null || domain.isEmpty())
+            return false;
+
+        String[] labels = splitDomain(domain);
+
+        if (labels.length == 0)
+            return false;
+
+        TrieNode node = root;
+
+        for (int i = labels.length - 1; i >= 0; i--) {
+            String label = labels[i];
+
+            node = node.children.get(label);
+
+            if (node == null)
                 return false;
-            }
-            if (current.blocked) {
+
+            if (node.subtreeBlocked)
                 return true;
-            }
+
+            if (i == 0 && node.exactBlocked)
+                return true;
+
+            if (i > 0 && node.wildcardBlocked)
+                return true;
         }
 
         return false;
     }
 
-    private Node child(Node node, String key) {
-        Node child = node.children.get(key);
-        if (child == null) {
-            child = new Node();
-            node.children.put(key, child);
-        }
-        return child;
-    }
+    private static String[] splitDomain(String domain) {
+        if (domain == null || domain.isEmpty())
+            return new String[0];
 
-    private static class Node {
-        private final Map<String, Node> children = new HashMap<>();
-        private boolean blocked = false;
+        return domain.split("\\.");
     }
 }

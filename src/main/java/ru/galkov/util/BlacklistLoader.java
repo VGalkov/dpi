@@ -3,6 +3,7 @@ package ru.galkov.util;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.blacklist_source.BlacklistSource;
+import ru.galkov.blacklist_source.RknBlacklistSource;
 
 import java.util.HashSet;
 import java.util.List;
@@ -148,14 +149,20 @@ public final class BlacklistLoader implements AutoCloseable {
                         continue;
                     }
 
-                    newDomainTrie.addDomain(domain);
+                    if (domain.startsWith("*.")) {
+                        String subdomain = domain.substring(2);
+                        newDomainTrie.addDomain(subdomain, DomainTrie.MatchType.WILDCARD);
+                    } else if (isSubtreeRule(rule, source)) {
+                        newDomainTrie.addDomain(domain, DomainTrie.MatchType.SUBTREE);
+                    } else {
+                        newDomainTrie.addDomain(domain, DomainTrie.MatchType.EXACT);
+                    }
                     sourceAcceptedRules++;
                     totalRules++;
                 }
 
                 loadedSources++;
                 invalidRules += sourceInvalidRules;
-
                 long durationMillis = System.currentTimeMillis() - startedAt;
                 logger.info("{} {} {} {} {} {}",
                         LogFields.kv("event", "BLACKLIST_SOURCE_LOADED"),
@@ -170,10 +177,8 @@ public final class BlacklistLoader implements AutoCloseable {
             }
         }
 
-        if (!sources.isEmpty() && loadedSources == 0) {
+        if (!sources.isEmpty() && loadedSources == 0)
             throw new IllegalStateException("Не удалось загрузить ни одного источника blacklist");
-        }
-
         Set<String> immutableIps = Set.copyOf(newIps);
         BlacklistSnapshot newSnapshot = new BlacklistSnapshot(newDomainTrie, immutableIps);
 
@@ -277,5 +282,14 @@ public final class BlacklistLoader implements AutoCloseable {
             executor.shutdownNow();
         }
         logger.info("{}", LogFields.kv("event", "BLACKLIST_RELOAD_SCHEDULER_STOPPED"));
+    }
+
+    private static boolean isSubtreeRule(String rule, BlacklistSource source) {
+        // RKN всегда subtree
+        if (source instanceof RknBlacklistSource)
+            return true;
+
+        // Остальные источники — exact
+        return false;
     }
 }

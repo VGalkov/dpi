@@ -16,7 +16,7 @@ public final class BlacklistSnapshot {
     }
 
     public boolean matchesDomain(String domain) {
-        return domainTrie.isBlocked(domain);
+        return domainTrie.matches(domain);
     }
 
     public boolean containsIp(String ip) {
