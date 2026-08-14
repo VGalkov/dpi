@@ -16,14 +16,6 @@ import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- * DNS forwarder с проверкой blacklist:
- * - имени в вопросе;
- * - IPv4/IPv6 PTR-запросов;
- * - owner name DNS-записей;
- * - target name у CNAME/DNAME/PTR/NS/MX/SRV;
- * - IPv4 в A-record;
- * - IPv6 в AAAA-record;
- * - rate limit по IP DNS-клиента.
  */
 public class DnsServer {
 
@@ -31,24 +23,217 @@ public class DnsServer {
     private static final String IPV4_PTR_SUFFIX = ".in-addr.arpa.";
     private static final String IPV6_PTR_SUFFIX = ".ip6.arpa.";
 
-    private final ExecutorService workerPool =
-            new ThreadPoolExecutor(
-                    getConfig().getInt("dns.thread.num"),
-                    getConfig().getInt("dns.thread.num"),
-                    0L,
-                    TimeUnit.MILLISECONDS,
-                    new ArrayBlockingQueue<Runnable>(500),
-                    new ThreadPoolExecutor.CallerRunsPolicy()
-            );
+    private final ExecutorService workerPool = new ThreadPoolExecutor(
+            getConfig().getInt("dns.thread.num"),
+            getConfig().getInt("dns.thread.num"),
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<Runnable>(500),
+            new ThreadPoolExecutor.CallerRunsPolicy()
+    );
 
     private final BlacklistLoader blacklist;
     private final Map<String, SimpleResolver> resolvers;
     private final DnsRateLimiter rateLimiter;
 
+    private final Object lifecycleLock = new Object();
+
+    private volatile boolean running;
+    private volatile DatagramSocket udpSocket;
+    private volatile ServerSocket tcpListener;
+    private volatile Thread tcpThread;
+
     public DnsServer(BlacklistLoader blacklist) {
         this.blacklist = Objects.requireNonNull(blacklist);
         this.resolvers = createResolvers();
         this.rateLimiter = createRateLimiter();
+    }
+
+    public void run() {
+        synchronized (lifecycleLock) {
+            if (running) {
+                logger.warn("DNS server уже запущен");
+                return;
+            }
+
+            running = true;
+        }
+
+        int port = getConfig().getInt("dns.local.port");
+
+        logger.info("Запуск DNS форвардера на порту {}", Optional.of(port));
+
+        try (
+                DatagramSocket localUdpSocket = new DatagramSocket(port);
+                ServerSocket localTcpListener = new ServerSocket(port)
+        ) {
+            udpSocket = localUdpSocket;
+            tcpListener = localTcpListener;
+
+            startTcpAcceptor(localTcpListener);
+
+            while (running) {
+                DatagramPacket request = new DatagramPacket(new byte[4096], 4096);
+
+                try {
+                    localUdpSocket.receive(request);
+                } catch (SocketException e) {
+                    if (!running) {
+                        break;
+                    }
+
+                    throw e;
+                }
+
+                if (!running) {
+                    break;
+                }
+
+                String clientIp = request.getAddress().getHostAddress();
+
+                logger.debug("UDP: Получен пакет от {}", clientIp);
+
+                try {
+                    workerPool.execute(() -> processUdpRequest(localUdpSocket, request));
+                } catch (RuntimeException e) {
+                    logger.warn("DNS worker pool отклонил UDP-запрос от {}: {}", clientIp, e.getMessage());
+                }
+            }
+
+        } catch (IOException e) {
+            if (running) {
+                logger.error("Критическая ошибка запуска DNS-сервера", e);
+            } else {
+                logger.info("DNS server остановлен");
+            }
+
+        } finally {
+            running = false;
+            udpSocket = null;
+            tcpListener = null;
+
+            shutdownWorkerPool();
+
+            logger.info("DNS server завершил работу");
+        }
+    }
+
+    public void stop() {
+        synchronized (lifecycleLock) {
+            if (!running) {
+                return;
+            }
+
+            logger.info("Остановка DNS server начата");
+
+            running = false;
+
+            closeQuietly(udpSocket);
+            closeQuietly(tcpListener);
+
+            Thread currentTcpThread = tcpThread;
+
+            if (currentTcpThread != null) {
+                currentTcpThread.interrupt();
+            }
+        }
+
+        shutdownWorkerPool();
+
+        logger.info("Остановка DNS server завершена");
+    }
+
+    private void startTcpAcceptor(ServerSocket serverSocket) {
+        tcpThread = new Thread(
+                () -> handleTcpConnections(serverSocket),
+                "DnsServer-TCP-Acceptor"
+        );
+
+        tcpThread.setDaemon(false);
+        tcpThread.start();
+    }
+
+    private void handleTcpConnections(ServerSocket serverSocket) {
+        while (running) {
+            try {
+                Socket socket = serverSocket.accept();
+
+                if (!running) {
+                    closeQuietly(socket);
+                    break;
+                }
+
+                String clientIp = socket.getInetAddress().getHostAddress();
+
+                logger.info("TCP: принято соединение от {}", clientIp);
+
+                try {
+                    workerPool.execute(() -> handleSingleTcpSession(socket));
+                } catch (RuntimeException e) {
+                    logger.warn("DNS worker pool отклонил TCP-соединение от {}: {}", clientIp, e.getMessage());
+                    closeQuietly(socket);
+                }
+
+            } catch (SocketException e) {
+                if (running) {
+                    logger.warn("TCP accept error: {}", e.getMessage());
+                }
+
+                break;
+
+            } catch (IOException e) {
+                if (running) {
+                    logger.debug("TCP accept error", e);
+                }
+            }
+        }
+
+        logger.info("DNS TCP acceptor завершён");
+    }
+
+    private void shutdownWorkerPool() {
+        workerPool.shutdown();
+
+        try {
+            if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
+                logger.warn("DNS worker pool не завершился за 10 секунд, выполняется shutdownNow");
+                workerPool.shutdownNow();
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            workerPool.shutdownNow();
+        }
+    }
+
+    private void closeQuietly(DatagramSocket socket) {
+        if (socket != null && !socket.isClosed()) {
+            socket.close();
+        }
+    }
+
+    private void closeQuietly(ServerSocket socket) {
+        if (socket == null || socket.isClosed()) {
+            return;
+        }
+
+        try {
+            socket.close();
+        } catch (IOException e) {
+            logger.debug("Ошибка закрытия DNS TCP listener: {}", e.getMessage());
+        }
+    }
+
+    private void closeQuietly(Socket socket) {
+        if (socket == null || socket.isClosed()) {
+            return;
+        }
+
+        try {
+            socket.close();
+        } catch (IOException e) {
+            logger.debug("Ошибка закрытия DNS client socket: {}", e.getMessage());
+        }
     }
 
     private DnsRateLimiter createRateLimiter() {
@@ -75,18 +260,10 @@ public class DnsServer {
             throw new IllegalArgumentException("dns.rate-limit.client-idle-seconds должен быть больше 0");
         }
 
-        logger.info(
-                "DNS rate limit включён: requestsPerSecond={}, burst={}, clientIdleSeconds={}",
-                requestsPerSecond,
-                burst,
-                clientIdleSeconds
-        );
+        logger.info("DNS rate limit включён: requestsPerSecond={}, burst={}, clientIdleSeconds={}",
+                requestsPerSecond, burst, clientIdleSeconds);
 
-        return new DnsRateLimiter(
-                requestsPerSecond,
-                burst,
-                TimeUnit.SECONDS.toNanos(clientIdleSeconds)
-        );
+        return new DnsRateLimiter(requestsPerSecond, burst, TimeUnit.SECONDS.toNanos(clientIdleSeconds));
     }
 
     private Map<String, SimpleResolver> createResolvers() {
@@ -113,33 +290,6 @@ public class DnsServer {
         return Collections.unmodifiableMap(result);
     }
 
-    public void run() {
-        int port = getConfig().getInt("dns.local.port");
-        logger.info("Запуск DNS форвардера на порту {}", Optional.of(port));
-
-        try (
-                DatagramSocket udpSocket = new DatagramSocket(port);
-                ServerSocket tcpListener = new ServerSocket(port)
-        ) {
-            Thread tcpThread = new Thread(() -> handleTcpConnections(tcpListener), "DnsServer-TCP-Acceptor");
-            tcpThread.setDaemon(true);
-            tcpThread.start();
-
-            while (!Thread.currentThread().isInterrupted()) {
-                DatagramPacket request = new DatagramPacket(new byte[4096], 4096);
-                udpSocket.receive(request);
-
-                String clientIp = request.getAddress().getHostAddress();
-                logger.debug("UDP: Получен пакет от {}", clientIp);
-
-                workerPool.execute(() -> processUdpRequest(udpSocket, request));
-            }
-
-        } catch (IOException e) {
-            logger.error("Критическая ошибка запуска DNS-сервера", e);
-        }
-    }
-
     private void processUdpRequest(DatagramSocket socket, DatagramPacket packet) {
         String clientIp = packet.getAddress().getHostAddress();
         int length = packet.getLength();
@@ -151,13 +301,7 @@ public class DnsServer {
 
         byte[] queryData = new byte[length];
 
-        System.arraycopy(
-                packet.getData(),
-                packet.getOffset(),
-                queryData,
-                0,
-                length
-        );
+        System.arraycopy(packet.getData(), packet.getOffset(), queryData, 0, length);
 
         Message query;
 
@@ -176,13 +320,8 @@ public class DnsServer {
         String questionName = getQuestionName(query);
 
         if (!rateLimiter.tryAcquire(clientIp)) {
-            logger.warn(
-                    "DNS_RATE_LIMIT client={} transport=UDP qname={} requestsPerSecond={} burst={}",
-                    clientIp,
-                    questionName,
-                    rateLimiter.getRequestsPerSecond(),
-                    rateLimiter.getBurst()
-            );
+            logger.warn("DNS_RATE_LIMIT client={} transport=UDP qname={} requestsPerSecond={} burst={}",
+                    clientIp, questionName, rateLimiter.getRequestsPerSecond(), rateLimiter.getBurst());
 
             try {
                 sendRefusedResponse(socket, packet, query);
@@ -216,7 +355,6 @@ public class DnsServer {
 
             try {
                 sendRefusedResponse(socket, packet, query);
-
             } catch (IOException e) {
                 logger.error("UDP [{}]: не удалось отправить REFUSED из-за отсутствия upstream", clientIp, e);
             }
@@ -244,23 +382,8 @@ public class DnsServer {
             logger.debug("UDP [{}] <- ответ отправлен для домена {}", clientIp, questionName);
 
         } catch (IOException e) {
-            logger.error("UDP [{}]: не удалось отправить ответ для домена {}", clientIp, questionName, e);
-        }
-    }
-
-    private void handleTcpConnections(ServerSocket serverSocket) {
-        while (!Thread.currentThread().isInterrupted()) {
-            try {
-                Socket socket = serverSocket.accept();
-                String clientIp = socket.getInetAddress().getHostAddress();
-
-                logger.info("TCP: принято соединение от {}", clientIp);
-                workerPool.execute(() -> handleSingleTcpSession(socket));
-
-            } catch (IOException e) {
-                if (!Thread.currentThread().isInterrupted()) {
-                    logger.debug("TCP accept error", e);
-                }
+            if (running) {
+                logger.error("UDP [{}]: не удалось отправить ответ для домена {}", clientIp, questionName, e);
             }
         }
     }
@@ -275,12 +398,11 @@ public class DnsServer {
         ) {
             DataInputStream dataInput = new DataInputStream(input);
 
-            while (!currentSocket.isClosed()) {
+            while (running && !currentSocket.isClosed()) {
                 int length;
 
                 try {
                     length = dataInput.readUnsignedShort();
-
                 } catch (EOFException e) {
                     break;
                 }
@@ -310,13 +432,8 @@ public class DnsServer {
                 String questionName = getQuestionName(query);
 
                 if (!rateLimiter.tryAcquire(clientIp)) {
-                    logger.warn(
-                            "DNS_RATE_LIMIT client={} transport=TCP qname={} requestsPerSecond={} burst={}",
-                            clientIp,
-                            questionName,
-                            rateLimiter.getRequestsPerSecond(),
-                            rateLimiter.getBurst()
-                    );
+                    logger.warn("DNS_RATE_LIMIT client={} transport=TCP qname={} requestsPerSecond={} burst={}",
+                            clientIp, questionName, rateLimiter.getRequestsPerSecond(), rateLimiter.getBurst());
 
                     sendTcpRefusedResponse(output, query);
                     continue;
@@ -356,7 +473,7 @@ public class DnsServer {
             }
 
         } catch (IOException e) {
-            if (!(e instanceof java.nio.channels.ClosedChannelException)) {
+            if (running && !(e instanceof java.nio.channels.ClosedChannelException)) {
                 logger.debug("TCP [{}]: ошибка сессии", clientIp, e);
             }
 
@@ -516,9 +633,7 @@ public class DnsServer {
         return null;
     }
 
-    private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, Message query)
-            throws IOException {
-
+    private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, Message query) throws IOException {
         Message response = createRefusedResponse(query);
         byte[] responseBytes = response.toWire();
 
@@ -704,13 +819,7 @@ public class DnsServer {
         }
 
         private static DnsRateLimiter disabled() {
-            return new DnsRateLimiter(
-                    false,
-                    0,
-                    0,
-                    0L,
-                    new ConcurrentHashMap<String, TokenBucket>()
-            );
+            return new DnsRateLimiter(false, 0, 0, 0L, new ConcurrentHashMap<String, TokenBucket>());
         }
 
         private DnsRateLimiter(int requestsPerSecond, int burst, long clientIdleNanos) {
@@ -718,24 +827,39 @@ public class DnsServer {
         }
 
         private boolean tryAcquire(String clientIp) {
-            if (!enabled) return true;
+            if (!enabled) {
+                return true;
+            }
+
             long now = System.nanoTime();
+
             cleanupIfNeeded(now);
+
             TokenBucket bucket = buckets.computeIfAbsent(clientIp, ignored -> new TokenBucket(burst, now));
+
             return bucket.tryAcquire(now, requestsPerSecond, burst);
         }
 
         private void cleanupIfNeeded(long now) {
             long cleanupIntervalNanos = Math.min(clientIdleNanos, TimeUnit.SECONDS.toNanos(60));
-            if (now < nextCleanupNanos) return;
+
+            if (now < nextCleanupNanos) {
+                return;
+            }
 
             synchronized (this) {
-                if (now < nextCleanupNanos) return;
+                if (now < nextCleanupNanos) {
+                    return;
+                }
+
                 for (Map.Entry<String, TokenBucket> entry : buckets.entrySet()) {
                     TokenBucket bucket = entry.getValue();
-                    if (now - bucket.getLastSeenNanos() > clientIdleNanos)
+
+                    if (now - bucket.getLastSeenNanos() > clientIdleNanos) {
                         buckets.remove(entry.getKey(), bucket);
+                    }
                 }
+
                 nextCleanupNanos = now + cleanupIntervalNanos;
             }
         }
@@ -766,12 +890,17 @@ public class DnsServer {
 
             if (elapsedNanos > 0) {
                 double newTokens = (elapsedNanos / 1_000_000_000.0d) * requestsPerSecond;
+
                 tokens = Math.min(burst, tokens + newTokens);
                 lastRefillNanos = now;
             }
 
             lastSeenNanos = now;
-            if (tokens < 1.0d) return false;
+
+            if (tokens < 1.0d) {
+                return false;
+            }
+
             tokens -= 1.0d;
             return true;
         }

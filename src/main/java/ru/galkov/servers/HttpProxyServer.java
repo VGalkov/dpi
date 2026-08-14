@@ -7,12 +7,11 @@ import ru.galkov.util.BlacklistLoader;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
+import java.util.Set;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static ru.galkov.Main.getConfig;
@@ -22,8 +21,7 @@ import static ru.galkov.Main.getConfig;
  */
 public class HttpProxyServer {
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(HttpProxyServer.class);
+    private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
 
     private final BlacklistLoader blacklist;
     private final int port;
@@ -33,74 +31,109 @@ public class HttpProxyServer {
     private final int maxConnectionsPerClient;
 
     private final Semaphore connectionSlots;
-    private final ConcurrentHashMap<String, AtomicInteger> connectionsByClient =
+    private final ConcurrentMap<String, AtomicInteger> connectionsByClient =
             new ConcurrentHashMap<String, AtomicInteger>();
 
+    private final Set<Socket> activeClientSockets =
+            ConcurrentHashMap.newKeySet();
+
+    private final Object lifecycleLock = new Object();
+
     private volatile boolean running;
-    private Thread serverThread;
+    private volatile ServerSocket serverSocket;
+    private volatile Thread serverThread;
 
     public HttpProxyServer(int port, BlacklistLoader blacklist) {
         this.port = port;
         this.blacklist = Objects.requireNonNull(blacklist);
         this.maxConnections = getConfig().getInt("proxy.max-connections");
         this.maxConnectionsPerClient = getConfig().getInt("proxy.max-connections-per-client");
+
         validateLimits();
+
         this.connectionSlots = new Semaphore(maxConnections, true);
         this.workerPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2);
     }
 
     public void start() {
-        if (running) {
-            logger.warn("Прокси сервер уже запущен на порту {}", Optional.of(port));
-            return;
+        synchronized (lifecycleLock) {
+            if (running) {
+                logger.warn("Прокси сервер уже запущен на порту {}", Optional.of(port));
+                return;
+            }
+
+            running = true;
+
+            logger.info("Инициализация HTTP proxy: port={}, maxConnections={}, maxConnectionsPerClient={}",
+                    port, maxConnections, maxConnectionsPerClient);
+
+            serverThread = new Thread(this::runServer, "HttpProxy-Server-Thread-" + port);
+            serverThread.setDaemon(false);
+            serverThread.start();
         }
 
-        running = true;
-
-        logger.info(
-                "Инициализация HTTP proxy: port={}, maxConnections={}, maxConnectionsPerClient={}",
-                port,
-                maxConnections,
-                maxConnectionsPerClient
-        );
-
-        serverThread = new Thread(this::runServer, "HttpProxy-Server-Thread-" + port);
-        serverThread.setDaemon(false);
-        serverThread.start();
         waitForSocketReady();
     }
 
+    public void stop() {
+        synchronized (lifecycleLock) {
+            if (!running) return;
+            logger.info("Остановка HTTP proxy начата: port={}", port);
+            running = false;
+            closeQuietly(serverSocket);
+            for (Socket clientSocket : activeClientSockets)
+                closeQuietly(clientSocket);
+        }
+
+        shutdownWorkerPool();
+        joinServerThread();
+        logger.info("Остановка HTTP proxy завершена: port={}", port);
+    }
+
     private void runServer() {
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
+        try (ServerSocket localServerSocket = new ServerSocket(port)) {
+            serverSocket = localServerSocket;
             logger.info("HTTP Proxy успешно начал слушать порт {}", port);
 
             while (running) {
                 Socket clientSocket;
 
                 try {
-                    clientSocket = serverSocket.accept();
-                } catch (IOException e) {
-                    if (!running) {
-                        logger.debug("Приём соединений прокси остановлен корректно");
-                        break;
-                    }
+                    clientSocket = localServerSocket.accept();
 
+                } catch (SocketException e) {
+                    if (!running) break;
+                    logger.warn("Ошибка accept HTTP proxy: {}", e.getMessage());
+                    continue;
+
+                } catch (IOException e) {
+                    if (!running) break;
                     logger.error("Ошибка при попытке принять соединение на порту {}", port, e);
                     continue;
                 }
+
+                if (!running) {
+                    closeQuietly(clientSocket);
+                    break;
+                }
+
                 handleAcceptedConnection(clientSocket);
             }
 
         } catch (IOException e) {
             if (running) {
                 logger.error("Не удалось запустить HTTP Proxy на порту {}. Порт занят или нет прав доступа.", port, e);
-            } else
+            } else {
                 logger.info("HTTP Proxy корректно остановлен на порту {}", port);
-
+            }
 
         } finally {
-            workerPool.shutdown();
-            logger.info("Пул потоков proxy-сервера остановлен");
+            serverSocket = null;
+            running = false;
+
+            shutdownWorkerPool();
+
+            logger.info("HTTP Proxy server thread завершён");
         }
     }
 
@@ -108,77 +141,82 @@ public class HttpProxyServer {
         String clientIp = clientSocket.getInetAddress().getHostAddress();
 
         if (!connectionSlots.tryAcquire()) {
-            logger.warn(
-                    "PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS " +
-                            "active={} limit={}",
-                    clientIp,
-                    maxConnections - connectionSlots.availablePermits(),
-                    maxConnections
-            );
+            logger.warn("PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS active={} limit={}",
+                    clientIp, maxConnections - connectionSlots.availablePermits(), maxConnections);
 
             closeQuietly(clientSocket);
             return;
         }
 
-        AtomicInteger clientConnections =
-                connectionsByClient.computeIfAbsent(clientIp, key -> new AtomicInteger());
-
+        AtomicInteger clientConnections = connectionsByClient.computeIfAbsent(clientIp, key -> new AtomicInteger());
         int activeForClient = clientConnections.incrementAndGet();
-
         if (activeForClient > maxConnectionsPerClient) {
             releaseConnectionSlot(clientIp, clientConnections);
-
-            logger.warn(
-                    "PROXY_CONNECTION_REJECT client={} " +
-                            "reason=MAX_CONNECTIONS_PER_CLIENT " +
-                            "activeForClient={} limit={}",
-                    clientIp,
-                    activeForClient,
-                    maxConnectionsPerClient
-            );
-
+            logger.warn("PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS_PER_CLIENT activeForClient={} limit={}",
+                    clientIp, activeForClient, maxConnectionsPerClient);
             closeQuietly(clientSocket);
             return;
         }
 
-        logger.debug(
-                "PROXY_CONNECTION_ACCEPT client={} active={} activeForClient={}",
-                clientIp,
-                maxConnections - connectionSlots.availablePermits(),
-                activeForClient
-        );
+        activeClientSockets.add(clientSocket);
+
+        logger.debug("PROXY_CONNECTION_ACCEPT client={} active={} activeForClient={}",
+                clientIp, maxConnections - connectionSlots.availablePermits(), activeForClient);
 
         try {
-            workerPool.execute(
-                    () -> {
-                        try {
-                            new ProxyHandler(clientSocket, clientIp, blacklist).run();
-                        } finally {
-                            releaseConnectionSlot(clientIp, clientConnections);
-                        }
-                    }
-            );
+            workerPool.execute(() -> {
+                try {
+                    new ProxyHandler(clientSocket, clientIp, blacklist).run();
+
+                } finally {
+                    activeClientSockets.remove(clientSocket);
+                    releaseConnectionSlot(clientIp, clientConnections);
+                }
+            });
 
         } catch (RuntimeException e) {
+            activeClientSockets.remove(clientSocket);
             releaseConnectionSlot(clientIp, clientConnections);
             closeQuietly(clientSocket);
+
             logger.error("Не удалось передать proxy-соединение в worker pool: client={}", clientIp, e);
         }
     }
 
     private void releaseConnectionSlot(String clientIp, AtomicInteger clientConnections) {
-
         int remaining = clientConnections.decrementAndGet();
+
         if (remaining <= 0)
             connectionsByClient.remove(clientIp, clientConnections);
-
         connectionSlots.release();
-        logger.debug(
-                "PROXY_CONNECTION_CLOSE client={} active={} activeForClient={}",
-                clientIp,
-                maxConnections - connectionSlots.availablePermits(),
-                Math.max(remaining, 0)
-        );
+        logger.debug("PROXY_CONNECTION_CLOSE client={} active={} activeForClient={}",
+                clientIp, maxConnections - connectionSlots.availablePermits(), Math.max(remaining, 0));
+    }
+
+    private void shutdownWorkerPool() {
+        workerPool.shutdown();
+
+        try {
+            if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
+                logger.warn("Proxy worker pool не завершился за 10 секунд, выполняется shutdownNow");
+                workerPool.shutdownNow();
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            workerPool.shutdownNow();
+        }
+    }
+
+    private void joinServerThread() {
+        Thread currentServerThread = serverThread;
+        if (currentServerThread == null || currentServerThread == Thread.currentThread())
+            return;
+        try {
+            currentServerThread.join(5000L);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void validateLimits() {
@@ -188,16 +226,31 @@ public class HttpProxyServer {
             throw new IllegalArgumentException("proxy.max-connections-per-client должен быть больше 0");
         if (maxConnectionsPerClient > maxConnections)
             throw new IllegalArgumentException("proxy.max-connections-per-client не может быть больше proxy.max-connections");
-
     }
 
-    private void closeQuietly(Socket socket) {
-        if (socket == null) return;
+    private void closeQuietly(ServerSocket socket) {
+        if (socket == null || socket.isClosed()) {
+            return;
+        }
 
         try {
             socket.close();
+
         } catch (IOException e) {
-            logger.debug("Ошибка закрытия отклонённого proxy-соединения: {}", e.getMessage());
+            logger.debug("Ошибка закрытия HTTP proxy listener: {}", e.getMessage());
+        }
+    }
+
+    private void closeQuietly(Socket socket) {
+        if (socket == null || socket.isClosed()) {
+            return;
+        }
+
+        try {
+            socket.close();
+
+        } catch (IOException e) {
+            logger.debug("Ошибка закрытия proxy socket: {}", e.getMessage());
         }
     }
 
@@ -205,13 +258,19 @@ public class HttpProxyServer {
         long timeout = System.currentTimeMillis() + 5000L;
 
         while (System.currentTimeMillis() < timeout) {
+            if (serverSocket != null && serverSocket.isBound() && !serverSocket.isClosed()) {
+                return;
+            }
+
             try {
-                Thread.sleep(100L);
+                Thread.sleep(50L);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             }
         }
+
+        logger.warn("HTTP Proxy не подтвердил открытие порта {} за 5 секунд", port);
     }
 }
