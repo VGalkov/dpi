@@ -10,23 +10,20 @@ import java.io.*;
 import java.net.*;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import static ru.galkov.Main.getConfig;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
- *
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  * DNS forwarder с проверкой blacklist:
  * - имени в вопросе;
  * - IPv4/IPv6 PTR-запросов;
  * - owner name DNS-записей;
  * - target name у CNAME/DNAME/PTR/NS/MX/SRV;
  * - IPv4 в A-record;
- * - IPv6 в AAAA-record.
+ * - IPv6 в AAAA-record;
+ * - rate limit по IP DNS-клиента.
  */
 public class DnsServer {
 
@@ -46,18 +43,55 @@ public class DnsServer {
 
     private final BlacklistLoader blacklist;
     private final Map<String, SimpleResolver> resolvers;
+    private final DnsRateLimiter rateLimiter;
 
     public DnsServer(BlacklistLoader blacklist) {
         this.blacklist = Objects.requireNonNull(blacklist);
         this.resolvers = createResolvers();
+        this.rateLimiter = createRateLimiter();
+    }
+
+    private DnsRateLimiter createRateLimiter() {
+        boolean enabled = getConfig().getBoolean("dns.rate-limit.enabled");
+
+        if (!enabled) {
+            logger.info("DNS rate limit отключён");
+            return DnsRateLimiter.disabled();
+        }
+
+        int requestsPerSecond = getConfig().getInt("dns.rate-limit.requests-per-second");
+        int burst = getConfig().getInt("dns.rate-limit.burst");
+        int clientIdleSeconds = getConfig().getInt("dns.rate-limit.client-idle-seconds");
+
+        if (requestsPerSecond <= 0) {
+            throw new IllegalArgumentException("dns.rate-limit.requests-per-second должен быть больше 0");
+        }
+
+        if (burst <= 0) {
+            throw new IllegalArgumentException("dns.rate-limit.burst должен быть больше 0");
+        }
+
+        if (clientIdleSeconds <= 0) {
+            throw new IllegalArgumentException("dns.rate-limit.client-idle-seconds должен быть больше 0");
+        }
+
+        logger.info(
+                "DNS rate limit включён: requestsPerSecond={}, burst={}, clientIdleSeconds={}",
+                requestsPerSecond,
+                burst,
+                clientIdleSeconds
+        );
+
+        return new DnsRateLimiter(
+                requestsPerSecond,
+                burst,
+                TimeUnit.SECONDS.toNanos(clientIdleSeconds)
+        );
     }
 
     private Map<String, SimpleResolver> createResolvers() {
-        Map<String, SimpleResolver> result =
-                new LinkedHashMap<String, SimpleResolver>();
-
+        Map<String, SimpleResolver> result = new LinkedHashMap<String, SimpleResolver>();
         int timeout = getConfig().getInt("dns.timeout");
-
         List<String> dnsServers = getConfig().getList("dns.list");
 
         for (String dns : dnsServers) {
@@ -81,24 +115,23 @@ public class DnsServer {
 
     public void run() {
         int port = getConfig().getInt("dns.local.port");
-
         logger.info("Запуск DNS форвардера на порту {}", Optional.of(port));
 
         try (
                 DatagramSocket udpSocket = new DatagramSocket(port);
                 ServerSocket tcpListener = new ServerSocket(port)
         ) {
-            Thread tcpThread =
-                    new Thread(() -> handleTcpConnections(tcpListener), "DnsServer-TCP-Acceptor");
-
+            Thread tcpThread = new Thread(() -> handleTcpConnections(tcpListener), "DnsServer-TCP-Acceptor");
             tcpThread.setDaemon(true);
             tcpThread.start();
 
             while (!Thread.currentThread().isInterrupted()) {
                 DatagramPacket request = new DatagramPacket(new byte[4096], 4096);
                 udpSocket.receive(request);
+
                 String clientIp = request.getAddress().getHostAddress();
                 logger.debug("UDP: Получен пакет от {}", clientIp);
+
                 workerPool.execute(() -> processUdpRequest(udpSocket, request));
             }
 
@@ -108,7 +141,6 @@ public class DnsServer {
     }
 
     private void processUdpRequest(DatagramSocket socket, DatagramPacket packet) {
-
         String clientIp = packet.getAddress().getHostAddress();
         int length = packet.getLength();
 
@@ -131,6 +163,7 @@ public class DnsServer {
 
         try {
             query = new Message(queryData);
+
         } catch (WireParseException e) {
             logger.debug("UDP [{}]: некорректный DNS-пакет, длина {}", clientIp, length);
             return;
@@ -141,6 +174,25 @@ public class DnsServer {
         }
 
         String questionName = getQuestionName(query);
+
+        if (!rateLimiter.tryAcquire(clientIp)) {
+            logger.warn(
+                    "DNS_RATE_LIMIT client={} transport=UDP qname={} requestsPerSecond={} burst={}",
+                    clientIp,
+                    questionName,
+                    rateLimiter.getRequestsPerSecond(),
+                    rateLimiter.getBurst()
+            );
+
+            try {
+                sendRefusedResponse(socket, packet, query);
+            } catch (IOException e) {
+                logger.debug("UDP [{}]: не удалось отправить REFUSED для rate limit", clientIp, e);
+            }
+
+            return;
+        }
+
         logger.info("UDP [{}] -> DNS-запрос: {}", clientIp, questionName);
 
         String blockReason = checkQueryBlacklist(query);
@@ -166,20 +218,16 @@ public class DnsServer {
                 sendRefusedResponse(socket, packet, query);
 
             } catch (IOException e) {
-                logger.error("UDP [{}]: не удалось отправить REFUSED " + "из-за отсутствия upstream", clientIp, e);
+                logger.error("UDP [{}]: не удалось отправить REFUSED из-за отсутствия upstream", clientIp, e);
             }
+
             return;
         }
 
         blockReason = checkResponseBlacklist(response, questionName);
 
         if (blockReason != null) {
-            logger.info(
-                    "UDP [{}] <- ответ заблокирован: {}; причина: {}",
-                    clientIp,
-                    questionName,
-                    blockReason
-            );
+            logger.info("UDP [{}] <- ответ заблокирован: {}; причина: {}", clientIp, questionName, blockReason);
 
             try {
                 sendRefusedResponse(socket, packet, query);
@@ -201,26 +249,23 @@ public class DnsServer {
     }
 
     private void handleTcpConnections(ServerSocket serverSocket) {
-
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 Socket socket = serverSocket.accept();
-
                 String clientIp = socket.getInetAddress().getHostAddress();
 
                 logger.info("TCP: принято соединение от {}", clientIp);
-
                 workerPool.execute(() -> handleSingleTcpSession(socket));
 
             } catch (IOException e) {
-                if (!Thread.currentThread().isInterrupted())
+                if (!Thread.currentThread().isInterrupted()) {
                     logger.debug("TCP accept error", e);
+                }
             }
         }
     }
 
     private void handleSingleTcpSession(Socket socket) {
-
         String clientIp = socket.getInetAddress().getHostAddress();
 
         try (
@@ -247,6 +292,7 @@ public class DnsServer {
 
                 byte[] requestData = new byte[length];
                 dataInput.readFully(requestData);
+
                 Message query;
 
                 try {
@@ -263,18 +309,25 @@ public class DnsServer {
 
                 String questionName = getQuestionName(query);
 
+                if (!rateLimiter.tryAcquire(clientIp)) {
+                    logger.warn(
+                            "DNS_RATE_LIMIT client={} transport=TCP qname={} requestsPerSecond={} burst={}",
+                            clientIp,
+                            questionName,
+                            rateLimiter.getRequestsPerSecond(),
+                            rateLimiter.getBurst()
+                    );
+
+                    sendTcpRefusedResponse(output, query);
+                    continue;
+                }
+
                 logger.info("TCP [{}] -> DNS-запрос: {}", clientIp, questionName);
 
                 String blockReason = checkQueryBlacklist(query);
 
                 if (blockReason != null) {
-                    logger.info(
-                            "TCP [{}] <- ЗАБЛОКИРОВАНО: {}; причина: {}",
-                            clientIp,
-                            questionName,
-                            blockReason
-                    );
-
+                    logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО: {}; причина: {}", clientIp, questionName, blockReason);
                     sendTcpRefusedResponse(output, query);
                     continue;
                 }
@@ -290,14 +343,7 @@ public class DnsServer {
                 blockReason = checkResponseBlacklist(response, questionName);
 
                 if (blockReason != null) {
-                    logger.info(
-                            "TCP [{}] <- ответ заблокирован: {}; " +
-                                    "причина: {}",
-                            clientIp,
-                            questionName,
-                            blockReason
-                    );
-
+                    logger.info("TCP [{}] <- ответ заблокирован: {}; причина: {}", clientIp, questionName, blockReason);
                     sendTcpRefusedResponse(output, query);
                     continue;
                 }
@@ -319,20 +365,18 @@ public class DnsServer {
         }
     }
 
-    /**
-     * Проверяет DNS-вопрос до запроса к upstream.
-     *
-     * @return причина блокировки либо null, если запрос разрешён.
-     */
     private String checkQueryBlacklist(Message query) {
-
         Record question = query.getQuestion();
-        if (question == null) return null;
+
+        if (question == null) {
+            return null;
+        }
 
         String questionName = question.getName().toString();
 
-        if (blacklist.isBlockedDomain(questionName))
+        if (blacklist.isBlockedDomain(questionName)) {
             return "запрещённый домен в DNS-вопросе: " + questionName;
+        }
 
         String ipv4 = extractIpv4FromPtrQuery(questionName);
 
@@ -342,18 +386,14 @@ public class DnsServer {
 
         String ipv6 = extractIpv6FromPtrQuery(questionName);
 
-        if (ipv6 != null && blacklist.isBlockedIp(ipv6))
+        if (ipv6 != null && blacklist.isBlockedIp(ipv6)) {
             return "запрещённый IPv6 в PTR-запросе: " + ipv6;
+        }
+
         return null;
     }
 
-    /**
-     * Проверяет все записи ответа в ANSWER, AUTHORITY и ADDITIONAL.
-     *
-     * @return причина блокировки либо null, если ответ разрешён.
-     */
     private String checkResponseBlacklist(Message response, String requestedDomain) {
-
         int[] sections = {
                 Section.ANSWER,
                 Section.AUTHORITY,
@@ -363,44 +403,41 @@ public class DnsServer {
         for (int section : sections) {
             List<Record> records = response.getSection(section);
 
-            if (records == null) continue;
-
+            if (records == null) {
+                continue;
+            }
 
             for (Record record : records) {
                 String blockReason = checkRecordBlacklist(record, section, requestedDomain);
-                if (blockReason != null)
+
+                if (blockReason != null) {
                     return blockReason;
+                }
             }
         }
 
         return null;
     }
 
-    /**
-     * Проверяет одну DNS-запись:
-     * owner name, IP-адреса и доменные target-поля.
-     */
     private String checkRecordBlacklist(Record record, int section, String requestedDomain) {
+        if (record == null) {
+            return null;
+        }
 
-        if (record == null) return null;
         Name ownerName = record.getName();
 
         if (ownerName != null && blacklist.isBlockedDomain(ownerName.toString())) {
-            return "запрещённый owner domain " +
-                    ownerName +
-                    " в секции " +
-                    Section.string(section) +
-                    " для запроса " +
-                    requestedDomain;
+            return "запрещённый owner domain " + ownerName
+                    + " в секции " + Section.string(section)
+                    + " для запроса " + requestedDomain;
         }
 
         if (record instanceof ARecord) {
             String ip = ((ARecord) record).getAddress().getHostAddress();
+
             if (blacklist.isBlockedIp(ip)) {
-                return "запрещённый IPv4 " +
-                        ip +
-                        " в A-record, секция " +
-                        Section.string(section);
+                return "запрещённый IPv4 " + ip
+                        + " в A-record, секция " + Section.string(section);
             }
 
             return null;
@@ -408,8 +445,11 @@ public class DnsServer {
 
         if (record instanceof AAAARecord) {
             String ip = ((AAAARecord) record).getAddress().getHostAddress();
-            if (blacklist.isBlockedIp(ip))
-                return "запрещённый IPv6 " + ip + " в AAAA-record, секция " + Section.string(section);
+
+            if (blacklist.isBlockedIp(ip)) {
+                return "запрещённый IPv6 " + ip
+                        + " в AAAA-record, секция " + Section.string(section);
+            }
 
             return null;
         }
@@ -417,65 +457,54 @@ public class DnsServer {
         Name targetName = extractTargetName(record);
 
         if (targetName != null && blacklist.isBlockedDomain(targetName.toString())) {
-            return "запрещённый target domain " +
-                    targetName +
-                    " в " +
-                    record.getClass()
-                            .getSimpleName() +
-                    ", секция " +
-                    Section.string(section);
+            return "запрещённый target domain " + targetName
+                    + " в " + record.getClass().getSimpleName()
+                    + ", секция " + Section.string(section);
         }
 
         return null;
     }
 
-    /**
-     * Извлекает target-имя из DNS-записей, содержащих другое доменное имя.
-     */
     private Name extractTargetName(Record record) {
-
-        if (record instanceof CNAMERecord)
+        if (record instanceof CNAMERecord) {
             return ((CNAMERecord) record).getTarget();
+        }
 
-        if (record instanceof DNAMERecord)
+        if (record instanceof DNAMERecord) {
             return ((DNAMERecord) record).getTarget();
+        }
 
-        if (record instanceof PTRRecord)
+        if (record instanceof PTRRecord) {
             return ((PTRRecord) record).getTarget();
+        }
 
-        if (record instanceof NSRecord)
+        if (record instanceof NSRecord) {
             return ((NSRecord) record).getTarget();
+        }
 
-        if (record instanceof MXRecord)
+        if (record instanceof MXRecord) {
             return ((MXRecord) record).getTarget();
+        }
 
-
-        if (record instanceof SRVRecord)
+        if (record instanceof SRVRecord) {
             return ((SRVRecord) record).getTarget();
+        }
 
         return null;
     }
 
     private Message forwardToResolver(Message query, String clientIp) {
-
         String domain = getQuestionName(query);
 
         for (Map.Entry<String, SimpleResolver> entry : resolvers.entrySet()) {
-
             String dns = entry.getKey();
-
             SimpleResolver resolver = entry.getValue();
 
             try {
                 Message response = resolver.send(query);
 
                 if (response != null) {
-                    logger.info(
-                            "Запрос [{}] от [{}] выполнен через {}",
-                            domain,
-                            clientIp,
-                            dns
-                    );
+                    logger.info("Запрос [{}] от [{}] выполнен через {}", domain, clientIp, dns);
                     return response;
                 }
 
@@ -487,42 +516,41 @@ public class DnsServer {
         return null;
     }
 
-    private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, Message query) throws IOException {
+    private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, Message query)
+            throws IOException {
 
         Message response = createRefusedResponse(query);
-
         byte[] responseBytes = response.toWire();
 
-        DatagramPacket reply =
-                new DatagramPacket(
-                        responseBytes,
-                        responseBytes.length,
-                        originalPacket.getAddress(),
-                        originalPacket.getPort()
-                );
+        DatagramPacket reply = new DatagramPacket(
+                responseBytes,
+                responseBytes.length,
+                originalPacket.getAddress(),
+                originalPacket.getPort()
+        );
 
         socket.send(reply);
     }
 
     private void sendTcpRefusedResponse(OutputStream output, Message query) throws IOException {
-
         Message refused = createRefusedResponse(query);
         byte[] refusedBytes = refused.toWire();
+
         output.write(shortToBytes(refusedBytes.length));
         output.write(refusedBytes);
         output.flush();
     }
 
     private Message createRefusedResponse(Message query) {
-
         Message response = (Message) query.clone();
+
         response.getHeader().setFlag(Flags.QR);
         response.getHeader().setRcode(Rcode.REFUSED);
+
         return response;
     }
 
     private DatagramPacket getFormattedReply(Message response, DatagramPacket requestPacket) {
-
         byte[] responseData = response.toWire();
 
         return new DatagramPacket(
@@ -534,68 +562,64 @@ public class DnsServer {
     }
 
     private String getQuestionName(Message message) {
-
         Record question = message.getQuestion();
 
-        if (question == null || question.getName() == null)
+        if (question == null || question.getName() == null) {
             return "unknown";
+        }
+
         return question.getName().toString();
     }
 
-    /**
-     * Преобразует
-     * 93.226.237.209.in-addr.arpa.
-     * в IPv4:
-     * 209.237.226.93.
-     */
     private String extractIpv4FromPtrQuery(String ptrName) {
-
-        if (ptrName == null) return null;
-        String name = ptrName.toLowerCase(Locale.ROOT);
-        if (!name.endsWith(IPV4_PTR_SUFFIX))
+        if (ptrName == null) {
             return null;
+        }
+
+        String name = ptrName.toLowerCase(Locale.ROOT);
+
+        if (!name.endsWith(IPV4_PTR_SUFFIX)) {
+            return null;
+        }
 
         String reversedIp = name.substring(0, name.length() - IPV4_PTR_SUFFIX.length());
         String[] parts = reversedIp.split("\\.");
 
-        if (parts.length != 4)
+        if (parts.length != 4) {
             return null;
+        }
 
         String ip = parts[3] + "." + parts[2] + "." + parts[1] + "." + parts[0];
-        return blacklist.isBlockedIp(ip) || isValidIpLiteral(ip) ? ip : null;
+
+        return isValidIpv4Literal(ip) ? ip : null;
     }
 
-    /**
-     * Преобразует IPv6 reverse DNS имя:
-     *
-     * b.a.9.8.7.6.5.0.4.0.0.0.0.0.0.0.0.0
-     * .0.0.0.0.0.0.0.0.1.0.0.0.0.0.0.0.ip6.arpa.
-     *
-     * в нормальный IPv6 address.
-     */
     private String extractIpv6FromPtrQuery(String ptrName) {
-
-        if (ptrName == null)
+        if (ptrName == null) {
             return null;
+        }
 
         String name = ptrName.toLowerCase(Locale.ROOT);
-        if (!name.endsWith(IPV6_PTR_SUFFIX))
+
+        if (!name.endsWith(IPV6_PTR_SUFFIX)) {
             return null;
+        }
 
         String reversedNibbles = name.substring(0, name.length() - IPV6_PTR_SUFFIX.length());
         String[] nibbles = reversedNibbles.split("\\.");
 
-        if (nibbles.length != 32)
+        if (nibbles.length != 32) {
             return null;
-
+        }
 
         StringBuilder hexadecimal = new StringBuilder(32);
 
         for (int i = nibbles.length - 1; i >= 0; i--) {
-
             String nibble = nibbles[i];
-            if (nibble.length() != 1 || Character.digit(nibble.charAt(0), 16) < 0)
+
+            if (nibble.length() != 1 || Character.digit(nibble.charAt(0), 16) < 0) {
                 return null;
+            }
 
             hexadecimal.append(nibble);
         }
@@ -603,9 +627,9 @@ public class DnsServer {
         StringBuilder ipv6 = new StringBuilder(39);
 
         for (int i = 0; i < hexadecimal.length(); i += 4) {
-
-            if (i > 0)
+            if (i > 0) {
                 ipv6.append(':');
+            }
 
             ipv6.append(hexadecimal, i, i + 4);
         }
@@ -613,32 +637,35 @@ public class DnsServer {
         return ipv6.toString();
     }
 
-    private boolean isValidIpLiteral(String value) {
-
-        if (value == null || value.isEmpty())
+    private boolean isValidIpv4Literal(String value) {
+        if (value == null || value.isEmpty()) {
             return false;
-
+        }
 
         String[] parts = value.split("\\.", -1);
 
-        if (parts.length != 4)
+        if (parts.length != 4) {
             return false;
-
+        }
 
         for (String part : parts) {
-            if (part.isEmpty())
+            if (part.isEmpty()) {
                 return false;
-
+            }
 
             for (int i = 0; i < part.length(); i++) {
-                if (!Character.isDigit(part.charAt(i)))
+                if (!Character.isDigit(part.charAt(i))) {
                     return false;
+                }
             }
 
             try {
                 int number = Integer.parseInt(part);
-                if (number < 0 || number > 255)
+
+                if (number < 0 || number > 255) {
                     return false;
+                }
+
             } catch (NumberFormatException e) {
                 return false;
             }
@@ -648,10 +675,109 @@ public class DnsServer {
     }
 
     private static byte[] shortToBytes(int value) {
-
-        if (value < 0 || value > 0xFFFF)
+        if (value < 0 || value > 0xFFFF) {
             throw new IllegalArgumentException("Длина вне диапазона: " + value);
+        }
 
-        return new byte[]{(byte) ((value >> 8) & 0xFF), (byte) (value & 0xFF)};
+        return new byte[]{
+                (byte) ((value >> 8) & 0xFF),
+                (byte) (value & 0xFF)
+        };
+    }
+
+    private static final class DnsRateLimiter {
+
+        private final boolean enabled;
+        private final int requestsPerSecond;
+        private final int burst;
+        private final long clientIdleNanos;
+        private final ConcurrentHashMap<String, TokenBucket> buckets;
+        private volatile long nextCleanupNanos;
+
+        private DnsRateLimiter(boolean enabled, int requestsPerSecond, int burst,
+                               long clientIdleNanos, ConcurrentHashMap<String, TokenBucket> buckets) {
+            this.enabled = enabled;
+            this.requestsPerSecond = requestsPerSecond;
+            this.burst = burst;
+            this.clientIdleNanos = clientIdleNanos;
+            this.buckets = buckets;
+        }
+
+        private static DnsRateLimiter disabled() {
+            return new DnsRateLimiter(
+                    false,
+                    0,
+                    0,
+                    0L,
+                    new ConcurrentHashMap<String, TokenBucket>()
+            );
+        }
+
+        private DnsRateLimiter(int requestsPerSecond, int burst, long clientIdleNanos) {
+            this(true, requestsPerSecond, burst, clientIdleNanos, new ConcurrentHashMap<String, TokenBucket>());
+        }
+
+        private boolean tryAcquire(String clientIp) {
+            if (!enabled) return true;
+            long now = System.nanoTime();
+            cleanupIfNeeded(now);
+            TokenBucket bucket = buckets.computeIfAbsent(clientIp, ignored -> new TokenBucket(burst, now));
+            return bucket.tryAcquire(now, requestsPerSecond, burst);
+        }
+
+        private void cleanupIfNeeded(long now) {
+            long cleanupIntervalNanos = Math.min(clientIdleNanos, TimeUnit.SECONDS.toNanos(60));
+            if (now < nextCleanupNanos) return;
+
+            synchronized (this) {
+                if (now < nextCleanupNanos) return;
+                for (Map.Entry<String, TokenBucket> entry : buckets.entrySet()) {
+                    TokenBucket bucket = entry.getValue();
+                    if (now - bucket.getLastSeenNanos() > clientIdleNanos)
+                        buckets.remove(entry.getKey(), bucket);
+                }
+                nextCleanupNanos = now + cleanupIntervalNanos;
+            }
+        }
+
+        private int getRequestsPerSecond() {
+            return requestsPerSecond;
+        }
+
+        private int getBurst() {
+            return burst;
+        }
+    }
+
+    private static final class TokenBucket {
+
+        private double tokens;
+        private long lastRefillNanos;
+        private long lastSeenNanos;
+
+        private TokenBucket(int burst, long now) {
+            this.tokens = burst;
+            this.lastRefillNanos = now;
+            this.lastSeenNanos = now;
+        }
+
+        private synchronized boolean tryAcquire(long now, int requestsPerSecond, int burst) {
+            long elapsedNanos = now - lastRefillNanos;
+
+            if (elapsedNanos > 0) {
+                double newTokens = (elapsedNanos / 1_000_000_000.0d) * requestsPerSecond;
+                tokens = Math.min(burst, tokens + newTokens);
+                lastRefillNanos = now;
+            }
+
+            lastSeenNanos = now;
+            if (tokens < 1.0d) return false;
+            tokens -= 1.0d;
+            return true;
+        }
+
+        private synchronized long getLastSeenNanos() {
+            return lastSeenNanos;
+        }
     }
 }
