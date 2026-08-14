@@ -2,7 +2,6 @@ package ru.galkov.util;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.DomainTrie;
 import ru.galkov.blacklist_source.BlacklistSource;
 
 import java.util.Collections;

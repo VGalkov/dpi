@@ -1,4 +1,4 @@
-package ru.galkov;
+package ru.galkov.util;
 
 import java.util.HashMap;
 import java.util.Locale;

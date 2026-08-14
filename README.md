@@ -1,4 +1,4 @@
- Fully functional DPI that passes DNS requests through itself,
+ Fully functional DPI that passes DNS(proxy) requests through itself,
 naturally if they are unencrypted. 
 
 

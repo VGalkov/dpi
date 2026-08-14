@@ -1,7 +1,5 @@
 package ru.galkov.util;
 
-import ru.galkov.DomainTrie;
-
 import java.util.Collections;
 import java.util.Set;
 /**

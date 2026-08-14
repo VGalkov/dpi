@@ -18,22 +18,33 @@ import java.util.concurrent.TimeUnit;
 import static ru.galkov.Main.getConfig;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
+ *
+ * DNS forwarder с проверкой blacklist:
+ * - имени в вопросе;
+ * - IPv4/IPv6 PTR-запросов;
+ * - owner name DNS-записей;
+ * - target name у CNAME/DNAME/PTR/NS/MX/SRV;
+ * - IPv4 в A-record;
+ * - IPv6 в AAAA-record.
  */
 public class DnsServer {
+
     private static final Logger logger = LoggerFactory.getLogger(DnsServer.class);
+    private static final String IPV4_PTR_SUFFIX = ".in-addr.arpa.";
+    private static final String IPV6_PTR_SUFFIX = ".ip6.arpa.";
+
     private final ExecutorService workerPool =
             new ThreadPoolExecutor(
                     getConfig().getInt("dns.thread.num"),
                     getConfig().getInt("dns.thread.num"),
                     0L,
                     TimeUnit.MILLISECONDS,
-                    new ArrayBlockingQueue<>(500),
+                    new ArrayBlockingQueue<Runnable>(500),
                     new ThreadPoolExecutor.CallerRunsPolicy()
             );
 
     private final BlacklistLoader blacklist;
-
     private final Map<String, SimpleResolver> resolvers;
 
     public DnsServer(BlacklistLoader blacklist) {
@@ -42,8 +53,11 @@ public class DnsServer {
     }
 
     private Map<String, SimpleResolver> createResolvers() {
-        Map<String, SimpleResolver> result = new LinkedHashMap<String, SimpleResolver>();
+        Map<String, SimpleResolver> result =
+                new LinkedHashMap<String, SimpleResolver>();
+
         int timeout = getConfig().getInt("dns.timeout");
+
         List<String> dnsServers = getConfig().getList("dns.list");
 
         for (String dns : dnsServers) {
@@ -58,76 +72,25 @@ public class DnsServer {
             }
         }
 
-        if (result.isEmpty())
+        if (result.isEmpty()) {
             throw new IllegalStateException("Список DNS upstream пуст");
-        return Collections.unmodifiableMap(result);
-    }
-
-    private boolean checkResponseBlacklist(Message response, String requestedDomain) {
-
-        List<Record> records = new ArrayList<Record>();
-        addRecords(records, response, Section.ANSWER);
-        addRecords(records, response, Section.AUTHORITY);
-        addRecords(records, response, Section.ADDITIONAL);
-
-        for (Record record : records) {
-            Name name = record.getName();
-
-            if (name != null && blacklist.isBlockedDomain(name.toString())) {
-                logger.info("BLOCKED [Response]: запрещённый домен {} для запроса {}", name, requestedDomain);
-                return true;
-            }
-
-            // Проверка PTR-записей (домен в данных записи)
-            if (record instanceof PTRRecord) {
-                PTRRecord ptrRecord = (PTRRecord) record;
-                String ptrDomain = ptrRecord.getTarget().toString();
-                if (blacklist.isBlockedDomain(ptrDomain)) {
-                    logger.info("BLOCKED [Response PTR]: запрещённый домен {} в PTR-записи", ptrDomain);
-                    return true;
-                }
-            }
-
-            if (record instanceof ARecord) {
-                ARecord aRecord = (ARecord) record;
-                String ip = aRecord.getAddress().getHostAddress().toLowerCase(Locale.ROOT);
-
-                if (blacklist.isBlockedIp(ip)) {
-                    logger.info("BLOCKED [Response]: запрещённый IPv4 {}", ip);
-                    return true;
-                }
-            }
-
-            if (record instanceof AAAARecord) {
-                AAAARecord aaaaRecord = (AAAARecord) record;
-                String ip = aaaaRecord.getAddress().getHostAddress().toLowerCase(Locale.ROOT);
-
-                if (blacklist.isBlockedIp(ip)) {
-                    logger.info("BLOCKED [Response]: запрещённый IPv6 {}", ip);
-                    return true;
-                }
-            }
         }
 
-        return false;
-    }
-
-    private void addRecords(List<Record> target, Message message, int section) {
-
-        List<Record> sectionRecords = message.getSection(section);
-        if (sectionRecords != null)
-            target.addAll(sectionRecords);
+        return Collections.unmodifiableMap(result);
     }
 
     public void run() {
         int port = getConfig().getInt("dns.local.port");
+
         logger.info("Запуск DNS форвардера на порту {}", Optional.of(port));
 
         try (
                 DatagramSocket udpSocket = new DatagramSocket(port);
                 ServerSocket tcpListener = new ServerSocket(port)
         ) {
-            Thread tcpThread = new Thread(() -> handleTcpConnections(tcpListener), "DnsServer-TCP-Acceptor");
+            Thread tcpThread =
+                    new Thread(() -> handleTcpConnections(tcpListener), "DnsServer-TCP-Acceptor");
+
             tcpThread.setDaemon(true);
             tcpThread.start();
 
@@ -147,54 +110,46 @@ public class DnsServer {
     private void processUdpRequest(DatagramSocket socket, DatagramPacket packet) {
 
         String clientIp = packet.getAddress().getHostAddress();
-        int len = packet.getLength();
-        if (len == 0 || len > 4096) {
-            logger.warn("UDP [{}]: странный пакет, длина {}", clientIp, len);
+        int length = packet.getLength();
+
+        if (length == 0 || length > 4096) {
+            logger.warn("UDP [{}]: странный пакет, длина {}", clientIp, length);
             return;
         }
 
-        byte[] queryData = new byte[len];
-        System.arraycopy(packet.getData(), packet.getOffset(), queryData, 0, len);
-        Message message;
+        byte[] queryData = new byte[length];
+
+        System.arraycopy(
+                packet.getData(),
+                packet.getOffset(),
+                queryData,
+                0,
+                length
+        );
+
+        Message query;
 
         try {
-            message = new Message(queryData);
-
+            query = new Message(queryData);
         } catch (WireParseException e) {
-            logger.debug("UDP [" + clientIp + "]: некорректный DNS-пакет, длина" + len);
+            logger.debug("UDP [{}]: некорректный DNS-пакет, длина {}", clientIp, length);
             return;
 
         } catch (Exception e) {
-            logger.warn("UDP [{}]: ошибка парсинга пакета: {}", clientIp, e.getMessage());
+            logger.warn("UDP [{}]: ошибка парсинга DNS-пакета: {}", clientIp, e.getMessage());
             return;
         }
 
-        String domain = "unknown";
-        if (message.getQuestion() != null)
-            domain = message.getQuestion().getName().toString();
+        String questionName = getQuestionName(query);
+        logger.info("UDP [{}] -> DNS-запрос: {}", clientIp, questionName);
 
+        String blockReason = checkQueryBlacklist(query);
 
-        logger.info("UDP [{}] -> DNS-запрос: {}", clientIp, domain);
+        if (blockReason != null) {
+            logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО: {}; причина: {}", clientIp, questionName, blockReason);
 
-        // Проверка PTR-запроса (IP → домен)
-        if (domain.endsWith(".in-addr.arpa.")) {
-            String ip = extractIpFromPtrQuery(domain);
-            if (ip != null && blacklist.isBlockedIp(ip)) {
-                logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО IP: {}", clientIp, ip);
-                try {
-                    sendRefusedResponse(socket, packet, message);
-                } catch (IOException e) {
-                    logger.error("UDP [{}]: не удалось отправить REFUSED", clientIp, e);
-                }
-                return;
-            }
-        }
-
-        // Проверка обычного доменного запроса
-        if (blacklist.isBlocked(domain, clientIp)) {
-            logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО: {}", clientIp, domain);
             try {
-                sendRefusedResponse(socket, packet, message);
+                sendRefusedResponse(socket, packet, query);
             } catch (IOException e) {
                 logger.error("UDP [{}]: не удалось отправить REFUSED", clientIp, e);
             }
@@ -202,55 +157,47 @@ public class DnsServer {
             return;
         }
 
-        Message response = forwardToResolver(message, clientIp);
+        Message response = forwardToResolver(query, clientIp);
+
         if (response == null) {
-            logger.warn("UDP [{}] <- upstream не ответил для домена {}", clientIp, domain);
+            logger.warn("UDP [{}] <- upstream не ответил для домена {}", clientIp, questionName);
+
             try {
-                sendRefusedResponse(socket, packet, message);
+                sendRefusedResponse(socket, packet, query);
+
             } catch (IOException e) {
-                logger.error("UDP [{}]: не удалось отправить REFUSED из-за отсутствия upstream", clientIp, e);
+                logger.error("UDP [{}]: не удалось отправить REFUSED " + "из-за отсутствия upstream", clientIp, e);
             }
             return;
         }
 
-        if (checkResponseBlacklist(response, domain)) {
-            logger.info("UDP [{}] <- ответ заблокирован: {}", clientIp, domain);
+        blockReason = checkResponseBlacklist(response, questionName);
+
+        if (blockReason != null) {
+            logger.info(
+                    "UDP [{}] <- ответ заблокирован: {}; причина: {}",
+                    clientIp,
+                    questionName,
+                    blockReason
+            );
+
             try {
-                sendRefusedResponse(socket, packet, message);
+                sendRefusedResponse(socket, packet, query);
             } catch (IOException e) {
                 logger.error("UDP [{}]: не удалось отправить REFUSED для заблокированного ответа", clientIp, e);
             }
+
             return;
         }
 
         try {
-            DatagramPacket replyPacket = getFormattedReply(response, packet);
-            socket.send(replyPacket);
-            logger.debug("UDP [{}] <- ответ отправлен для домена {}", clientIp, domain);
+            DatagramPacket reply = getFormattedReply(response, packet);
+            socket.send(reply);
+            logger.debug("UDP [{}] <- ответ отправлен для домена {}", clientIp, questionName);
+
         } catch (IOException e) {
-            logger.error("UDP [{}]: не удалось отправить ответ для домена {}", clientIp, domain, e);
+            logger.error("UDP [{}]: не удалось отправить ответ для домена {}", clientIp, questionName, e);
         }
-    }
-
-    private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, Message query) throws IOException {
-        Message response = createRefusedResponse(query);
-        byte[] responseBytes = response.toWire();
-        DatagramPacket reply =
-                new DatagramPacket(
-                        responseBytes,
-                        responseBytes.length,
-                        originalPacket.getAddress(),
-                        originalPacket.getPort()
-                );
-        socket.send(reply);
-    }
-
-    private Message createRefusedResponse(Message query) {
-        Message response = (Message) query.clone();
-        response.getHeader().setFlag(Flags.QR);
-        response.getHeader().setRcode(Rcode.REFUSED);
-
-        return response;
     }
 
     private void handleTcpConnections(ServerSocket serverSocket) {
@@ -258,8 +205,11 @@ public class DnsServer {
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 Socket socket = serverSocket.accept();
+
                 String clientIp = socket.getInetAddress().getHostAddress();
+
                 logger.info("TCP: принято соединение от {}", clientIp);
+
                 workerPool.execute(() -> handleSingleTcpSession(socket));
 
             } catch (IOException e) {
@@ -270,6 +220,7 @@ public class DnsServer {
     }
 
     private void handleSingleTcpSession(Socket socket) {
+
         String clientIp = socket.getInetAddress().getHostAddress();
 
         try (
@@ -278,101 +229,253 @@ public class DnsServer {
                 OutputStream output = currentSocket.getOutputStream()
         ) {
             DataInputStream dataInput = new DataInputStream(input);
+
             while (!currentSocket.isClosed()) {
-                int len;
+                int length;
+
                 try {
-                    len = dataInput.readUnsignedShort();
+                    length = dataInput.readUnsignedShort();
 
                 } catch (EOFException e) {
                     break;
                 }
 
-                if (len == 0) {
+                if (length == 0) {
                     logger.warn("TCP [{}]: получен пакет нулевой длины", clientIp);
                     break;
                 }
 
-                byte[] requestData = new byte[len];
+                byte[] requestData = new byte[length];
                 dataInput.readFully(requestData);
-                Message message;
+                Message query;
+
                 try {
-                    message = new Message(requestData);
+                    query = new Message(requestData);
+
                 } catch (WireParseException e) {
                     logger.debug("TCP [{}]: получен некорректный DNS-пакет", clientIp);
                     return;
 
                 } catch (Exception e) {
-                    logger.warn("TCP [{}]: ошибка чтения сообщения: {}", clientIp, e.getMessage());
+                    logger.warn("TCP [{}]: ошибка чтения DNS-сообщения: {}", clientIp, e.getMessage());
                     continue;
                 }
 
-                String domain = "unknown";
-                if (message.getQuestion() != null)
-                    domain = message.getQuestion().getName().toString();
-                logger.info("TCP [{}] -> DNS-запрос: {}", clientIp, domain);
+                String questionName = getQuestionName(query);
 
-                // Проверка PTR-запроса
-                if (domain.endsWith(".in-addr.arpa.")) {
-                    String ip = extractIpFromPtrQuery(domain);
-                    if (ip != null && blacklist.isBlockedIp(ip)) {
-                        logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО IP: {}", clientIp, ip);
-                        sendTcpRefusedResponse(output, message);
-                        continue;
-                    }
-                }
+                logger.info("TCP [{}] -> DNS-запрос: {}", clientIp, questionName);
 
-                // Проверка обычного доменного запроса
-                if (blacklist.isBlocked(domain, clientIp)) {
-                    logger.info("TCP [{}] <- ЗАБЛОКИРОВАНО: {}", clientIp, domain);
-                    sendTcpRefusedResponse(output, message);
+                String blockReason = checkQueryBlacklist(query);
+
+                if (blockReason != null) {
+                    logger.info(
+                            "TCP [{}] <- ЗАБЛОКИРОВАНО: {}; причина: {}",
+                            clientIp,
+                            questionName,
+                            blockReason
+                    );
+
+                    sendTcpRefusedResponse(output, query);
                     continue;
                 }
-                Message response = forwardToResolver(message, clientIp);
+
+                Message response = forwardToResolver(query, clientIp);
+
                 if (response == null) {
-                    logger.warn("TCP [{}] <- upstream не ответил: {}", clientIp, domain);
-                    sendTcpRefusedResponse(output, message);
+                    logger.warn("TCP [{}] <- upstream не ответил: {}", clientIp, questionName);
+                    sendTcpRefusedResponse(output, query);
                     continue;
                 }
 
-                if (checkResponseBlacklist(response, domain)) {
-                    logger.info("TCP [{}] <- ответ заблокирован: {}", clientIp, domain);
-                    sendTcpRefusedResponse(output, message);
+                blockReason = checkResponseBlacklist(response, questionName);
+
+                if (blockReason != null) {
+                    logger.info(
+                            "TCP [{}] <- ответ заблокирован: {}; " +
+                                    "причина: {}",
+                            clientIp,
+                            questionName,
+                            blockReason
+                    );
+
+                    sendTcpRefusedResponse(output, query);
                     continue;
                 }
 
                 byte[] responseBytes = response.toWire();
+
                 output.write(shortToBytes(responseBytes.length));
                 output.write(responseBytes);
                 output.flush();
             }
 
         } catch (IOException e) {
-            if (!(e instanceof java.nio.channels.ClosedChannelException))
+            if (!(e instanceof java.nio.channels.ClosedChannelException)) {
                 logger.debug("TCP [{}]: ошибка сессии", clientIp, e);
+            }
 
         } finally {
             logger.info("TCP: сессия с {} завершена", clientIp);
         }
     }
 
-    private void sendTcpRefusedResponse(OutputStream output, Message query) throws IOException {
-        Message refused = createRefusedResponse(query);
-        byte[] refusedBytes = refused.toWire();
-        output.write(shortToBytes(refusedBytes.length));
-        output.write(refusedBytes);
-        output.flush();
+    /**
+     * Проверяет DNS-вопрос до запроса к upstream.
+     *
+     * @return причина блокировки либо null, если запрос разрешён.
+     */
+    private String checkQueryBlacklist(Message query) {
+
+        Record question = query.getQuestion();
+        if (question == null) return null;
+
+        String questionName = question.getName().toString();
+
+        if (blacklist.isBlockedDomain(questionName))
+            return "запрещённый домен в DNS-вопросе: " + questionName;
+
+        String ipv4 = extractIpv4FromPtrQuery(questionName);
+
+        if (ipv4 != null && blacklist.isBlockedIp(ipv4)) {
+            return "запрещённый IPv4 в PTR-запросе: " + ipv4;
+        }
+
+        String ipv6 = extractIpv6FromPtrQuery(questionName);
+
+        if (ipv6 != null && blacklist.isBlockedIp(ipv6))
+            return "запрещённый IPv6 в PTR-запросе: " + ipv6;
+        return null;
+    }
+
+    /**
+     * Проверяет все записи ответа в ANSWER, AUTHORITY и ADDITIONAL.
+     *
+     * @return причина блокировки либо null, если ответ разрешён.
+     */
+    private String checkResponseBlacklist(Message response, String requestedDomain) {
+
+        int[] sections = {
+                Section.ANSWER,
+                Section.AUTHORITY,
+                Section.ADDITIONAL
+        };
+
+        for (int section : sections) {
+            List<Record> records = response.getSection(section);
+
+            if (records == null) continue;
+
+
+            for (Record record : records) {
+                String blockReason = checkRecordBlacklist(record, section, requestedDomain);
+                if (blockReason != null)
+                    return blockReason;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Проверяет одну DNS-запись:
+     * owner name, IP-адреса и доменные target-поля.
+     */
+    private String checkRecordBlacklist(Record record, int section, String requestedDomain) {
+
+        if (record == null) return null;
+        Name ownerName = record.getName();
+
+        if (ownerName != null && blacklist.isBlockedDomain(ownerName.toString())) {
+            return "запрещённый owner domain " +
+                    ownerName +
+                    " в секции " +
+                    Section.string(section) +
+                    " для запроса " +
+                    requestedDomain;
+        }
+
+        if (record instanceof ARecord) {
+            String ip = ((ARecord) record).getAddress().getHostAddress();
+            if (blacklist.isBlockedIp(ip)) {
+                return "запрещённый IPv4 " +
+                        ip +
+                        " в A-record, секция " +
+                        Section.string(section);
+            }
+
+            return null;
+        }
+
+        if (record instanceof AAAARecord) {
+            String ip = ((AAAARecord) record).getAddress().getHostAddress();
+            if (blacklist.isBlockedIp(ip))
+                return "запрещённый IPv6 " + ip + " в AAAA-record, секция " + Section.string(section);
+
+            return null;
+        }
+
+        Name targetName = extractTargetName(record);
+
+        if (targetName != null && blacklist.isBlockedDomain(targetName.toString())) {
+            return "запрещённый target domain " +
+                    targetName +
+                    " в " +
+                    record.getClass()
+                            .getSimpleName() +
+                    ", секция " +
+                    Section.string(section);
+        }
+
+        return null;
+    }
+
+    /**
+     * Извлекает target-имя из DNS-записей, содержащих другое доменное имя.
+     */
+    private Name extractTargetName(Record record) {
+
+        if (record instanceof CNAMERecord)
+            return ((CNAMERecord) record).getTarget();
+
+        if (record instanceof DNAMERecord)
+            return ((DNAMERecord) record).getTarget();
+
+        if (record instanceof PTRRecord)
+            return ((PTRRecord) record).getTarget();
+
+        if (record instanceof NSRecord)
+            return ((NSRecord) record).getTarget();
+
+        if (record instanceof MXRecord)
+            return ((MXRecord) record).getTarget();
+
+
+        if (record instanceof SRVRecord)
+            return ((SRVRecord) record).getTarget();
+
+        return null;
     }
 
     private Message forwardToResolver(Message query, String clientIp) {
 
-        String domain = query.getQuestion() != null ? query.getQuestion().getName().toString() : "unknown";
+        String domain = getQuestionName(query);
+
         for (Map.Entry<String, SimpleResolver> entry : resolvers.entrySet()) {
+
             String dns = entry.getKey();
+
             SimpleResolver resolver = entry.getValue();
+
             try {
                 Message response = resolver.send(query);
+
                 if (response != null) {
-                    logger.info("Запрос [{}] от [{}] выполнен через {}", domain, clientIp, dns);
+                    logger.info(
+                            "Запрос [{}] от [{}] выполнен через {}",
+                            domain,
+                            clientIp,
+                            dns
+                    );
                     return response;
                 }
 
@@ -384,43 +487,171 @@ public class DnsServer {
         return null;
     }
 
-    private DatagramPacket getFormattedReply(Message response, DatagramPacket requestPacket) {
-        byte[] responseData = response.toWire();
-        return new DatagramPacket(responseData, responseData.length, requestPacket.getAddress(), requestPacket.getPort());
+    private void sendRefusedResponse(DatagramSocket socket, DatagramPacket originalPacket, Message query) throws IOException {
+
+        Message response = createRefusedResponse(query);
+
+        byte[] responseBytes = response.toWire();
+
+        DatagramPacket reply =
+                new DatagramPacket(
+                        responseBytes,
+                        responseBytes.length,
+                        originalPacket.getAddress(),
+                        originalPacket.getPort()
+                );
+
+        socket.send(reply);
     }
 
-    private static byte[] shortToBytes(int value) {
-        if (value < 0 || value > 0xFFFF)
-            throw new IllegalArgumentException("Длина вне диапазона: " + value);
+    private void sendTcpRefusedResponse(OutputStream output, Message query) throws IOException {
 
+        Message refused = createRefusedResponse(query);
+        byte[] refusedBytes = refused.toWire();
+        output.write(shortToBytes(refusedBytes.length));
+        output.write(refusedBytes);
+        output.flush();
+    }
 
-        return new byte[]{(byte) ((value >> 8) & 0xFF), (byte) (value & 0xFF)
-        };
+    private Message createRefusedResponse(Message query) {
+
+        Message response = (Message) query.clone();
+        response.getHeader().setFlag(Flags.QR);
+        response.getHeader().setRcode(Rcode.REFUSED);
+        return response;
+    }
+
+    private DatagramPacket getFormattedReply(Message response, DatagramPacket requestPacket) {
+
+        byte[] responseData = response.toWire();
+
+        return new DatagramPacket(
+                responseData,
+                responseData.length,
+                requestPacket.getAddress(),
+                requestPacket.getPort()
+        );
+    }
+
+    private String getQuestionName(Message message) {
+
+        Record question = message.getQuestion();
+
+        if (question == null || question.getName() == null)
+            return "unknown";
+        return question.getName().toString();
     }
 
     /**
-     * Извлекает IP-адрес из PTR-запроса (например, "93.226.237.209.in-addr.arpa." → "209.237.226.93")
+     * Преобразует
+     * 93.226.237.209.in-addr.arpa.
+     * в IPv4:
+     * 209.237.226.93.
      */
-    private String extractIpFromPtrQuery(String ptrName) {
-        if (ptrName == null) {
+    private String extractIpv4FromPtrQuery(String ptrName) {
+
+        if (ptrName == null) return null;
+        String name = ptrName.toLowerCase(Locale.ROOT);
+        if (!name.endsWith(IPV4_PTR_SUFFIX))
             return null;
-        }
+
+        String reversedIp = name.substring(0, name.length() - IPV4_PTR_SUFFIX.length());
+        String[] parts = reversedIp.split("\\.");
+
+        if (parts.length != 4)
+            return null;
+
+        String ip = parts[3] + "." + parts[2] + "." + parts[1] + "." + parts[0];
+        return blacklist.isBlockedIp(ip) || isValidIpLiteral(ip) ? ip : null;
+    }
+
+    /**
+     * Преобразует IPv6 reverse DNS имя:
+     *
+     * b.a.9.8.7.6.5.0.4.0.0.0.0.0.0.0.0.0
+     * .0.0.0.0.0.0.0.0.1.0.0.0.0.0.0.0.ip6.arpa.
+     *
+     * в нормальный IPv6 address.
+     */
+    private String extractIpv6FromPtrQuery(String ptrName) {
+
+        if (ptrName == null)
+            return null;
 
         String name = ptrName.toLowerCase(Locale.ROOT);
-
-        if (!name.endsWith(".in-addr.arpa.")) {
+        if (!name.endsWith(IPV6_PTR_SUFFIX))
             return null;
+
+        String reversedNibbles = name.substring(0, name.length() - IPV6_PTR_SUFFIX.length());
+        String[] nibbles = reversedNibbles.split("\\.");
+
+        if (nibbles.length != 32)
+            return null;
+
+
+        StringBuilder hexadecimal = new StringBuilder(32);
+
+        for (int i = nibbles.length - 1; i >= 0; i--) {
+
+            String nibble = nibbles[i];
+            if (nibble.length() != 1 || Character.digit(nibble.charAt(0), 16) < 0)
+                return null;
+
+            hexadecimal.append(nibble);
         }
 
-        // Удаляем ".in-addr.arpa." и переворачиваем части
-        String ipReverse = name.substring(0, name.length() - ".in-addr.arpa.".length());
-        String[] parts = ipReverse.split("\\.");
+        StringBuilder ipv6 = new StringBuilder(39);
 
-        if (parts.length != 4) {
-            return null;
+        for (int i = 0; i < hexadecimal.length(); i += 4) {
+
+            if (i > 0)
+                ipv6.append(':');
+
+            ipv6.append(hexadecimal, i, i + 4);
         }
 
-        // Переворачиваем: 93.226.237.209 → 209.237.226.93
-        return parts[3] + "." + parts[2] + "." + parts[1] + "." + parts[0];
+        return ipv6.toString();
+    }
+
+    private boolean isValidIpLiteral(String value) {
+
+        if (value == null || value.isEmpty())
+            return false;
+
+
+        String[] parts = value.split("\\.", -1);
+
+        if (parts.length != 4)
+            return false;
+
+
+        for (String part : parts) {
+            if (part.isEmpty())
+                return false;
+
+
+            for (int i = 0; i < part.length(); i++) {
+                if (!Character.isDigit(part.charAt(i)))
+                    return false;
+            }
+
+            try {
+                int number = Integer.parseInt(part);
+                if (number < 0 || number > 255)
+                    return false;
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static byte[] shortToBytes(int value) {
+
+        if (value < 0 || value > 0xFFFF)
+            throw new IllegalArgumentException("Длина вне диапазона: " + value);
+
+        return new byte[]{(byte) ((value >> 8) & 0xFF), (byte) (value & 0xFF)};
     }
 }
