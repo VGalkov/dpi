@@ -2,6 +2,7 @@ package ru.galkov.blacklist_source;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.util.LogFields;
 
 import java.io.*;
 import java.net.URL;
@@ -43,7 +44,10 @@ public final class FileBlacklistSource implements BlacklistSource {
                 rules.add(value);
             }
 
-            logger.info("Локальный blacklist загружен: {}, правил {}", file.getPath(), rules.size());
+            logger.info("{} {} {}",
+                    LogFields.kv("event", "FILE_SOURCE_LOADED"),
+                    LogFields.kv("file", file.getPath()),
+                    LogFields.kv("rules", rules.size()));
             return rules;
         }
     }
@@ -51,7 +55,9 @@ public final class FileBlacklistSource implements BlacklistSource {
     private InputStream openInputStream() throws IOException {
 
         if (file.isFile()) {
-            logger.info("Blacklist найден на диске: {}", file.getAbsolutePath());
+            logger.info("{} {}",
+                    LogFields.kv("event", "FILE_SOURCE_FOUND"),
+                    LogFields.kv("file", file.getAbsolutePath()));
             return new FileInputStream(file);
         }
 

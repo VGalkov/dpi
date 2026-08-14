@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.BlacklistLoader;
 import ru.galkov.util.HostNormalizer;
+import ru.galkov.util.LogFields;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -150,10 +151,19 @@ public class ProxyHandler implements Runnable {
         String host = hostAndPort.host;
         int port = hostAndPort.port;
 
-        logger.info("{} -> CONNECT {}:{}", clientIp, host, port);
+        logger.info("{} {} {} {}",
+                LogFields.kv("event", "PROXY_CONNECT"),
+                LogFields.kv("client", clientIp),
+                LogFields.kv("host", host),
+                LogFields.kv("port", port));
 
         if (isBlockedHostOrIp(host)) {
-            logger.info("{} <- CONNECT blocked by host/IP: {}:{}", clientIp, host, port);
+            logger.info("{} {} {} {} {}",
+                    LogFields.kv("event", "PROXY_CONNECT_BLOCKED"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("host", host),
+                    LogFields.kv("port", port),
+                    LogFields.kv("reason", "HOST_IP"));
             sendError(clientOut, 403, "Forbidden");
             return;
         }
@@ -191,7 +201,11 @@ public class ProxyHandler implements Runnable {
                 logger.info("{} -> CONNECT {}:{}: SNI={}", clientIp, host, port, sniHost);
 
                 if (blacklist != null && blacklist.isBlockedDomain(sniHost)) {
-                    logger.info("{} <- CONNECT blocked by SNI: {}", clientIp, sniHost);
+                    logger.info("{} {} {} {}",
+                            LogFields.kv("event", "PROXY_CONNECT_BLOCKED"),
+                            LogFields.kv("client", clientIp),
+                            LogFields.kv("sni", sniHost),
+                            LogFields.kv("reason", "SNI"));
                     closeQuietly(remoteSocket);
                     return;
                 }
@@ -205,7 +219,11 @@ public class ProxyHandler implements Runnable {
             remoteOut.write(clientHelloBytes);
             remoteOut.flush();
 
-            logger.info("{} <- CONNECT tunnel established: {}:{}", clientIp, host, port);
+            logger.info("{} {} {} {}",
+                    LogFields.kv("event", "PROXY_CONNECT_ESTABLISHED"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("host", host),
+                    LogFields.kv("port", port));
 
             runTunnel(clientSocket, remoteSocket);
 
@@ -216,7 +234,11 @@ public class ProxyHandler implements Runnable {
                 sendError(clientOut, 504, "Gateway Timeout");
             }
 
-            logger.info("{} -> CONNECT timeout {}:{}", clientIp, host, port);
+            logger.info("{} {} {} {}",
+                    LogFields.kv("event", "PROXY_CONNECT_TIMEOUT"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("host", host),
+                    LogFields.kv("port", port));
 
         } catch (IOException e) {
             closeQuietly(remoteSocket);
@@ -626,7 +648,12 @@ public class ProxyHandler implements Runnable {
         int finalPort = hostAndPort.port;
 
         if (isBlockedHostOrIp(finalHost)) {
-            logger.info("{} <- HTTP blocked by host/IP: {}:{}", clientIp, finalHost, finalPort);
+            logger.info("{} {} {} {} {}",
+                    LogFields.kv("event", "PROXY_HTTP_BLOCKED"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("host", finalHost),
+                    LogFields.kv("port", finalPort),
+                    LogFields.kv("reason", "HOST_IP"));
             sendError(clientOut, 403, "Forbidden");
             return;
         }
@@ -661,7 +688,11 @@ public class ProxyHandler implements Runnable {
             clientOut.flush();
 
         } catch (SocketTimeoutException e) {
-            logger.info("{} -> HTTP upstream timeout {}:{}", clientIp, finalHost, finalPort);
+            logger.info("{} {} {} {}",
+                    LogFields.kv("event", "PROXY_HTTP_UPSTREAM_TIMEOUT"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("host", finalHost),
+                    LogFields.kv("port", finalPort));
             sendError(clientOut, 504, "Gateway Timeout");
         }
     }
@@ -753,8 +784,11 @@ public class ProxyHandler implements Runnable {
         }
 
         if (contentLength > maxBodyBytes) {
-            logger.info("{} <- HTTP body is too large: {} bytes, limit {} bytes",
-                    clientIp, contentLength, maxBodyBytes);
+            logger.info("{} {} {} {}",
+                    LogFields.kv("event", "PROXY_HTTP_BODY_TOO_LARGE"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("size", contentLength),
+                    LogFields.kv("limit", maxBodyBytes));
 
             sendError(clientOut, 413, "Payload Too Large");
             return null;
@@ -905,8 +939,11 @@ public class ProxyHandler implements Runnable {
     private void pipe(Socket source, Socket destination, String direction) {
         byte[] buffer = new byte[8192];
 
-        logger.debug("Tunnel {}: source={}, destination={}",
-                direction, source.getRemoteSocketAddress(), destination.getRemoteSocketAddress());
+        logger.debug("{} {} {} {}",
+                LogFields.kv("event", "PROXY_TUNNEL"),
+                LogFields.kv("direction", direction),
+                LogFields.kv("source", source.getRemoteSocketAddress()),
+                LogFields.kv("destination", destination.getRemoteSocketAddress()));
 
         try {
             InputStream input = source.getInputStream();

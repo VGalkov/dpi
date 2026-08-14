@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.xbill.DNS.*;
 import org.xbill.DNS.Record;
 import ru.galkov.util.BlacklistLoader;
+import ru.galkov.util.LogFields;
 
 import java.io.*;
 import java.net.*;
@@ -320,8 +321,13 @@ public class DnsServer {
         String questionName = getQuestionName(query);
 
         if (!rateLimiter.tryAcquire(clientIp)) {
-            logger.warn("DNS_RATE_LIMIT client={} transport=UDP qname={} requestsPerSecond={} burst={}",
-                    clientIp, questionName, rateLimiter.getRequestsPerSecond(), rateLimiter.getBurst());
+            logger.warn("{} {} {} {} {} {}",
+                    LogFields.kv("event", "DNS_RATE_LIMIT"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("transport", "UDP"),
+                    LogFields.kv("qname", questionName),
+                    LogFields.kv("requestsPerSecond", rateLimiter.getRequestsPerSecond()),
+                    LogFields.kv("burst", rateLimiter.getBurst()));
 
             try {
                 sendRefusedResponse(socket, packet, query);
@@ -332,12 +338,22 @@ public class DnsServer {
             return;
         }
 
-        logger.info("UDP [{}] -> DNS-запрос: {}", clientIp, questionName);
+        logger.info("{} {} {} {}",
+                LogFields.kv("event", "DNS_QUERY"),
+                LogFields.kv("client", clientIp),
+                LogFields.kv("transport", "UDP"),
+                LogFields.kv("qname", questionName));
 
         String blockReason = checkQueryBlacklist(query);
 
         if (blockReason != null) {
-            logger.info("UDP [{}] <- ЗАБЛОКИРОВАНО: {}; причина: {}", clientIp, questionName, blockReason);
+            logger.info("{} {} {} {} {} {}",
+                    LogFields.kv("event", "DNS_BLOCK"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("transport", "UDP"),
+                    LogFields.kv("qname", questionName),
+                    LogFields.kv("reason", "QUERY"),
+                    LogFields.kv("detail", blockReason));
 
             try {
                 sendRefusedResponse(socket, packet, query);
@@ -351,7 +367,11 @@ public class DnsServer {
         Message response = forwardToResolver(query, clientIp);
 
         if (response == null) {
-            logger.warn("UDP [{}] <- upstream не ответил для домена {}", clientIp, questionName);
+            logger.warn("{} {} {} {} {}",
+                    LogFields.kv("event", "DNS_UPSTREAM_NO_RESPONSE"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("transport", "UDP"),
+                    LogFields.kv("qname", questionName));
 
             try {
                 sendRefusedResponse(socket, packet, query);
@@ -365,7 +385,13 @@ public class DnsServer {
         blockReason = checkResponseBlacklist(response, questionName);
 
         if (blockReason != null) {
-            logger.info("UDP [{}] <- ответ заблокирован: {}; причина: {}", clientIp, questionName, blockReason);
+            logger.info("{} {} {} {} {} {}",
+                    LogFields.kv("event", "DNS_BLOCK"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("transport", "UDP"),
+                    LogFields.kv("qname", questionName),
+                    LogFields.kv("reason", "RESPONSE"),
+                    LogFields.kv("detail", blockReason));
 
             try {
                 sendRefusedResponse(socket, packet, query);
@@ -379,7 +405,11 @@ public class DnsServer {
         try {
             DatagramPacket reply = getFormattedReply(response, packet);
             socket.send(reply);
-            logger.debug("UDP [{}] <- ответ отправлен для домена {}", clientIp, questionName);
+            logger.debug("{} {} {} {}",
+                    LogFields.kv("event", "DNS_RESPONSE_SENT"),
+                    LogFields.kv("client", clientIp),
+                    LogFields.kv("transport", "UDP"),
+                    LogFields.kv("qname", questionName));
 
         } catch (IOException e) {
             if (running) {
@@ -432,14 +462,23 @@ public class DnsServer {
                 String questionName = getQuestionName(query);
 
                 if (!rateLimiter.tryAcquire(clientIp)) {
-                    logger.warn("DNS_RATE_LIMIT client={} transport=TCP qname={} requestsPerSecond={} burst={}",
-                            clientIp, questionName, rateLimiter.getRequestsPerSecond(), rateLimiter.getBurst());
+                    logger.warn("{} {} {} {} {} {}",
+                            LogFields.kv("event", "DNS_RATE_LIMIT"),
+                            LogFields.kv("client", clientIp),
+                            LogFields.kv("transport", "TCP"),
+                            LogFields.kv("qname", questionName),
+                            LogFields.kv("requestsPerSecond", rateLimiter.getRequestsPerSecond()),
+                            LogFields.kv("burst", rateLimiter.getBurst()));
 
                     sendTcpRefusedResponse(output, query);
                     continue;
                 }
 
-                logger.info("TCP [{}] -> DNS-запрос: {}", clientIp, questionName);
+                logger.info("{} {} {} {}",
+                        LogFields.kv("event", "DNS_QUERY"),
+                        LogFields.kv("client", clientIp),
+                        LogFields.kv("transport", "TCP"),
+                        LogFields.kv("qname", questionName));
 
                 String blockReason = checkQueryBlacklist(query);
 
@@ -478,7 +517,9 @@ public class DnsServer {
             }
 
         } finally {
-            logger.info("TCP: сессия с {} завершена", clientIp);
+            logger.info("{} {}",
+                    LogFields.kv("event", "DNS_TCP_SESSION_END"),
+                    LogFields.kv("client", clientIp));
         }
     }
 

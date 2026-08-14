@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
+import ru.galkov.util.LogFields;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -32,7 +33,7 @@ public final class RknBlacklistSource implements BlacklistSource {
     @Override
     public List<String> loadRules() throws IOException {
         byte[] xmlBytes = Files.readAllBytes(xmlFile);
-        logger.info("Чтение реестра РКН из файла: {}", xmlFile.toAbsolutePath());
+        logger.info("{} {}", LogFields.kv("event", "RKN_SOURCE_READ"), LogFields.kv("file", xmlFile.toAbsolutePath()));
         return parseRegisterXml(xmlBytes);
     }
 
@@ -76,7 +77,7 @@ public final class RknBlacklistSource implements BlacklistSource {
             }
         }
 
-        logger.info("Из файла РКН извлечено правил: {}", rules.size());
+        logger.info("{} {}", LogFields.kv("event", "RKN_SOURCE_RULES_EXTRACTED"), LogFields.kv("rules", rules.size()));
         return rules;
     }
 

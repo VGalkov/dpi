@@ -63,19 +63,16 @@ public final class BlacklistLoader implements AutoCloseable {
      * Загружает источники немедленно.
      * В отличие от первой загрузки не очищает активный blacklist при ошибке: прежний snapshot остаётся рабочим.
      */
-    public boolean reloadNow() {
+    public void reloadNow() {
         synchronized (reloadLock) {
             try {
                 BlacklistSnapshot newSnapshot = buildSnapshot();
                 snapshot.set(newSnapshot);
                 loaded = true;
-
-                logger.info("Blacklist snapshot успешно атомарно обновлён");
-                return true;
+                logger.info("{}", LogFields.kv("event", "BLACKLIST_RELOAD_OK"));
 
             } catch (Exception e) {
-                logger.error("Не удалось обновить blacklist. Предыдущий snapshot сохранён.", e);
-                return false;
+                logger.error("{} error={}", LogFields.kv("event", "BLACKLIST_RELOAD_ERROR"), e.getMessage());
             }
         }
     }
@@ -88,7 +85,7 @@ public final class BlacklistLoader implements AutoCloseable {
             try {
                 BlacklistSnapshot newSnapshot = buildSnapshot();
                 snapshot.set(newSnapshot);
-                logger.info("Blacklist впервые успешно загружен");
+                logger.info("{}", LogFields.kv("event", "BLACKLIST_FIRST_LOAD_OK"));
             } catch (Exception e) {
                 logger.error("Критическая ошибка первой загрузки blacklist. Используется пустой snapshot.", e);
                 snapshot.set(BlacklistSnapshot.empty());
@@ -109,7 +106,7 @@ public final class BlacklistLoader implements AutoCloseable {
         for (BlacklistSource source : sources) {
             try {
                 long startedAt = System.currentTimeMillis();
-                logger.info("Загрузка blacklist из источника: {}", source);
+                logger.info("{} {}", LogFields.kv("event", "BLACKLIST_SOURCE_LOAD_START"), LogFields.kv("source", source));
                 List<String> rules = source.loadRules();
                 if (rules == null) {
                     logger.warn("Источник {} вернул null вместо списка правил", source);
@@ -160,14 +157,13 @@ public final class BlacklistLoader implements AutoCloseable {
                 invalidRules += sourceInvalidRules;
 
                 long durationMillis = System.currentTimeMillis() - startedAt;
-                logger.info(
-                        "Источник blacklist загружен: source={}, получено={}, принято={}, некорректно={}, время={} мс",
-                        source,
-                        rules.size(),
-                        sourceAcceptedRules,
-                        sourceInvalidRules,
-                        durationMillis
-                );
+                logger.info("{} {} {} {} {} {}",
+                        LogFields.kv("event", "BLACKLIST_SOURCE_LOADED"),
+                        LogFields.kv("source", source),
+                        LogFields.kv("rulesReceived", rules.size()),
+                        LogFields.kv("rulesAccepted", sourceAcceptedRules),
+                        LogFields.kv("rulesInvalid", sourceInvalidRules),
+                        LogFields.kv("durationMs", durationMillis));
 
             } catch (Exception e) {
                 logger.error("Не удалось загрузить blacklist из источника {}", source, e);
@@ -181,14 +177,13 @@ public final class BlacklistLoader implements AutoCloseable {
         Set<String> immutableIps = Set.copyOf(newIps);
         BlacklistSnapshot newSnapshot = new BlacklistSnapshot(newDomainTrie, immutableIps);
 
-        logger.info(
-                "Новый blacklist snapshot собран: источников={}, правил={}, уникальных IP={}, дубликатов IP={}, некорректных правил={}",
-                loadedSources,
-                totalRules,
-                immutableIps.size(),
-                duplicateIps,
-                invalidRules
-        );
+        logger.info("{} {} {} {} {} {}",
+                LogFields.kv("event", "BLACKLIST_SNAPSHOT_BUILT"),
+                LogFields.kv("sourcesLoaded", loadedSources),
+                LogFields.kv("rulesTotal", totalRules),
+                LogFields.kv("ipsUnique", immutableIps.size()),
+                LogFields.kv("ipsDuplicate", duplicateIps),
+                LogFields.kv("rulesInvalid", invalidRules));
 
         return newSnapshot;
     }
@@ -281,6 +276,6 @@ public final class BlacklistLoader implements AutoCloseable {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
         }
-        logger.info("Планировщик обновления blacklist остановлен");
+        logger.info("{}", LogFields.kv("event", "BLACKLIST_RELOAD_SCHEDULER_STOPPED"));
     }
 }

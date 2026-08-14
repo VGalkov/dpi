@@ -2,6 +2,7 @@ package ru.galkov.blacklist_source;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.util.LogFields;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -30,14 +31,14 @@ public final class AdguardBlacklistSource implements BlacklistSource {
     @Override
     public List<String> loadRules() throws IOException {
 
-        logger.info("Начинается загрузка AdGuard blacklist: {}", url);
+        logger.info("{} {}", LogFields.kv("event", "ADGUARD_SOURCE_LOAD_START"), LogFields.kv("url", url));
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(connectTimeout);
         connection.setReadTimeout(readTimeout);
         connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
         int status = connection.getResponseCode();
-        logger.info("Ответ AdGuard: HTTP {}", status);
+        logger.info("{} {}", LogFields.kv("event", "ADGUARD_SOURCE_HTTP_STATUS"), LogFields.kv("status", status));
         if (status != HttpURLConnection.HTTP_OK)
             throw new IOException("AdGuard вернул HTTP-код " + status);
 
@@ -57,7 +58,7 @@ public final class AdguardBlacklistSource implements BlacklistSource {
             connection.disconnect();
         }
 
-        logger.info("AdGuard blacklist загружен: правил {}", rules.size());
+        logger.info("{} {}", LogFields.kv("event", "ADGUARD_SOURCE_LOADED"), LogFields.kv("rules", rules.size()));
         return rules;
     }
 
