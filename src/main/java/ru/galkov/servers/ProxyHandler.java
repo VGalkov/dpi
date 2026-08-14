@@ -3,6 +3,7 @@ package ru.galkov.servers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.BlacklistLoader;
+import ru.galkov.util.BlockDecision;
 import ru.galkov.util.HostNormalizer;
 import ru.galkov.util.LogFields;
 
@@ -21,7 +22,7 @@ import java.util.StringTokenizer;
 import static ru.galkov.Main.getConfig;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506774@yandex.ru) Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public class ProxyHandler implements Runnable {
 
@@ -157,13 +158,16 @@ public class ProxyHandler implements Runnable {
                 LogFields.kv("host", host),
                 LogFields.kv("port", port));
 
-        if (isBlockedHostOrIp(host)) {
-            logger.info("{} {} {} {} {}",
+        BlockDecision decision = checkBlockedHostOrIp(host);
+
+        if (decision.isBlocked()) {
+            logger.info("{} {} {} {} {} {}",
                     LogFields.kv("event", "PROXY_CONNECT_BLOCKED"),
                     LogFields.kv("client", clientIp),
                     LogFields.kv("host", host),
                     LogFields.kv("port", port),
-                    LogFields.kv("reason", "HOST_IP"));
+                    LogFields.kv("reason", "HOST_IP"),
+                    LogFields.kv("rule", decision.getMatchedRule()));
             sendError(clientOut, 403, "Forbidden");
             return;
         }
@@ -200,12 +204,15 @@ public class ProxyHandler implements Runnable {
             if (sniHost != null) {
                 logger.info("{} -> CONNECT {}:{}: SNI={}", clientIp, host, port, sniHost);
 
-                if (blacklist != null && blacklist.isBlockedDomain(sniHost)) {
-                    logger.info("{} {} {} {}",
+                BlockDecision sniDecision = blacklist.checkDomain(sniHost);
+
+                if (sniDecision.isBlocked()) {
+                    logger.info("{} {} {} {} {}",
                             LogFields.kv("event", "PROXY_CONNECT_BLOCKED"),
                             LogFields.kv("client", clientIp),
                             LogFields.kv("sni", sniHost),
-                            LogFields.kv("reason", "SNI"));
+                            LogFields.kv("reason", "SNI"),
+                            LogFields.kv("rule", sniDecision.getMatchedRule()));
                     closeQuietly(remoteSocket);
                     return;
                 }
@@ -320,12 +327,17 @@ public class ProxyHandler implements Runnable {
         return new HostAndPort(host, port);
     }
 
-    private boolean isBlockedHostOrIp(String host) {
+    private BlockDecision checkBlockedHostOrIp(String host) {
         if (blacklist == null) {
-            return false;
+            return BlockDecision.allow();
         }
 
-        return blacklist.isBlockedIp(host) || blacklist.isBlockedDomain(host);
+        BlockDecision ipDecision = blacklist.checkIp(host);
+        if (ipDecision.isBlocked()) {
+            return ipDecision;
+        }
+
+        return blacklist.checkDomain(host);
     }
 
     private byte[] readInitialTlsHandshake(InputStream input) throws IOException {
@@ -631,13 +643,16 @@ public class ProxyHandler implements Runnable {
         String finalHost = hostAndPort.host;
         int finalPort = hostAndPort.port;
 
-        if (isBlockedHostOrIp(finalHost)) {
-            logger.info("{} {} {} {} {}",
+        BlockDecision decision = checkBlockedHostOrIp(finalHost);
+
+        if (decision.isBlocked()) {
+            logger.info("{} {} {} {} {} {}",
                     LogFields.kv("event", "PROXY_HTTP_BLOCKED"),
                     LogFields.kv("client", clientIp),
                     LogFields.kv("host", finalHost),
                     LogFields.kv("port", finalPort),
-                    LogFields.kv("reason", "HOST_IP"));
+                    LogFields.kv("reason", "HOST_IP"),
+                    LogFields.kv("rule", decision.getMatchedRule()));
             sendError(clientOut, 403, "Forbidden");
             return;
         }
@@ -787,45 +802,6 @@ public class ProxyHandler implements Runnable {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    private byte[] readRequestBody(InputStream clientIn, OutputStream clientOut, long contentLength)
-            throws IOException {
-
-        if (contentLength == 0) {
-            return new byte[0];
-        }
-
-        if (contentLength > maxBodyBytes) {
-            logger.info("{} {} {} {}",
-                    LogFields.kv("event", "PROXY_HTTP_BODY_TOO_LARGE"),
-                    LogFields.kv("client", clientIp),
-                    LogFields.kv("size", contentLength),
-                    LogFields.kv("limit", maxBodyBytes));
-
-            sendError(clientOut, 413, "Payload Too Large");
-            return null;
-        }
-
-        if (contentLength > Integer.MAX_VALUE) {
-            sendError(clientOut, 413, "Payload Too Large");
-            return null;
-        }
-
-        byte[] body = new byte[(int) contentLength];
-        int totalRead = 0;
-
-        while (totalRead < body.length) {
-            int read = clientIn.read(body, totalRead, body.length - totalRead);
-
-            if (read == -1) {
-                throw new IOException("Unexpected end of request body");
-            }
-
-            totalRead += read;
-        }
-
-        return body;
     }
 
     private HostAndPort resolveHttpTarget(String hostHeader, String target) {
@@ -1097,7 +1073,6 @@ public class ProxyHandler implements Runnable {
                 throw new IOException("Negative chunk size: " + chunkSize);
 
             if (chunkSize == 0) {
-                readAndDiscardTrailers(clientIn);
                 break;
             }
 
@@ -1127,13 +1102,6 @@ public class ProxyHandler implements Runnable {
             totalBytes += chunkSize;
 
             readLine(clientIn, 2);
-        }
-    }
-
-    private void readAndDiscardTrailers(InputStream clientIn) throws IOException {
-        String line;
-
-        while ((line = readLine(clientIn, maxHeaderBytes)) != null && !line.isEmpty()) {
         }
     }
 
@@ -1167,7 +1135,6 @@ public class ProxyHandler implements Runnable {
 
         long contentLength = -1;
         boolean chunked = false;
-        boolean connectionClose = false;
         String line;
 
         while ((line = readLine(remoteIn, maxHeaderBytes)) != null && !line.isEmpty()) {
@@ -1188,11 +1155,6 @@ public class ProxyHandler implements Runnable {
                 if (value.contains("chunked"))
                     chunked = true;
 
-            } else if (lower.startsWith("connection:")) {
-                String value = line.substring(11).trim().toLowerCase(Locale.ROOT);
-
-                if (value.contains("close"))
-                    connectionClose = true;
             }
         }
 

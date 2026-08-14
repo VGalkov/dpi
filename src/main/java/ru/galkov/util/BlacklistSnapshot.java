@@ -15,20 +15,34 @@ public final class BlacklistSnapshot {
         this.ipCidrs = ipCidrs != null ? ipCidrs : Collections.emptySet();
     }
 
-    public boolean matchesDomain(String domain) {
-        return domainTrie.matches(domain);
-    }
+    public BlockDecision checkIp(String ip) {
+        String normalizedIp = HostNormalizer.normalizeIp(ip);
 
-    public boolean containsIp(String ip) {
-        if (ips.contains(ip))
-            return true;
+        if (normalizedIp == null)
+            return BlockDecision.allow();
+
+        if (ips.contains(normalizedIp))
+            return BlockDecision.blockIpExact(normalizedIp, "blacklist");
 
         for (IpCidr cidr : ipCidrs) {
-            if (cidr.contains(ip))
-                return true;
+            if (cidr.contains(normalizedIp))
+                return BlockDecision.blockIpCidr(normalizedIp, "blacklist");
         }
 
-        return false;
+        return BlockDecision.allow();
+    }
+
+    public BlockDecision checkDomain(String domain) {
+        String normalizedDomain = HostNormalizer.normalizeHost(domain);
+
+        if (normalizedDomain == null)
+            return BlockDecision.allow();
+
+        if (domainTrie.matches(normalizedDomain)) {
+            return BlockDecision.blockDomain(DomainTrie.MatchType.EXACT, normalizedDomain, "blacklist");
+        }
+
+        return BlockDecision.allow();
     }
 
     public static BlacklistSnapshot empty() {

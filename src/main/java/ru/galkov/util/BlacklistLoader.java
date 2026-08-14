@@ -39,14 +39,24 @@ public final class BlacklistLoader implements AutoCloseable {
         return snapshot.get();
     }
 
-    public boolean isBlockedIp(String ip) {
+    public BlockDecision checkIp(String ip) {
         String normalizedIp = HostNormalizer.normalizeIp(ip);
-        return normalizedIp != null && snapshot().containsIp(normalizedIp);
+        return normalizedIp != null ? snapshot().checkIp(normalizedIp) : BlockDecision.allow();
     }
 
-    public boolean isBlockedDomain(String domain) {
+    public BlockDecision checkDomain(String domain) {
         String normalizedDomain = HostNormalizer.normalizeHost(domain);
-        return normalizedDomain != null && snapshot().matchesDomain(normalizedDomain);
+        return normalizedDomain != null ? snapshot().checkDomain(normalizedDomain) : BlockDecision.allow();
+    }
+
+    @Deprecated
+    public boolean isBlockedIp(String ip) {
+        return checkIp(ip).isBlocked();
+    }
+
+    @Deprecated
+    public boolean isBlockedDomain(String domain) {
+        return checkDomain(domain).isBlocked();
     }
 
     /**
