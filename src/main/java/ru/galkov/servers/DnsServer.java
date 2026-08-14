@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xbill.DNS.*;
 import org.xbill.DNS.Record;
+import ru.galkov.llm.DnsAnomalyDetector;
 import ru.galkov.util.BlacklistLoader;
 import ru.galkov.util.LogFields;
 
@@ -23,6 +24,7 @@ public class DnsServer {
     private static final Logger logger = LoggerFactory.getLogger(DnsServer.class);
     private static final String IPV4_PTR_SUFFIX = ".in-addr.arpa.";
     private static final String IPV6_PTR_SUFFIX = ".ip6.arpa.";
+    private final DnsAnomalyDetector dnsAnomalyDetector;
 
     private final ExecutorService workerPool = new ThreadPoolExecutor(
             getConfig().getInt("dns.thread.num"),
@@ -31,6 +33,7 @@ public class DnsServer {
             TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<Runnable>(500),
             new ThreadPoolExecutor.CallerRunsPolicy()
+
     );
 
     private final BlacklistLoader blacklist;
@@ -44,9 +47,10 @@ public class DnsServer {
     private volatile ServerSocket tcpListener;
     private volatile Thread tcpThread;
 
-    public DnsServer(BlacklistLoader blacklist) {
+    public DnsServer(BlacklistLoader blacklist, DnsAnomalyDetector dnsAnomalyDetector)  {
         this.blacklist = Objects.requireNonNull(blacklist);
         this.resolvers = createResolvers();
+        this.dnsAnomalyDetector = dnsAnomalyDetector;
         this.rateLimiter = createRateLimiter();
     }
 
@@ -364,6 +368,11 @@ public class DnsServer {
             return;
         }
 
+        if (dnsAnomalyDetector != null && dnsAnomalyDetector.isEnabled()) {
+            int queryType = query.getQuestion().getType();
+            dnsAnomalyDetector.recordQuery(clientIp, questionName, queryType);
+        }
+
         Message response = forwardToResolver(query, clientIp);
 
         if (response == null) {
@@ -489,6 +498,11 @@ public class DnsServer {
                 }
 
                 Message response = forwardToResolver(query, clientIp);
+
+                if (dnsAnomalyDetector != null && dnsAnomalyDetector.isEnabled()) {
+                    int queryType = query.getQuestion().getType();
+                    dnsAnomalyDetector.recordQuery(clientIp, questionName, queryType);
+                }
 
                 if (response == null) {
                     logger.warn("TCP [{}] <- upstream не ответил: {}", clientIp, questionName);
