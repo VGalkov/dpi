@@ -621,11 +621,6 @@ public class ProxyHandler implements Runnable {
 
         HttpHeaders headers = readHttpHeaders(clientIn, firstLine);
 
-        if (headers.expectContinuePresent) {
-            sendError(clientOut, 417, "Expectation Failed");
-            return;
-        }
-
         HostAndPort hostAndPort = resolveHttpTarget(headers.hostHeader, target);
 
         if (hostAndPort == null) {
@@ -645,6 +640,28 @@ public class ProxyHandler implements Runnable {
                     LogFields.kv("reason", "HOST_IP"));
             sendError(clientOut, 403, "Forbidden");
             return;
+        }
+
+        if (headers.expectContinuePresent) {
+            if (headers.chunked) {
+                if (maxBodyBytes <= 0) {
+                    sendError(clientOut, 413, "Payload Too Large");
+                    return;
+                }
+            } else if (headers.contentLength > maxBodyBytes) {
+                logger.info("{} {} {} {}",
+                        LogFields.kv("event", "PROXY_HTTP_BODY_TOO_LARGE"),
+                        LogFields.kv("client", clientIp),
+                        LogFields.kv("size", headers.contentLength),
+                        LogFields.kv("limit", maxBodyBytes));
+
+                sendError(clientOut, 413, "Payload Too Large");
+                return;
+            }
+
+            String continueResponse = "HTTP/1.1 100 Continue\r\n\r\n";
+            clientOut.write(continueResponse.getBytes(StandardCharsets.ISO_8859_1));
+            clientOut.flush();
         }
 
         try (Socket remoteSocket = new Socket()) {
