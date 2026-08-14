@@ -1,5 +1,7 @@
 package ru.galkov.util;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class LogFields {
 
     private LogFields() {

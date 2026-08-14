@@ -22,7 +22,6 @@ import java.util.Optional;
 public class Main {
 
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
-
     private static DnsServer dnsServer;
     private static HttpProxyServer proxyServer;
     private static AppConfig config;
@@ -32,7 +31,7 @@ public class Main {
         try {
             config = AppConfig.getInstance();
 
-            List<BlacklistSource> sources = new ArrayList<BlacklistSource>();
+            List<BlacklistSource> sources = new ArrayList<>();
 
             addLocalFileSource(sources);
             addAdguardSource(sources);

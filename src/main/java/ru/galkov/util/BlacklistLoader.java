@@ -23,11 +23,8 @@ public final class BlacklistLoader implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
 
     private final List<BlacklistSource> sources;
-    private final AtomicReference<BlacklistSnapshot> snapshot =
-            new AtomicReference<BlacklistSnapshot>(BlacklistSnapshot.empty());
-
+    private final AtomicReference<BlacklistSnapshot> snapshot = new AtomicReference<>(BlacklistSnapshot.empty());
     private final Object reloadLock = new Object();
-
     private volatile boolean loaded;
     private volatile ScheduledExecutorService reloadExecutor;
 
@@ -61,7 +58,7 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     /**
-     * Загружает источники немедленно.
+     * Загружает источники.
      * В отличие от первой загрузки не очищает активный blacklist при ошибке: прежний snapshot остаётся рабочим.
      */
     public void reloadNow() {
@@ -98,7 +95,8 @@ public final class BlacklistLoader implements AutoCloseable {
 
     private BlacklistSnapshot buildSnapshot() {
         DomainTrie newDomainTrie = new DomainTrie();
-        Set<String> newIps = new HashSet<String>();
+        Set<String> newIps = new HashSet<>();
+        Set<IpCidr> newIpCidrs = new HashSet<>();
         int loadedSources = 0;
         int totalRules = 0;
         int invalidRules = 0;
@@ -131,6 +129,20 @@ public final class BlacklistLoader implements AutoCloseable {
                         continue;
                     }
 
+                    if (isCidrRule(normalizedValue)) {
+                        try {
+                            IpCidr cidr = new IpCidr(normalizedValue);
+                            newIpCidrs.add(cidr);
+                            sourceAcceptedRules++;
+                            totalRules++;
+                            continue;
+                        } catch (Exception e) {
+                            sourceInvalidRules++;
+                            logger.debug("Источник {}: пропущен некорректный CIDR: {}", source, normalizedValue);
+                            continue;
+                        }
+                    }
+
                     if (isIpLiteral(normalizedValue)) {
                         String ip = HostNormalizer.normalizeIp(normalizedValue);
 
@@ -140,8 +152,7 @@ public final class BlacklistLoader implements AutoCloseable {
                             continue;
                         }
 
-                        if (!newIps.add(ip))
-                            duplicateIps++;
+                        if (!newIps.add(ip)) duplicateIps++;
 
                         sourceAcceptedRules++;
                         totalRules++;
@@ -189,18 +200,26 @@ public final class BlacklistLoader implements AutoCloseable {
 
         if (!sources.isEmpty() && loadedSources == 0)
             throw new IllegalStateException("Не удалось загрузить ни одного источника blacklist");
-        Set<String> immutableIps = Set.copyOf(newIps);
-        BlacklistSnapshot newSnapshot = new BlacklistSnapshot(newDomainTrie, immutableIps);
 
-        logger.info("{} {} {} {} {} {}",
+        Set<String> immutableIps = Set.copyOf(newIps);
+        Set<IpCidr> immutableIpCidrs = Set.copyOf(newIpCidrs);
+        BlacklistSnapshot newSnapshot = new BlacklistSnapshot(newDomainTrie, immutableIps, immutableIpCidrs);
+
+        logger.info("{} {} {} {} {} {} {}",
                 LogFields.kv("event", "BLACKLIST_SNAPSHOT_BUILT"),
                 LogFields.kv("sourcesLoaded", loadedSources),
                 LogFields.kv("rulesTotal", totalRules),
                 LogFields.kv("ipsUnique", immutableIps.size()),
+                LogFields.kv("ipsCidr", immutableIpCidrs.size()),
                 LogFields.kv("ipsDuplicate", duplicateIps),
                 LogFields.kv("rulesInvalid", invalidRules));
 
         return newSnapshot;
+    }
+
+    private static boolean isCidrRule(String value) {
+        if (value == null || value.isEmpty()) return false;
+        return value.indexOf('/') >= 0;
     }
 
     private void startReloadScheduler() {
@@ -260,10 +279,8 @@ public final class BlacklistLoader implements AutoCloseable {
         for (String part : parts) {
             if (part.isEmpty()) return false;
 
-
-            for (int i = 0; i < part.length(); i++) {
+            for (int i = 0; i < part.length(); i++)
                 if (!Character.isDigit(part.charAt(i))) return false;
-            }
 
             try {
                 int number = Integer.parseInt(part);
