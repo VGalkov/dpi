@@ -1,5 +1,7 @@
 package ru.galkov.llm;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class DnsQueryRecord {
     private final String clientIp;
     private final String domain;
@@ -9,7 +11,6 @@ public final class DnsQueryRecord {
     private final double entropy;
     private final int subdomainCount;
 
-    // Поля заголовка DNS
     private final boolean isQuery;
     private final int opcode;
     private final boolean isTruncated;
@@ -107,10 +108,6 @@ public final class DnsQueryRecord {
 
     public boolean isRecursionDesired() {
         return recursionDesired;
-    }
-
-    public int getZ() {
-        return z;
     }
 
     public int getRcode() {

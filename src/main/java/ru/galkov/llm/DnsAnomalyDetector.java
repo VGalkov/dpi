@@ -2,19 +2,25 @@ package ru.galkov.llm;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.util.LocaleUtil;
 import ru.galkov.util.LogFields;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.*;
 
 import static ru.galkov.Main.getConfig;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class DnsAnomalyDetector {
 
     private static final Logger logger = LoggerFactory.getLogger(DnsAnomalyDetector.class);
@@ -67,7 +73,7 @@ public final class DnsAnomalyDetector {
         }
         this.processedTtlMillis = ttlSeconds * 1000L;
 
-        logger.info("DnsAnomalyDetector инициализирован: enabled={}, model={}, url={}, ttl={}s",
+        logger.info(LocaleUtil.getString("dns_anomaly_detector_initialized"),
                 enabled, model, llmUrl, processedTtlMillis / 1000);
     }
 
@@ -79,7 +85,7 @@ public final class DnsAnomalyDetector {
         long now = System.currentTimeMillis();
         processedDomains.put(domain, now);
         processedClients.put(clientIp, now);
-        logger.debug("DnsAnomalyDetector: домен помечен как обработанный: domain={}, clientIp={}, ttl={}s",
+        logger.debug(LocaleUtil.getString("dns_anomaly_detector_domain_marked"),
                 domain, clientIp, processedTtlMillis / 1000);
     }
 
@@ -107,25 +113,25 @@ public final class DnsAnomalyDetector {
         }
 
         if (removedDomains > 0 || removedClients > 0) {
-            logger.info("DnsAnomalyDetector: очистка устаревших записей: domains={}, clients={}, ttl={}s",
+            logger.info(LocaleUtil.getString("dns_anomaly_detector_cleanup"),
                     removedDomains, removedClients, processedTtlMillis / 1000);
         }
     }
 
     public void start() {
         if (!enabled) {
-            logger.info("DnsAnomalyDetector отключён в конфиге");
+            logger.info(LocaleUtil.getString("dns_anomaly_detector_disabled"));
             return;
         }
 
         if (running) {
-            logger.warn("DnsAnomalyDetector уже запущен");
+            logger.warn(LocaleUtil.getString("dns_anomaly_detector_already_running"));
             return;
         }
 
         running = true;
         executor.submit(this::processQueue);
-        logger.info("DnsAnomalyDetector запущен, модель={}", model);
+        logger.info(LocaleUtil.getString("dns_anomaly_detector_started"), model);
     }
 
     public void stop() {
@@ -140,7 +146,7 @@ public final class DnsAnomalyDetector {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
         }
-        logger.info("DnsAnomalyDetector остановлен");
+        logger.info(LocaleUtil.getString("dns_anomaly_detector_stopped"));
     }
 
     public boolean isEnabled() {
@@ -161,10 +167,10 @@ public final class DnsAnomalyDetector {
             queue.removeIf(r -> r.getDomain().equals(domain));
 
             queue.offer(record);
-            logger.debug("DnsAnomalyDetector: запись добавлена в очередь: client={}, domain={}, queryType={}",
+            logger.debug(LocaleUtil.getString("dns_anomaly_detector_record_added"),
                     clientIp, domain, queryType);
         } catch (Exception e) {
-            logger.debug("Ошибка добавления записи в очередь: {}", e.getMessage());
+            logger.debug(LocaleUtil.getString("dns_anomaly_detector_queue_add_error"), e.getMessage());
         }
     }
 
@@ -188,7 +194,7 @@ public final class DnsAnomalyDetector {
                 if (now - lastCleanupTime > cleanupIntervalMillis) {
                     cleanupProcessed();
                     lastCleanupTime = now;
-                    logger.info("DnsAnomalyDetector: очистка processedDomains/processedClients выполнена, ttl={}s",
+                    logger.info(LocaleUtil.getString("dns_anomaly_detector_cleanup_performed"),
                             processedTtlMillis / 1000);
                 }
 
@@ -202,7 +208,7 @@ public final class DnsAnomalyDetector {
 
                 // Двойная проверка
                 if (isProcessed(domain, record.getClientIp())) {
-                    logger.debug("DnsAnomalyDetector: пропуск записи (уже обработано): client={}, domain={}",
+                    logger.debug(LocaleUtil.getString("dns_anomaly_detector_skip_processed"),
                             record.getClientIp(), domain);
                     continue;
                 }
@@ -210,7 +216,7 @@ public final class DnsAnomalyDetector {
                 // Сразу помечаем как обрабатываемый
                 markProcessed(domain, record.getClientIp());
 
-                logger.info("DnsAnomalyDetector: анализ записи: client={}, domain={}, queryType={}, entropy={}",
+                logger.info(LocaleUtil.getString("dns_anomaly_detector_analyzing"),
                         record.getClientIp(), domain, record.getQueryType(), record.getEntropy());
 
                 DnsAnalysisResult result = analyzeRecord(record);
@@ -228,7 +234,7 @@ public final class DnsAnomalyDetector {
                             LogFields.kv("reason", result.getReason()),
                             LogFields.kv("timestamp", record.getTimestamp()));
                 } else if (result != null) {
-                    logger.info("DnsAnomalyDetector: запрос не подозрителен: client={}, domain={}, queryType={}, confidence={}, reason={}",
+                    logger.info(LocaleUtil.getString("dns_anomaly_detector_not_suspicious"),
                             record.getClientIp(), domain, record.getQueryType(), result.getConfidence(), result.getReason());
                 }
 
@@ -236,104 +242,85 @@ public final class DnsAnomalyDetector {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                logger.error("Ошибка обработки записи: {}", e.getMessage());
+                logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"), e.getMessage());
             }
         }
 
-        logger.info("DnsAnomalyDetector завершил обработку очереди");
+        logger.info(LocaleUtil.getString("dns_anomaly_detector_queue_completed"));
     }
 
     private DnsAnalysisResult analyzeRecord(DnsQueryRecord record) {
         if (llmUrl == null || llmUrl.isEmpty()) {
-            logger.warn("LLM Studio URL не настроен");
+            logger.warn(LocaleUtil.getString("dns_anomaly_detector_llm_url_not_configured"));
             return null;
         }
 
         if (model == null || model.isEmpty()) {
-            logger.warn("LLM Studio model не настроен");
+            logger.warn(LocaleUtil.getString("dns_anomaly_detector_llm_model_not_configured"));
             return null;
         }
 
         try {
             String prompt = buildPrompt(record);
 
-            logger.info("DnsAnomalyDetector: отправка запроса в LLM Studio: model={}, url={}", model, llmUrl);
-            logger.debug("DnsAnomalyDetector: промпт: {}", prompt);
+            logger.info(LocaleUtil.getString("dns_anomaly_detector_sending_request"), model, llmUrl);
+            logger.debug(LocaleUtil.getString("dns_anomaly_detector_prompt"), prompt);
 
             String response = sendToLlm(prompt);
 
             if (response == null || response.isEmpty()) {
-                logger.warn("DnsAnomalyDetector: пустой ответ от LLM Studio");
+                logger.warn(LocaleUtil.getString("dns_anomaly_detector_empty_response"));
                 return null;
             }
 
-            logger.debug("DnsAnomalyDetector: ответ LLM Studio: {}", response);
+            logger.debug(LocaleUtil.getString("dns_anomaly_detector_response"), response);
 
             return parseResponse(response);
 
         } catch (Exception e) {
-            logger.error("Ошибка анализа записи: {}", e.getMessage(), e);
+            logger.error(LocaleUtil.getString("dns_anomaly_detector_analysis_error"), e.getMessage(), e);
             return null;
         }
     }
 
     private String buildPrompt(DnsQueryRecord record) {
-        return String.format(
-                "Ты — система безопасности, анализирующая DNS-трафик на аномалии.\n\n" +
-                        "Проанализируй DNS-запрос:\n" +
-                        "- Client IP: %s\n" +
-                        "- Domain: %s\n" +
-                        "- Query Type: %d (1=A, 28=AAAA, 16=TXT, 12=PTR, 5=CNAME, 15=MX)\n" +
-                        "- Domain Length: %d символов\n" +
-                        "- Entropy: %.2f (норма: 2.5-3.5, подозрительно: >4.0)\n" +
-                        "- Subdomain Count: %d (норма: 1-3, подозрительно: >5)\n" +
-                        "- DNS Header:\n" +
-                        "  * QR: %s (QUERY=норма, RESPONSE=аномалия для запроса)\n" +
-                        "  * Opcode: %d (0=standard query, 1=inverse, 2=status, 4=notify)\n" +
-                        "  * TC: %s (false=норма, true=возможна атака на переполнение)\n" +
-                        "  * RD: %s (true=норма, false=аномалия для клиента)\n" +
-                        "  * RCODE: %d (0=no error, 3=NXDOMAIN, 5=refused)\n\n" +
-                        "Критерии подозрительности (оцени по шкале 0-1):\n" +
-                        "1. DNS tunneling: domainLength>50 И entropy>3.5 И subdomainCount>5 → confidence=0.9\n" +
-                        "2. DGA-домен: entropy>4.0 И домен содержит случайные цифры/буквы (a1b2c3.xyz) → confidence=0.8\n" +
-                        "3. C2-канал: queryType=16 (TXT) И entropy>3.5 → confidence=0.7\n" +
-                        "4. Атака на переполнение: TC=true → confidence=0.6\n" +
-                        "5. Сканер/разведка: Opcode!=0 ИЛИ QR=RESPONSE в запросе → confidence=0.8\n" +
-                        "6. DGA-сканер: queryType=1 (A) И RCODE=3 (NXDOMAIN) И entropy>3.5 → confidence=0.7\n" +
-                        "7. Подозрительный TLD: домен заканчивается на .xyz/.top/.club/.work/.tk → confidence=0.5\n" +
-                        "8. IP в домене: домен содержит цифры и дефисы (192-168-1-1.example.com) → confidence=0.6\n\n" +
-                        "9. Частые запросы: один IP делает >10 запросов к разным доменам за 1 минуту → confidence=0.6\n" +
-                        "10. Запрос к известному malicious-домену (если есть в списке) → confidence=0.95\n" +
-                        "11. Запрос к домену с keywords (malware, phishing, hack, exploit) → confidence=0.8\n" +
-                        "Правила принятия решения:\n" +
-                        "- isSuspicious=true, если confidence>=0.7\n" +
-                        "- isSuspicious=false, если confidence<0.7\n" +
-                        "- recommendedActions=[\"BLOCK_DOMAIN\"], если confidence>=0.8\n" +
-                        "- recommendedActions=[\"LOG_ONLY\"], если 0.7<=confidence<0.8\n" +
-                        "- recommendedActions=[\"NONE\"], если confidence<0.7\n\n" +
-                        "Ответь ТОЛЬКО в формате JSON:\n" +
-                        "{\n" +
-                        "  \"isSuspicious\": true/false,\n" +
-                        "  \"confidence\": 0.0-1.0,\n" +
-                        "  \"reason\": \"краткое объяснение (1-2 предложения)\",\n" +
-                        "  \"recommendedActions\": [\"BLOCK_DOMAIN\"/\"LOG_ONLY\"/\"NONE\"]\n" +
-                        "}",
-                record.getClientIp(),
-                record.getDomain(),
-                record.getQueryType(),
-                record.getDomainLength(),
-                record.getEntropy(),
-                record.getSubdomainCount(),
-                record.isQuery() ? "QUERY" : "RESPONSE",
-                record.getOpcode(),
-                record.isTruncated() ? "true" : "false",
-                record.isRecursionDesired() ? "true" : "false",
-                record.getRcode()
-        );
+        return loadPromptTemplate("prompts/dns_anomaly_prompt.txt")
+                .replace("{clientIp}", record.getClientIp())
+                .replace("{domain}", record.getDomain())
+                .replace("{queryType}", String.valueOf(record.getQueryType()))
+                .replace("{domainLength}", String.valueOf(record.getDomainLength()))
+                .replace("{entropy}", String.format("%.2f", record.getEntropy()))
+                .replace("{subdomainCount}", String.valueOf(record.getSubdomainCount()))
+                .replace("{qr}", record.isQuery() ? "QUERY" : "RESPONSE")
+                .replace("{opcode}", String.valueOf(record.getOpcode()))
+                .replace("{tc}", record.isTruncated() ? "true" : "false")
+                .replace("{rd}", record.isRecursionDesired() ? "true" : "false")
+                .replace("{rcode}", String.valueOf(record.getRcode()));
+    }
+
+    private String loadPromptTemplate(String resourceName) {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourceName)) {
+            if (is == null) {
+                logger.warn("Шаблон промпта не найден: {}", resourceName);
+                return "";
+            }
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            logger.error("Ошибка загрузки шаблона промпта: {}", resourceName, e);
+            return "";
+        }
     }
 
 
     private String sendToLlm(String prompt) throws IOException, InterruptedException {
+        // Экранируем специальные символы для JSON
+        String escapedPrompt = prompt
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+
         String jsonBody = String.format(
                 "{" +
                         "\"model\": \"%s\"," +
@@ -344,7 +331,7 @@ public final class DnsAnomalyDetector {
                         "\"max_tokens\": 500" +
                         "}",
                 model,
-                prompt.replace("\"", "\\\"").replace("\n", "\\n")
+                escapedPrompt
         );
 
         HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -359,12 +346,12 @@ public final class DnsAnomalyDetector {
 
         HttpRequest request = builder.build();
 
-        logger.debug("DnsAnomalyDetector: HTTP-запрос к LLM Studio: {}", llmUrl);
+        logger.debug(LocaleUtil.getString("dns_anomaly_detector_http_request"), llmUrl);
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
-            logger.warn("LLM Studio вернул статус: {}", response.statusCode());
+            logger.warn(LocaleUtil.getString("dns_anomaly_detector_llm_status"), response.statusCode());
             return null;
         }
 
@@ -392,19 +379,19 @@ public final class DnsAnomalyDetector {
                     .replace("\\\"", "\"")
                     .replace("\\n", "\n");
 
-            logger.debug("DnsAnomalyDetector: распарсенный JSON от LLM: {}", content);
+            logger.debug(LocaleUtil.getString("dns_anomaly_detector_parsed_json"), content);
 
             boolean isSuspicious = content.contains("\"isSuspicious\":true");
             double confidence = extractConfidence(content);
             String reason = extractField(content, "reason");
 
-            logger.info("DnsAnomalyDetector: результат анализа: isSuspicious={}, confidence={}, reason={}",
+            logger.info(LocaleUtil.getString("dns_anomaly_detector_analysis_result"),
                     isSuspicious, confidence, reason);
 
             return new DnsAnalysisResult(isSuspicious, confidence, reason, null);
 
         } catch (Exception e) {
-            logger.debug("Ошибка парсинга ответа LLM: {}", e.getMessage());
+            logger.debug(LocaleUtil.getString("dns_anomaly_detector_parse_error"), e.getMessage());
             return null;
         }
     }

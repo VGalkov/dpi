@@ -3,6 +3,7 @@ package ru.galkov.blacklist_source;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.BlacklistRule;
+import ru.galkov.util.LocaleUtil;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -13,8 +14,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class AdguardBlacklistSource implements BlacklistSource {
     private static final Logger logger = LoggerFactory.getLogger(AdguardBlacklistSource.class);
@@ -30,16 +32,16 @@ public final class AdguardBlacklistSource implements BlacklistSource {
 
     @Override
     public List<BlacklistRule> loadRules() throws IOException {
-        logger.info("Начинается загрузка AdGuard blacklist: {}", url);
+        logger.info(LocaleUtil.getString("adguard_load_started"), url);
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(connectTimeout);
         connection.setReadTimeout(readTimeout);
         connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
         int status = connection.getResponseCode();
-        logger.info("Ответ AdGuard: HTTP {}", status);
+        logger.info(LocaleUtil.getString("adguard_http_response"), status);
         if (status != HttpURLConnection.HTTP_OK)
-            throw new IOException("AdGuard вернул HTTP-код " + status);
+            throw new IOException(LocaleUtil.getString("adguard_http_error") + status);
 
         List<BlacklistRule> rules = new ArrayList<>();
         try (
@@ -57,7 +59,7 @@ public final class AdguardBlacklistSource implements BlacklistSource {
             connection.disconnect();
         }
 
-        logger.info("AdGuard blacklist загружен: правил {}", rules.size());
+        logger.info(LocaleUtil.getString("adguard_blacklist_loaded"), rules.size());
         return rules;
     }
 

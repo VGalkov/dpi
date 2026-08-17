@@ -3,6 +3,7 @@ package ru.galkov.blacklist_source;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.BlacklistRule;
+import ru.galkov.util.LocaleUtil;
 import ru.galkov.util.LogFields;
 
 import java.io.*;
@@ -10,18 +11,21 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.ResourceBundle;
+
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class FileBlacklistSource implements BlacklistSource {
 
     private static final Logger logger = LoggerFactory.getLogger(FileBlacklistSource.class);
+    private static final ResourceBundle messages = ResourceBundle.getBundle("locale.messages");
 
     private final File file;
 
     public FileBlacklistSource(File file) {
         if (file == null)
-            throw new IllegalArgumentException("Файл blacklist не может быть null");
+            throw new IllegalArgumentException(LocaleUtil.getString("file_blacklist_cannot_be_null"));
 
         this.file = file;
     }
@@ -43,10 +47,11 @@ public final class FileBlacklistSource implements BlacklistSource {
                 rules.add(rule);
             }
 
-            logger.info("Локальный blacklist загружен: {}, правил {}", file.getPath(), rules.size());
+            logger.info(LocaleUtil.getString("local_blacklist_loaded"), file.getPath(), rules.size());
             return rules;
         }
     }
+
     private BlacklistRule parseLine(String line) {
         if (line == null)
             return null;
@@ -72,11 +77,12 @@ public final class FileBlacklistSource implements BlacklistSource {
                 null
         );
     }
+
     private InputStream openInputStream() throws IOException {
 
         if (file.isFile()) {
             logger.info("{} {}",
-                    LogFields.kv("event", "FILE_SOURCE_FOUND"),
+                    LogFields.kv("event", LocaleUtil.getString("file_source_found")),
                     LogFields.kv("file", file.getAbsolutePath()));
             return new FileInputStream(file);
         }
@@ -92,34 +98,11 @@ public final class FileBlacklistSource implements BlacklistSource {
         URL resource = classLoader.getResource(resourceName);
 
         if (resource != null) {
-            logger.info("Blacklist найден в classpath: {}", resource.toExternalForm());
+            logger.info(LocaleUtil.getString("blacklist_in_classpath"), resource.toExternalForm());
             return resource.openStream();
         }
 
-        throw new FileNotFoundException("Blacklist не найден на диске или в classpath: " + file.getAbsolutePath()
-        );
-    }
-
-    private String normalizeLine(String line) {
-
-        if (line == null) {
-            return null;
-        }
-
-        String value = line.trim();
-
-        if (value.isEmpty() || value.startsWith("#")) {
-            return null;
-        }
-
-
-        int commentIndex = value.indexOf('#');
-
-        if (commentIndex >= 0) {
-            value = value.substring(0, commentIndex).trim();
-        }
-
-        return value.isEmpty() ? null : value;
+        throw new FileNotFoundException(LocaleUtil.getString("blacklist_not_found") + file.getAbsolutePath());
     }
 
     @Override

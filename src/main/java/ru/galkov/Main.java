@@ -11,6 +11,7 @@ import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
 import ru.galkov.util.BlacklistLoader;
+import ru.galkov.util.LocaleUtil;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -56,10 +57,10 @@ public class Main {
             startProxyServer();
             startDnsServer();
 
-            logger.info("Система запущена");
+            logger.info(LocaleUtil.getString("system_started"));
 
         } catch (Exception e) {
-            logger.error("Система не запущена", e);
+            logger.error(LocaleUtil.getString("system_not_started"), e);
             stopApplication();
             Runtime.getRuntime().exit(-1);
         }
@@ -75,7 +76,7 @@ public class Main {
         );
 
         sources.add(source);
-        logger.info("Источник LocalFile добавлен: {}", source);
+        logger.info(LocaleUtil.getString("source_local_file_added"), source);
     }
 
     private static void addAdguardSource(List<BlacklistSource> sources) {
@@ -92,7 +93,7 @@ public class Main {
         );
 
         sources.add(source);
-        logger.info("Источник AdGuard добавлен: {}", source);
+        logger.info(LocaleUtil.getString("source_adguard_added"), source);
     }
 
     private static void addMvpsSource(List<BlacklistSource> sources) {
@@ -109,7 +110,7 @@ public class Main {
         );
 
         sources.add(source);
-        logger.info("Источник MVPS Hosts добавлен: {}", source);
+        logger.info(LocaleUtil.getString("source_mvps_hosts_added"), source);
     }
 
     private static void addRknSource(List<BlacklistSource> sources) {
@@ -122,7 +123,7 @@ public class Main {
         );
 
         sources.add(source);
-        logger.info("Источник РКН добавлен: {}", source);
+        logger.info(LocaleUtil.getString("source_rkn_added"), source);
     }
 
     private static void registerShutdownHook() {
@@ -132,13 +133,13 @@ public class Main {
     }
 
     private static synchronized void stopApplication() {
-        logger.info("Начата штатная остановка системы");
+        logger.info(LocaleUtil.getString("shutdown_started"));
 
         if (httpAnomalyDetector != null) {
             try {
                 httpAnomalyDetector.stop();
             } catch (Exception e) {
-                logger.error("Ошибка остановки HttpAnomalyDetector", e);
+                logger.error(LocaleUtil.getString("error_stop_http_anomaly"), e);
             }
         }
 
@@ -146,7 +147,7 @@ public class Main {
             try {
                 dnsAnomalyDetector.stop();
             } catch (Exception e) {
-                logger.error("Ошибка остановки DnsAnomalyDetector", e);
+                logger.error(LocaleUtil.getString("error_stop_dns_anomaly"), e);
             }
         }
 
@@ -154,7 +155,7 @@ public class Main {
             try {
                 proxyServer.stop();
             } catch (Exception e) {
-                logger.error("Ошибка остановки HTTP proxy", e);
+                logger.error(LocaleUtil.getString("error_stop_http_proxy"), e);
             }
         }
 
@@ -162,7 +163,7 @@ public class Main {
             try {
                 dnsServer.stop();
             } catch (Exception e) {
-                logger.error("Ошибка остановки DNS server", e);
+                logger.error(LocaleUtil.getString("error_stop_dns_server"), e);
             }
         }
 
@@ -170,21 +171,21 @@ public class Main {
             try {
                 blacklist.close();
             } catch (Exception e) {
-                logger.error("Ошибка остановки blacklist loader", e);
+                logger.error(LocaleUtil.getString("error_stop_blacklist"), e);
             }
         }
 
-        logger.info("Штатная остановка системы завершена");
+        logger.info(LocaleUtil.getString("shutdown_completed"));
     }
 
     public static synchronized void startDnsServer() {
         if (dnsServer != null) {
-            logger.info("DNS server уже инициализирован");
+            logger.info(LocaleUtil.getString("dns_server_already_initialized"));
             return;
         }
 
         if (!config.getBoolean("dns.start")) {
-            logger.info("DNS server отключён в application.properties");
+            logger.info(LocaleUtil.getString("dns_server_disabled"));
             return;
         }
 
@@ -199,26 +200,26 @@ public class Main {
         dnsThread.start();
 
         logger.info(
-                "DNS server запущен в отдельном потоке на порту {}",
+                LocaleUtil.getString("dns_server_started"),
                 getConfig().getInt("dns.local.port")
         );
     }
 
     public static synchronized void startProxyServer() {
         if (proxyServer != null) {
-            logger.info("HTTP Proxy уже инициализирован");
+            logger.info(LocaleUtil.getString("http_proxy_already_initialized"));
             return;
         }
 
         if (!config.getBoolean("proxy.start")) {
-            logger.info("HTTP Proxy отключён в application.properties");
+            logger.info(LocaleUtil.getString("http_proxy_disabled"));
             return;
         }
 
         int port = getConfig().getInt("proxy.local.port");
 
         logger.info(
-                "Инициализация и запуск HTTP Proxy на порту {}",
+                LocaleUtil.getString("http_proxy_init_start"),
                 Optional.of(port)
         );
 

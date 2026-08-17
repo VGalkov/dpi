@@ -1,8 +1,8 @@
-
 package ru.galkov;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.util.LocaleUtil;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -12,7 +12,7 @@ import java.net.URL;
 import java.util.*;
 
 /**
- * Galkov V A s0506777@yandex.ru
+ * Galkov V A [s0506777@yandex.ru](mailto:s0506777@yandex.ru)
  */
 public final class AppConfig {
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
@@ -31,7 +31,7 @@ public final class AppConfig {
         String path = System.getProperty("config.path", DEFAULT_PATH);
 
         if (Holder.INSTANCE == null) {
-            logger.info("Попытка загрузки конфигурации из: {}", path);
+            logger.info(LocaleUtil.getString("config_attempt_load"), path);
             Holder.INSTANCE = new AppConfig(path);
         }
         return Holder.INSTANCE;
@@ -44,17 +44,17 @@ public final class AppConfig {
 
         try {
             if (configFile.exists() && configFile.isFile()) {
-                logger.info("✅ Конфиг найден на диске: {}", configFile.getAbsolutePath());
+                logger.info(LocaleUtil.getString("config_found_disk"), configFile.getAbsolutePath());
                 try (FileInputStream fis = new FileInputStream(configFile)) {
                     raw.load(fis);
                 }
             }
             else {
-                logger.warn("⚠️ Файл '{}' не найден на диске. Пытаемся найти внутри JAR...", path);
+                logger.warn(LocaleUtil.getString("config_not_found_disk"), path);
                 URL resourceUrl = AppConfig.class.getResource("/application.properties");
 
                 if (resourceUrl != null) {
-                    logger.info("✅ Конфиг найден внутри JAR.");
+                    logger.info(LocaleUtil.getString("config_found_jar"));
                     inputStream = resourceUrl.openStream();
                     try {
                         raw.load(inputStream);
@@ -63,17 +63,16 @@ public final class AppConfig {
                     }
                 } else {
                     throw new IllegalStateException(
-                            "❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось найти application.properties ни на диске, ни внутри JAR!\n" +
-                                    "   Проверьте, лежит ли файл application.properties рядом с ac.jar или внутри проекта в папке resources."
+                            LocaleUtil.getString("config_critical_not_found")
                     );
                 }
             }
 
             if (raw.isEmpty())
-                throw new IOException("⚠️ Конфиг не найден на диске или внутри JAR!");
+                throw new IOException(LocaleUtil.getString("config_empty"));
 
         } catch (IOException e) {
-            logger.error("❌ Ошибка загрузки конфигурации", e);
+            logger.error(LocaleUtil.getString("config_load_error"), e);
             throw e;
         }
 
@@ -97,14 +96,14 @@ public final class AppConfig {
             if (start < 0) break;
 
             int end = value.indexOf('}', start);
-            if (end < 0) throw new IllegalArgumentException("Непарный ${ в значении: '" + value + "'");
+            if (end < 0) throw new IllegalArgumentException(LocaleUtil.getString("unpaired_placeholder", value));
 
             String keyInside = value.substring(start + 2, end).trim();
             String replacement = raw.getProperty(keyInside);
 
             if (replacement == null) {
                 throw new IllegalStateException(
-                        "Не найдено значение для ключа '" + keyInside + "' при разрешении '${...}'");
+                        LocaleUtil.getString("value_not_found_for_key", keyInside));
             }
 
             replacement = resolveValue(replacement, raw);
@@ -116,7 +115,7 @@ public final class AppConfig {
     public String get(String key) {
         String val = props.getProperty(key);
         if (val == null)
-            throw new IllegalStateException("Ключ '" + key + "' не найден в application.properties");
+            throw new IllegalStateException(LocaleUtil.getString("key_not_found", key));
         return val;
     }
 

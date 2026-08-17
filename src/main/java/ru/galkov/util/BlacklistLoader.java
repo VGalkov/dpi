@@ -30,7 +30,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
     public BlacklistLoader(List<BlacklistSource> sources) {
         if (sources == null)
-            throw new IllegalArgumentException("Список источников blacklist не может быть null");
+            throw new IllegalArgumentException(LocaleUtil.getString("blacklist_sources_cannot_be_null"));
         this.sources = List.copyOf(sources);
     }
 
@@ -77,10 +77,10 @@ public final class BlacklistLoader implements AutoCloseable {
                 BlacklistSnapshot newSnapshot = buildSnapshot();
                 snapshot.set(newSnapshot);
                 loaded = true;
-                logger.info("{}", LogFields.kv("event", "BLACKLIST_RELOAD_OK"));
+                logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_ok")));
 
             } catch (Exception e) {
-                logger.error("{} error={}", LogFields.kv("event", "BLACKLIST_RELOAD_ERROR"), e.getMessage());
+                logger.error("{} error={}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_error")), e.getMessage());
             }
         }
     }
@@ -93,9 +93,9 @@ public final class BlacklistLoader implements AutoCloseable {
             try {
                 BlacklistSnapshot newSnapshot = buildSnapshot();
                 snapshot.set(newSnapshot);
-                logger.info("{}", LogFields.kv("event", "BLACKLIST_FIRST_LOAD_OK"));
+                logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_first_load_ok")));
             } catch (Exception e) {
-                logger.error("Критическая ошибка первой загрузки blacklist. Используется пустой snapshot.", e);
+                logger.error(LocaleUtil.getString("blacklist_critical_load_error"), e);
                 snapshot.set(BlacklistSnapshot.empty());
             } finally {
                 loaded = true;
@@ -115,11 +115,11 @@ public final class BlacklistLoader implements AutoCloseable {
         for (BlacklistSource source : sources) {
             try {
                 long startedAt = System.currentTimeMillis();
-                logger.info("Загрузка blacklist из источника: {}", source);
+                logger.info(LocaleUtil.getString("blacklist_source_loaded"), source);
                 List<BlacklistRule> rules = source.loadRules();
 
                 if (rules == null) {
-                    logger.warn("Источник {} вернул null вместо списка правил", source);
+                    logger.warn(LocaleUtil.getString("blacklist_source_null"), source);
                     continue;
                 }
 
@@ -148,7 +148,7 @@ public final class BlacklistLoader implements AutoCloseable {
                             continue;
                         } catch (Exception e) {
                             sourceInvalidRules++;
-                            logger.debug("Источник {}: пропущен некорректный CIDR: {}", source, normalizedValue);
+                            logger.debug(LocaleUtil.getString("blacklist_invalid_cidr"), source, normalizedValue);
                             continue;
                         }
                     }
@@ -158,7 +158,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
                         if (ip == null) {
                             sourceInvalidRules++;
-                            logger.debug("Источник {}: пропущен некорректный IP: {}", source, normalizedValue);
+                            logger.debug(LocaleUtil.getString("blacklist_invalid_ip"), source, normalizedValue);
                             continue;
                         }
 
@@ -173,7 +173,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
                     if (domain == null) {
                         sourceInvalidRules++;
-                        logger.debug("Источник {}: пропущено некорректное доменное правило: {}", source, normalizedValue);
+                        logger.debug(LocaleUtil.getString("blacklist_invalid_domain"), source, normalizedValue);
                         continue;
                     }
 
@@ -195,7 +195,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
                 long durationMillis = System.currentTimeMillis() - startedAt;
                 logger.info(
-                        "Источник blacklist загружен: source={}, получено={}, принято={}, некорректно={}, время={} мс",
+                        LocaleUtil.getString("blacklist_source_loaded"),
                         source,
                         rules.size(),
                         sourceAcceptedRules,
@@ -204,19 +204,19 @@ public final class BlacklistLoader implements AutoCloseable {
                 );
 
             } catch (Exception e) {
-                logger.error("Не удалось загрузить blacklist из источника {}", source, e);
+                logger.error(LocaleUtil.getString("blacklist_source_load_error"), source, e);
             }
         }
 
         if (!sources.isEmpty() && loadedSources == 0)
-            throw new IllegalStateException("Не удалось загрузить ни одного источника blacklist");
+            throw new IllegalStateException(LocaleUtil.getString("blacklist_no_sources_loaded"));
 
         Set<String> immutableIps = Set.copyOf(newIps);
         Set<IpCidr> immutableIpCidrs = Set.copyOf(newIpCidrs);
         BlacklistSnapshot newSnapshot = new BlacklistSnapshot(newDomainTrie, immutableIps, immutableIpCidrs);
 
         logger.info("{} {} {} {} {} {} {}",
-                LogFields.kv("event", "BLACKLIST_SNAPSHOT_BUILT"),
+                LogFields.kv("event", LocaleUtil.getString("blacklist_snapshot_built")),
                 LogFields.kv("sourcesLoaded", loadedSources),
                 LogFields.kv("rulesTotal", totalRules),
                 LogFields.kv("ipsUnique", immutableIps.size()),
@@ -234,7 +234,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
     private void startReloadScheduler() {
         if (!getConfig().getBoolean("blacklist.reload.enabled")) {
-            logger.info("Периодическое обновление blacklist отключено");
+            logger.info(LocaleUtil.getString("blacklist_reload_disabled"));
             return;
         }
 
@@ -242,7 +242,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
         if (intervalSeconds <= 0) {
             logger.warn(
-                    "Периодическое обновление blacklist отключено: некорректный интервал {}",
+                    LocaleUtil.getString("blacklist_reload_invalid_interval"),
                     intervalSeconds
             );
             return;
@@ -261,7 +261,7 @@ public final class BlacklistLoader implements AutoCloseable {
             );
 
             reloadExecutor.scheduleWithFixedDelay(this::reloadNow, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
-            logger.info("Периодическое обновление blacklist включено: каждые {} секунд", intervalSeconds);
+            logger.info(LocaleUtil.getString("blacklist_reload_enabled"), intervalSeconds);
         }
     }
 
@@ -318,7 +318,7 @@ public final class BlacklistLoader implements AutoCloseable {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
         }
-        logger.info("{}", LogFields.kv("event", "BLACKLIST_RELOAD_SCHEDULER_STOPPED"));
+        logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_scheduler_stopped")));
     }
 
     private static boolean isSubtreeRule(String rule, BlacklistSource source) {

@@ -7,6 +7,7 @@ import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import ru.galkov.util.BlacklistRule;
+import ru.galkov.util.LocaleUtil;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -29,14 +30,14 @@ public final class RknBlacklistSource implements BlacklistSource {
 
     public RknBlacklistSource(Path xmlFile) {
         if (xmlFile == null || !Files.isRegularFile(xmlFile))
-            throw new IllegalArgumentException("Файл XML РКН не задан или не найден: " + xmlFile);
+            throw new IllegalArgumentException(LocaleUtil.getString("rkn_xml_file_not_found", xmlFile));
         this.xmlFile = xmlFile;
     }
 
     @Override
     public List<BlacklistRule> loadRules() throws IOException {
         byte[] xmlBytes = Files.readAllBytes(xmlFile);
-        logger.info("Чтение реестра РКН из файла: {}", xmlFile.toAbsolutePath());
+        logger.info(LocaleUtil.getString("rkn_reading_register"), xmlFile.toAbsolutePath());
         return parseRegisterXml(xmlBytes);
     }
 
@@ -57,47 +58,51 @@ public final class RknBlacklistSource implements BlacklistSource {
                 Node node = children.item(i);
                 String tagName = node.getNodeName();
 
-                if ("domain".equals(tagName)) {
-                    String domain = node.getTextContent().trim().toLowerCase(Locale.ROOT);
-                    if (domain.startsWith("*.")) {
-                        domain = domain.substring(2);
+                switch (tagName) {
+                    case "domain" -> {
+                        String domain = node.getTextContent().trim().toLowerCase(Locale.ROOT);
+                        if (domain.startsWith("*.")) {
+                            domain = domain.substring(2);
+                        }
+                        if (!domain.isBlank()) {
+                            rules.add(new BlacklistRule(
+                                    BlacklistRule.RuleType.DOMAIN,
+                                    domain,
+                                    "RKN",
+                                    contentId,
+                                    blockType
+                            ));
+                        }
                     }
-                    if (!domain.isBlank()) {
-                        rules.add(new BlacklistRule(
-                                BlacklistRule.RuleType.DOMAIN,
-                                domain,
-                                "RKN",
-                                contentId,
-                                blockType
-                        ));
+                    case "ip" -> {
+                        String ip = node.getTextContent().trim();
+                        if (!ip.isBlank()) {
+                            rules.add(new BlacklistRule(
+                                    BlacklistRule.RuleType.IP,
+                                    ip,
+                                    "RKN",
+                                    contentId,
+                                    blockType
+                            ));
+                        }
                     }
-                } else if ("ip".equals(tagName)) {
-                    String ip = node.getTextContent().trim();
-                    if (!ip.isBlank()) {
-                        rules.add(new BlacklistRule(
-                                BlacklistRule.RuleType.IP,
-                                ip,
-                                "RKN",
-                                contentId,
-                                blockType
-                        ));
-                    }
-                } else if ("ipv6".equals(tagName)) {
-                    String ipv6 = node.getTextContent().trim();
-                    if (!ipv6.isBlank()) {
-                        rules.add(new BlacklistRule(
-                                BlacklistRule.RuleType.IP,
-                                ipv6,
-                                "RKN",
-                                contentId,
-                                blockType
-                        ));
+                    case "ipv6" -> {
+                        String ipv6 = node.getTextContent().trim();
+                        if (!ipv6.isBlank()) {
+                            rules.add(new BlacklistRule(
+                                    BlacklistRule.RuleType.IP,
+                                    ipv6,
+                                    "RKN",
+                                    contentId,
+                                    blockType
+                            ));
+                        }
                     }
                 }
             }
         }
 
-        logger.info("Из файла РКН извлечено правил: {}", rules.size());
+        logger.info(LocaleUtil.getString("rkn_rules_extracted"), rules.size());
         return rules;
     }
 
@@ -138,7 +143,7 @@ public final class RknBlacklistSource implements BlacklistSource {
             DocumentBuilder builder = factory.newDocumentBuilder();
             return builder.parse(new ByteArrayInputStream(xmlBytes));
         } catch (Exception e) {
-            throw new IOException("Ошибка разбора XML РКН", e);
+            throw new IOException(LocaleUtil.getString("rkn_xml_parse_error"), e);
         }
     }
 

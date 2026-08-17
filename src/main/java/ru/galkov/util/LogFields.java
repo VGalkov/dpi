@@ -13,7 +13,6 @@ public final class LogFields {
 
         String s = value.toString();
 
-        // экранирование пробелов и кавычек не делаем, пока достаточно простого формата
         return key + "=" + s;
     }
 

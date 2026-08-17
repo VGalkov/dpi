@@ -2,7 +2,9 @@ package ru.galkov.llm;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class DynamicBlocklist {
 
     private final ConcurrentMap<String, Long> blockedDomains = new ConcurrentHashMap<>();

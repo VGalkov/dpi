@@ -2,17 +2,23 @@ package ru.galkov.llm;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.util.LocaleUtil;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.*;
 
 import static ru.galkov.Main.getConfig;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class HttpAnomalyDetector {
 
     private static final Logger logger = LoggerFactory.getLogger(HttpAnomalyDetector.class);
@@ -57,35 +63,35 @@ public final class HttpAnomalyDetector {
         int ttlSeconds = 3600;
         try {
             String ttlStr = getConfig().get("http.anomaly-detector.processed-ttl-seconds");
-            if (ttlStr != null && !ttlStr.isEmpty()) {
+            if (!ttlStr.isEmpty()) {
                 ttlSeconds = Integer.parseInt(ttlStr);
             }
         } catch (NumberFormatException e) {
-            logger.warn("Некорректный http.anomaly-detector.processed-ttl-seconds, использую 3600");
+            logger.warn(LocaleUtil.getString("http_anomaly_detector_invalid_ttl"));
         }
         this.processedTtlMillis = ttlSeconds * 1000L;
 
         this.inspectBody = getConfig().getBoolean("http.anomaly-detector.inspect-body");
 
-        logger.info("HttpAnomalyDetector инициализирован: enabled={}, model={}, url={}, ttl={}s, inspectBody={}",
+        logger.info(LocaleUtil.getString("http_anomaly_detector_initialized"),
                 enabled, model, llmUrl, processedTtlMillis / 1000, inspectBody);
     }
 
 
     public void start() {
         if (!enabled) {
-            logger.info("HttpAnomalyDetector отключён в конфиге");
+            logger.info(LocaleUtil.getString("http_anomaly_detector_disabled"));
             return;
         }
 
         if (running) {
-            logger.warn("HttpAnomalyDetector уже запущен");
+            logger.warn(LocaleUtil.getString("http_anomaly_detector_already_running"));
             return;
         }
 
         running = true;
         executor.submit(this::processQueue);
-        logger.info("HttpAnomalyDetector запущен, модель={}", model);
+        logger.info(LocaleUtil.getString("http_anomaly_detector_started"), model);
     }
 
     public void stop() {
@@ -100,7 +106,7 @@ public final class HttpAnomalyDetector {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
         }
-        logger.info("HttpAnomalyDetector остановлен");
+        logger.info(LocaleUtil.getString("http_anomaly_detector_stopped"));
     }
 
     public boolean isEnabled() {
@@ -115,10 +121,10 @@ public final class HttpAnomalyDetector {
             HttpQueryRecord record = new HttpQueryRecord(clientIp, method, host, port, path,
                     headers, body, System.currentTimeMillis());
             queue.offer(record);
-            logger.debug("HttpAnomalyDetector: запись добавлена в очередь: client={}, host={}, method={}",
+            logger.debug(LocaleUtil.getString("http_anomaly_detector_record_added"),
                     clientIp, host, method);
         } catch (Exception e) {
-            logger.error("Ошибка добавления записи в очередь: {}", e.getMessage(), e);
+            logger.error(LocaleUtil.getString("http_anomaly_detector_queue_add_error"), e.getMessage(), e);
         }
     }
 
@@ -128,48 +134,48 @@ public final class HttpAnomalyDetector {
                 HttpQueryRecord record = queue.poll(1, TimeUnit.SECONDS);
                 if (record == null) continue;
                 analyzeRecord(record);
-                logger.debug("HttpAnomalyDetector: запись обработана: client={}, host={}",
+                logger.debug(LocaleUtil.getString("http_anomaly_detector_record_processed"),
                         record.getClientIp(), record.getHost());
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                logger.warn("HttpAnomalyDetector: поток прерван");
+                logger.warn(LocaleUtil.getString("http_anomaly_detector_thread_interrupted"));
                 break;
             } catch (Exception e) {
-                logger.error("HttpAnomalyDetector: ошибка анализа записи: {}", e.getMessage(), e);
+                logger.error(LocaleUtil.getString("http_anomaly_detector_analysis_error"), e.getMessage(), e);
             }
         }
     }
 
     private HttpAnalysisResult analyzeRecord(HttpQueryRecord record) {
         if (llmUrl == null || llmUrl.isEmpty()) {
-            logger.warn("LLM Studio URL не настроен");
+            logger.warn(LocaleUtil.getString("http_anomaly_detector_llm_url_not_configured"));
             return null;
         }
 
         if (model == null || model.isEmpty()) {
-            logger.warn("LLM Studio model не настроен");
+            logger.warn(LocaleUtil.getString("http_anomaly_detector_llm_model_not_configured"));
             return null;
         }
 
         try {
             String prompt = buildPrompt(record);
 
-            logger.info("HttpAnomalyDetector: отправка запроса в LLM Studio: model={}, url={}", model, llmUrl);
-            logger.debug("HttpAnomalyDetector: промпт: {}", prompt);
+            logger.info(LocaleUtil.getString("http_anomaly_detector_sending_request"), model, llmUrl);
+            logger.debug(LocaleUtil.getString("http_anomaly_detector_prompt"), prompt);
 
             String response = sendToLlm(prompt);
 
             if (response == null || response.isEmpty()) {
-                logger.warn("HttpAnomalyDetector: пустой ответ от LLM Studio");
+                logger.warn(LocaleUtil.getString("http_anomaly_detector_empty_response"));
                 return null;
             }
 
-            logger.debug("HttpAnomalyDetector: ответ LLM Studio: {}", response);
+            logger.debug(LocaleUtil.getString("http_anomaly_detector_response"), response);
             return parseResponse(response);
 
         } catch (Exception e) {
-            logger.error("Ошибка анализа записи: {}", e.getMessage(), e);
+            logger.error(LocaleUtil.getString("http_anomaly_detector_analysis_error"), e.getMessage(), e);
             return null;
         }
     }
@@ -181,41 +187,38 @@ public final class HttpAnomalyDetector {
                     record.getBody().substring(0, 500) + "..." : record.getBody();
         }
 
-        return String.format(
-                "Ты — система безопасности, анализирующая HTTP-трафик на аномалии.\n\n" +
-                        "Проанализируй HTTP-запрос:\n" +
-                        "- IP клиента: %s\n" +
-                        "- Метод: %s\n" +
-                        "- Хост: %s\n" +
-                        "- Порт: %d\n" +
-                        "- Путь: %s\n" +
-                        "- Заголовки:\n%s\n" +
-                        "- Тело (первые 500 символов): %s\n\n" +
-                        "Критерии подозрительности:\n" +
-                        "1. SQL Injection: SELECT, UNION, DROP, INSERT, UPDATE, DELETE, OR 1=1 → confidence=0.9\n" +
-                        "2. XSS: <script>, javascript:, onerror=, onload= → confidence=0.8\n" +
-                        "3. Path Traversal: ../, ..\\\\, 2e2e2f → confidence=0.8\n" +
-                        "4. Command Injection: ;, |, &, $(), 0a, 0d → confidence=0.7\n" +
-                        "5. Подозрительный User-Agent: curl, wget, python, nikto, sqlmap, nmap → confidence=0.6\n" +
-                        "6. Подозрительный хост: IP-адрес или необычный TLD (.xyz, .top, .tk) → confidence=0.5\n\n" +
-                        "Ответь ТОЛЬКО в формате JSON:\n" +
-                        "{\n" +
-                        "  \"isSuspicious\": true/false,\n" +
-                        "  \"confidence\": 0.0-1.0,\n" +
-                        "  \"reason\": \"краткое объяснение\",\n" +
-                        "  \"recommendedActions\": [\"BLOCK_REQUEST\"/\"LOG_ONLY\"/\"NONE\"]\n" +
-                        "}",
-                record.getClientIp(),
-                record.getMethod(),
-                record.getHost(),
-                record.getPort(),
-                record.getPath(),
-                record.getHeaders(),
-                bodyPreview
-        );
+        return loadPromptTemplate("prompts/http_anomaly_prompt.txt")
+                .replace("{clientIp}", record.getClientIp())
+                .replace("{method}", record.getMethod())
+                .replace("{host}", record.getHost())
+                .replace("{port}", String.valueOf(record.getPort()))
+                .replace("{path}", record.getPath())
+                .replace("{headers}", record.getHeaders())
+                .replace("{bodyPreview}", bodyPreview);
+    }
+
+    private String loadPromptTemplate(String resourceName) {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourceName)) {
+            if (is == null) {
+                logger.warn("Шаблон промпта не найден: {}", resourceName);
+                return "";
+            }
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            logger.error("Ошибка загрузки шаблона промпта: {}", resourceName, e);
+            return "";
+        }
     }
 
     private String sendToLlm(String prompt) throws IOException, InterruptedException {
+        // Экранируем специальные символы для JSON
+        String escapedPrompt = prompt
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+
         String jsonBody = String.format(
                 "{" +
                         "\"model\": \"%s\"," +
@@ -226,7 +229,7 @@ public final class HttpAnomalyDetector {
                         "\"max_tokens\": 500" +
                         "}",
                 model,
-                prompt.replace("\"", "\\\"").replace("\n", "\\n")
+                escapedPrompt
         );
 
         HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -242,7 +245,7 @@ public final class HttpAnomalyDetector {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
-            logger.warn("LLM Studio вернул статус: {}", response.statusCode());
+            logger.warn(LocaleUtil.getString("http_anomaly_detector_llm_status"), response.statusCode());
             return null;
         }
 
@@ -270,16 +273,16 @@ public final class HttpAnomalyDetector {
                     .replace("\\\"", "\"")
                     .replace("\\n", "\n");
 
-            logger.debug("HttpAnomalyDetector: распарсенный JSON от LLM: {}", content);
+            logger.debug(LocaleUtil.getString("http_anomaly_detector_parsed_json"), content);
 
             boolean isSuspicious = content.contains("\"isSuspicious\":true");
             double confidence = extractConfidence(content);
             String reason = extractField(content, "reason");
-            logger.info("HttpAnomalyDetector: результат анализа: isSuspicious={}, confidence={}, reason={}",
+            logger.info(LocaleUtil.getString("http_anomaly_detector_analysis_result"),
                     isSuspicious, confidence, reason);
             return new HttpAnalysisResult(isSuspicious, confidence, reason, null);
         } catch (Exception e) {
-            logger.debug("Ошибка парсинга ответа LLM: {}", e.getMessage());
+            logger.debug(LocaleUtil.getString("http_anomaly_detector_parse_error"), e.getMessage());
             return null;
         }
     }

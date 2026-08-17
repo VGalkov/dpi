@@ -4,6 +4,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 
 /**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  * Модель IP-сети в CIDR для IPv4 и IPv6.
  */
 public final class IpCidr {
@@ -17,7 +18,7 @@ public final class IpCidr {
         int slash = cidr.indexOf('/');
 
         if (slash <= 0 || slash == cidr.length() - 1)
-            throw new UnknownHostException("Некорректный CIDR: " + cidr);
+            throw new UnknownHostException(LocaleUtil.getString("invalid_cidr", cidr));
 
         String ipPart = cidr.substring(0, slash);
         String prefixPart = cidr.substring(slash + 1);
@@ -28,7 +29,7 @@ public final class IpCidr {
         int maxPrefix = this.network.getAddress().length == 4 ? 32 : 128;
 
         if (prefixLength < 0 || prefixLength > maxPrefix)
-            throw new UnknownHostException("Префикс вне диапазона 0-" + maxPrefix + ": " + cidr);
+            throw new UnknownHostException(LocaleUtil.getString("prefix_out_of_range", maxPrefix, cidr));
 
         this.networkBytes = this.network.getAddress();
         this.maskBytes = createMask(this.network.getAddress().length, prefixLength);

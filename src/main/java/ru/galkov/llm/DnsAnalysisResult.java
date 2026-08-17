@@ -2,7 +2,9 @@ package ru.galkov.llm;
 
 import java.util.Collections;
 import java.util.List;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class DnsAnalysisResult {
     private final boolean isSuspicious;
     private final double confidence;
@@ -26,9 +28,5 @@ public final class DnsAnalysisResult {
 
     public String getReason() {
         return reason;
-    }
-
-    public List<String> getRecommendedActions() {
-        return recommendedActions;
     }
 }
