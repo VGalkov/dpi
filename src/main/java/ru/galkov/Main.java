@@ -35,7 +35,6 @@ public class Main {
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
-
             List<BlacklistSource> sources = new ArrayList<>();
 
             addLocalFileSource(sources);

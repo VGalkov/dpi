@@ -31,7 +31,11 @@ public final class AppConfig {
         String path = System.getProperty("config.path", DEFAULT_PATH);
 
         if (Holder.INSTANCE == null) {
-            logger.info(LocaleUtil.getString("config_attempt_load"), path);
+            LocaleUtil.reload();
+            String testKey = LocaleUtil.getString("config_attempt_load");
+            logger.debug("DEBUG: Loaded locale test: {}", testKey);
+
+            logger.info(testKey, path);
             Holder.INSTANCE = new AppConfig(path);
         }
         return Holder.INSTANCE;
