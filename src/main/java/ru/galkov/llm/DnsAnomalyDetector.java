@@ -10,8 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.*;
 
 import static ru.galkov.Main.getConfig;
@@ -26,6 +25,7 @@ public final class DnsAnomalyDetector {
     private final Duration timeout;
     private final String apiKey;
     private final double trustThreshold;
+    private final long processedTtlMillis;
 
     private final BlockingQueue<DnsQueryRecord> queue = new LinkedBlockingQueue<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
@@ -34,8 +34,8 @@ public final class DnsAnomalyDetector {
         return t;
     });
 
-    private final Set<String> processedDomains = new HashSet<>();
-    private final Set<String> processedClients = new HashSet<>();
+    private final Map<String, Long> processedDomains = new ConcurrentHashMap<>();
+    private final Map<String, Long> processedClients = new ConcurrentHashMap<>();
 
     private volatile boolean running;
 
@@ -59,7 +59,50 @@ public final class DnsAnomalyDetector {
         }
         this.trustThreshold = threshold;
 
-        logger.info("DnsAnomalyDetector инициализирован: enabled={}, model={}, url={}", enabled, model, llmUrl);
+        // TTL по умолчанию 1 час (3600 секунд)
+        this.processedTtlMillis = getConfig().getInt("dns.anomaly-detector.processed-ttl-seconds") * 1000L;
+
+        logger.info("DnsAnomalyDetector инициализирован: enabled={}, model={}, url={}, ttl={}s",
+                enabled, model, llmUrl, processedTtlMillis / 1000);
+    }
+
+    private boolean isProcessed(String domain, String clientIp) {
+        return processedDomains.containsKey(domain) || processedClients.containsKey(clientIp);
+    }
+
+    private void markProcessed(String domain, String clientIp) {
+        long now = System.currentTimeMillis();
+        processedDomains.put(domain, now);
+        processedClients.put(clientIp, now);
+    }
+
+    private void cleanupProcessed() {
+        long now = System.currentTimeMillis();
+        long expiryTime = now - processedTtlMillis;
+
+        int removedDomains = 0;
+        int removedClients = 0;
+
+        // Очистка устаревших доменов
+        for (Map.Entry<String, Long> entry : processedDomains.entrySet()) {
+            if (entry.getValue() < expiryTime) {
+                processedDomains.remove(entry.getKey());
+                removedDomains++;
+            }
+        }
+
+        // Очистка устаревших клиентов
+        for (Map.Entry<String, Long> entry : processedClients.entrySet()) {
+            if (entry.getValue() < expiryTime) {
+                processedClients.remove(entry.getKey());
+                removedClients++;
+            }
+        }
+
+        if (removedDomains > 0 || removedClients > 0) {
+            logger.info("DnsAnomalyDetector: очистка устаревших записей: domains={}, clients={}",
+                    removedDomains, removedClients);
+        }
     }
 
     public void start() {
@@ -100,12 +143,17 @@ public final class DnsAnomalyDetector {
     public void recordQuery(String clientIp, String domain, int queryType) {
         if (!enabled || !running) return;
 
-        if (processedDomains.contains(domain) || processedClients.contains(clientIp)) {
+        // Проверка до добавления в очередь
+        if (isProcessed(domain, clientIp)) {
             return;
         }
 
         try {
             DnsQueryRecord record = new DnsQueryRecord(clientIp, domain, queryType, System.currentTimeMillis());
+
+            // Удалить все существующие записи с таким же доменом из очереди
+            queue.removeIf(r -> r.getDomain().equals(domain) || r.getClientIp().equals(clientIp));
+
             queue.offer(record);
             logger.debug("DnsAnomalyDetector: запись добавлена в очередь: client={}, domain={}, queryType={}",
                     clientIp, domain, queryType);
@@ -115,22 +163,39 @@ public final class DnsAnomalyDetector {
     }
 
     private void processQueue() {
+        long lastCleanupTime = System.currentTimeMillis();
+        long cleanupIntervalMillis = 60000; // Очистка раз в минуту
+
         while (running) {
             try {
+                // Периодическая очистка устаревших записей
+                long now = System.currentTimeMillis();
+                if (now - lastCleanupTime > cleanupIntervalMillis) {
+                    cleanupProcessed();
+                    lastCleanupTime = now;
+                    logger.debug("DnsAnomalyDetector: очистка processedDomains/processedClients выполнена");
+                }
+
                 DnsQueryRecord record = queue.poll(1, TimeUnit.SECONDS);
 
                 if (record == null) {
                     continue;
                 }
 
-                if (processedDomains.contains(record.getDomain()) || processedClients.contains(record.getClientIp())) {
+                String domain = record.getDomain();
+
+                // Двойная проверка
+                if (isProcessed(domain, record.getClientIp())) {
                     logger.debug("DnsAnomalyDetector: пропуск записи (уже обработано): client={}, domain={}",
-                            record.getClientIp(), record.getDomain());
+                            record.getClientIp(), domain);
                     continue;
                 }
 
+                // Сразу помечаем как обрабатываемый
+                markProcessed(domain, record.getClientIp());
+
                 logger.info("DnsAnomalyDetector: анализ записи: client={}, domain={}, queryType={}, entropy={}",
-                        record.getClientIp(), record.getDomain(), record.getQueryType(), record.getEntropy());
+                        record.getClientIp(), domain, record.getQueryType(), record.getEntropy());
 
                 DnsAnalysisResult result = analyzeRecord(record);
 
@@ -138,17 +203,14 @@ public final class DnsAnomalyDetector {
                     logger.info("{} {} {} {} {} {} {}",
                             LogFields.kv("event", "DNS_ANOMALY_DETECTED"),
                             LogFields.kv("client", record.getClientIp()),
-                            LogFields.kv("domain", record.getDomain()),
+                            LogFields.kv("domain", domain),
                             LogFields.kv("queryType", record.getQueryType()),
                             LogFields.kv("confidence", result.getConfidence()),
                             LogFields.kv("reason", result.getReason()),
                             LogFields.kv("timestamp", record.getTimestamp()));
-
-                    processedDomains.add(record.getDomain());
-                    processedClients.add(record.getClientIp());
                 } else if (result != null) {
                     logger.info("DnsAnomalyDetector: запрос не подозрителен: client={}, domain={}, confidence={}, reason={}",
-                            record.getClientIp(), record.getDomain(), result.getConfidence(), result.getReason());
+                            record.getClientIp(), domain, result.getConfidence(), result.getReason());
                 }
 
             } catch (InterruptedException e) {
@@ -209,7 +271,14 @@ public final class DnsAnomalyDetector {
                         "Критерии подозрительности:\n" +
                         "1. DNS tunneling — очень длинные домены (>50 символов), высокая энтропия (>3.5), много поддоменов (>5).\n" +
                         "2. DGA-домены — случайные наборы символов, отсутствие осмысленных слов.\n" +
-                        "3. TXT-запросы к подозрительным доменам — возможный C2-канал.\n\n" +
+                        "3. TXT-запросы к подозрительным доменам — возможный C2-канал.\n" +
+                        "4. Частые запросы к одному домену с одного IP (>10 запросов в минуту) — возможный бот или сканер.\n" +
+                        "5. Запросы к доменам с цифрами и дефисами в случайном порядке (например, a1b2-c3d4.xyz) — возможный DGA.\n" +
+                        "6. Запросы к доменам с необычными TLD (.xyz, .top, .club, .work) — часто используются для спама.\n" +
+                        "7. Запросы к доменам, которые были зарегистрированы недавно (<30 дней) — возможный фишинг.\n" +
+                        "8. Запросы с нестандартными типами записей (NULL, CNAME на внешние домены, множественные TXT) — возможный C2.\n" +
+                        "9. Запросы к доменам с IP-адресами в имени (например, 192-168-1-1.example.com) — возможный обход blacklist.\n" +
+                        "10. Запросы к доменам, которые содержат ключевые слова (malware, phishing, hack, exploit) — явная угроза.\n\n" +
                         "Ответь ТОЛЬКО в формате JSON:\n" +
                         "{\n" +
                         "  \"isSuspicious\": true/false,\n" +
