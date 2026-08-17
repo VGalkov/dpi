@@ -2,7 +2,6 @@ package ru.galkov.llm;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.util.LogFields;
 
 import java.io.IOException;
 import java.net.URI;
@@ -10,7 +9,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Map;
 import java.util.concurrent.*;
 
 import static ru.galkov.Main.getConfig;
@@ -35,11 +33,7 @@ public final class HttpAnomalyDetector {
         return t;
     });
 
-    private final Map<String, Long> processedHosts = new ConcurrentHashMap<>();
-    private final Map<String, Long> processedClients = new ConcurrentHashMap<>();
-
     private volatile boolean running;
-
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
@@ -77,42 +71,6 @@ public final class HttpAnomalyDetector {
                 enabled, model, llmUrl, processedTtlMillis / 1000, inspectBody);
     }
 
-    private boolean isProcessed(String host, String clientIp) {
-        return processedHosts.containsKey(host) || processedClients.containsKey(clientIp);
-    }
-
-    private void markProcessed(String host, String clientIp) {
-        long now = System.currentTimeMillis();
-        processedHosts.put(host, now);
-        processedClients.put(clientIp, now);
-    }
-
-    private void cleanupProcessed() {
-        long now = System.currentTimeMillis();
-        long expiryTime = now - processedTtlMillis;
-
-        int removedHosts = 0;
-        int removedClients = 0;
-
-        for (Map.Entry<String, Long> entry : processedHosts.entrySet()) {
-            if (entry.getValue() < expiryTime) {
-                processedHosts.remove(entry.getKey());
-                removedHosts++;
-            }
-        }
-
-        for (Map.Entry<String, Long> entry : processedClients.entrySet()) {
-            if (entry.getValue() < expiryTime) {
-                processedClients.remove(entry.getKey());
-                removedClients++;
-            }
-        }
-
-        if (removedHosts > 0 || removedClients > 0) {
-            logger.info("HttpAnomalyDetector: очистка устаревших записей: hosts={}, clients={}, ttl={}s",
-                    removedHosts, removedClients, processedTtlMillis / 1000);
-        }
-    }
 
     public void start() {
         if (!enabled) {
@@ -156,80 +114,31 @@ public final class HttpAnomalyDetector {
         try {
             HttpQueryRecord record = new HttpQueryRecord(clientIp, method, host, port, path,
                     headers, body, System.currentTimeMillis());
-
-            queue.removeIf(r -> r.getHost().equals(host));
-
             queue.offer(record);
             logger.debug("HttpAnomalyDetector: запись добавлена в очередь: client={}, host={}, method={}",
                     clientIp, host, method);
         } catch (Exception e) {
-            logger.debug("Ошибка добавления записи в очередь: {}", e.getMessage());
+            logger.error("Ошибка добавления записи в очередь: {}", e.getMessage(), e);
         }
     }
 
-    private void processQueue() {
-        long lastCleanupTime = System.currentTimeMillis();
-        long cleanupIntervalMillis = 10000;
-        long lastLlmRequestTime = 0;
-        long llmRequestIntervalMillis = 120000;
-
+    public void processQueue() {
         while (running) {
             try {
-                long now = System.currentTimeMillis();
-
-                if (now - lastLlmRequestTime < llmRequestIntervalMillis) {
-                    Thread.sleep(100);
-                    continue;
-                }
-
-                if (now - lastCleanupTime > cleanupIntervalMillis) {
-                    cleanupProcessed();
-                    lastCleanupTime = now;
-                    logger.info("HttpAnomalyDetector: очистка processedDomains/processedClients выполнена, ttl={}s",
-                            processedTtlMillis / 1000);
-                }
-
                 HttpQueryRecord record = queue.poll(1, TimeUnit.SECONDS);
                 if (record == null) continue;
-                String host = record.getHost();
-
-                if (isProcessed(host, record.getClientIp())) {
-                    logger.debug("HttpAnomalyDetector: пропуск записи (уже обработано): client={}, host={}",
-                            record.getClientIp(), host);
-                    continue;
-                }
-
-                markProcessed(host, record.getClientIp());
-
-                logger.info("HttpAnomalyDetector: анализ записи: client={}, host={}, method={}, path={}",
-                        record.getClientIp(), host, record.getMethod(), record.getPath());
-
-                HttpAnalysisResult result = analyzeRecord(record);
-                lastLlmRequestTime = System.currentTimeMillis();
-
-                if (result != null && result.isSuspicious() && result.getConfidence() >= trustThreshold) {
-                    logger.info("{} {} {} {} {} {} {}",
-                            LogFields.kv("event", "HTTP_ANOMALY_DETECTED"),
-                            LogFields.kv("client", record.getClientIp()),
-                            LogFields.kv("host", host),
-                            LogFields.kv("method", record.getMethod()),
-                            LogFields.kv("confidence", result.getConfidence()),
-                            LogFields.kv("reason", result.getReason()),
-                            LogFields.kv("timestamp", record.getTimestamp()));
-                } else if (result != null) {
-                    logger.info("HttpAnomalyDetector: запрос не подозрителен: client={}, host={}, method={}, confidence={}, reason={}",
-                            record.getClientIp(), host, record.getMethod(), result.getConfidence(), result.getReason());
-                }
+                analyzeRecord(record);
+                logger.debug("HttpAnomalyDetector: запись обработана: client={}, host={}",
+                        record.getClientIp(), record.getHost());
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                logger.warn("HttpAnomalyDetector: поток прерван");
                 break;
             } catch (Exception e) {
-                logger.error("Ошибка обработки записи: {}", e.getMessage());
+                logger.error("HttpAnomalyDetector: ошибка анализа записи: {}", e.getMessage(), e);
             }
         }
-
-        logger.info("HttpAnomalyDetector завершил обработку очереди");
     }
 
     private HttpAnalysisResult analyzeRecord(HttpQueryRecord record) {
@@ -257,7 +166,6 @@ public final class HttpAnomalyDetector {
             }
 
             logger.debug("HttpAnomalyDetector: ответ LLM Studio: {}", response);
-
             return parseResponse(response);
 
         } catch (Exception e) {
@@ -276,20 +184,20 @@ public final class HttpAnomalyDetector {
         return String.format(
                 "Ты — система безопасности, анализирующая HTTP-трафик на аномалии.\n\n" +
                         "Проанализируй HTTP-запрос:\n" +
-                        "- Client IP: %s\n" +
-                        "- Method: %s\n" +
-                        "- Host: %s\n" +
-                        "- Port: %d\n" +
-                        "- Path: %s\n" +
-                        "- Headers:\n%s\n" +
-                        "- Body (first 500 chars): %s\n\n" +
+                        "- IP клиента: %s\n" +
+                        "- Метод: %s\n" +
+                        "- Хост: %s\n" +
+                        "- Порт: %d\n" +
+                        "- Путь: %s\n" +
+                        "- Заголовки:\n%s\n" +
+                        "- Тело (первые 500 символов): %s\n\n" +
                         "Критерии подозрительности:\n" +
                         "1. SQL Injection: SELECT, UNION, DROP, INSERT, UPDATE, DELETE, OR 1=1 → confidence=0.9\n" +
                         "2. XSS: <script>, javascript:, onerror=, onload= → confidence=0.8\n" +
                         "3. Path Traversal: ../, ..\\\\, 2e2e2f → confidence=0.8\n" +
                         "4. Command Injection: ;, |, &, $(), 0a, 0d → confidence=0.7\n" +
-                        "5. Suspicious User-Agent: curl, wget, python, nikto, sqlmap, nmap → confidence=0.6\n" +
-                        "6. Suspicious Host: IP-адрес или необычный TLD (.xyz, .top, .tk) → confidence=0.5\n\n" +
+                        "5. Подозрительный User-Agent: curl, wget, python, nikto, sqlmap, nmap → confidence=0.6\n" +
+                        "6. Подозрительный хост: IP-адрес или необычный TLD (.xyz, .top, .tk) → confidence=0.5\n\n" +
                         "Ответь ТОЛЬКО в формате JSON:\n" +
                         "{\n" +
                         "  \"isSuspicious\": true/false,\n" +
