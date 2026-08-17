@@ -9,7 +9,17 @@ public final class DnsQueryRecord {
     private final double entropy;
     private final int subdomainCount;
 
-    public DnsQueryRecord(String clientIp, String domain, int queryType, long timestamp) {
+    // Поля заголовка DNS
+    private final boolean isQuery;
+    private final int opcode;
+    private final boolean isTruncated;
+    private final boolean recursionDesired;
+    private final int z;
+    private final int rcode;
+
+    public DnsQueryRecord(String clientIp, String domain, int queryType, long timestamp,
+                          boolean isQuery, int opcode, boolean isTruncated,
+                          boolean recursionDesired, int z, int rcode) {
         this.clientIp = clientIp;
         this.domain = domain;
         this.queryType = queryType;
@@ -17,6 +27,12 @@ public final class DnsQueryRecord {
         this.domainLength = domain != null ? domain.length() : 0;
         this.entropy = calculateEntropy(domain);
         this.subdomainCount = countSubdomains(domain);
+        this.isQuery = isQuery;
+        this.opcode = opcode;
+        this.isTruncated = isTruncated;
+        this.recursionDesired = recursionDesired;
+        this.z = z;
+        this.rcode = rcode;
     }
 
     private static double calculateEntropy(String domain) {
@@ -75,5 +91,29 @@ public final class DnsQueryRecord {
 
     public int getSubdomainCount() {
         return subdomainCount;
+    }
+
+    public boolean isQuery() {
+        return isQuery;
+    }
+
+    public int getOpcode() {
+        return opcode;
+    }
+
+    public boolean isTruncated() {
+        return isTruncated;
+    }
+
+    public boolean isRecursionDesired() {
+        return recursionDesired;
+    }
+
+    public int getZ() {
+        return z;
+    }
+
+    public int getRcode() {
+        return rcode;
     }
 }

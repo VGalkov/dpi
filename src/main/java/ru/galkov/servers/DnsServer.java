@@ -370,7 +370,14 @@ public class DnsServer {
 
         if (dnsAnomalyDetector != null && dnsAnomalyDetector.isEnabled()) {
             int queryType = query.getQuestion().getType();
-            dnsAnomalyDetector.recordQuery(clientIp, questionName, queryType);
+            boolean isQuery = !query.getHeader().getFlag(Flags.QR);
+            int opcode = query.getHeader().getOpcode();
+            boolean isTruncated = query.getHeader().getFlag(Flags.TC);
+            boolean recursionDesired = query.getHeader().getFlag(Flags.RD);
+            int rcode = query.getHeader().getRcode();
+
+            dnsAnomalyDetector.recordQuery(clientIp, questionName, queryType,
+                    isQuery, opcode, isTruncated, recursionDesired, 0, rcode);
         }
 
         Message response = forwardToResolver(query, clientIp);
@@ -497,12 +504,19 @@ public class DnsServer {
                     continue;
                 }
 
-                Message response = forwardToResolver(query, clientIp);
-
                 if (dnsAnomalyDetector != null && dnsAnomalyDetector.isEnabled()) {
                     int queryType = query.getQuestion().getType();
-                    dnsAnomalyDetector.recordQuery(clientIp, questionName, queryType);
+                    boolean isQuery = !query.getHeader().getFlag(Flags.QR);
+                    int opcode = query.getHeader().getOpcode();
+                    boolean isTruncated = query.getHeader().getFlag(Flags.TC);
+                    boolean recursionDesired = query.getHeader().getFlag(Flags.RD);
+                    int rcode = query.getHeader().getRcode();
+
+                    dnsAnomalyDetector.recordQuery(clientIp, questionName, queryType,
+                            isQuery, opcode, isTruncated, recursionDesired, 0, rcode);
                 }
+
+                Message response = forwardToResolver(query, clientIp);
 
                 if (response == null) {
                     logger.warn("TCP [{}] <- upstream не ответил: {}", clientIp, questionName);
