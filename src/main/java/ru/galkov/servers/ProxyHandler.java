@@ -2,6 +2,7 @@ package ru.galkov.servers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.util.BlacklistLoader;
 import ru.galkov.util.BlockDecision;
 import ru.galkov.util.HostNormalizer;
@@ -40,11 +41,14 @@ public class ProxyHandler implements Runnable {
     private final int remoteReadTimeoutMillis;
     private final int maxHeaderBytes;
     private final long maxBodyBytes;
+    private static HttpAnomalyDetector httpAnomalyDetector;
 
-    public ProxyHandler(Socket clientSocket, String clientIp, BlacklistLoader blacklist) {
+    public ProxyHandler(Socket clientSocket, String clientIp, BlacklistLoader blacklist,
+                        HttpAnomalyDetector httpAnomalyDetector) {
         this.clientSocket = clientSocket;
         this.clientIp = clientIp;
         this.blacklist = blacklist;
+        ProxyHandler.httpAnomalyDetector = httpAnomalyDetector;
         this.connectTimeoutMillis = getConfig().getInt("proxy.connect-timeout-millis");
         this.clientReadTimeoutMillis = getConfig().getInt("proxy.client-read-timeout-millis");
         this.remoteReadTimeoutMillis = getConfig().getInt("proxy.remote-read-timeout-millis");
@@ -158,6 +162,11 @@ public class ProxyHandler implements Runnable {
                 LogFields.kv("host", host),
                 LogFields.kv("port", port));
 
+        // Отправка в HttpAnomalyDetector
+        if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) {
+            httpAnomalyDetector.recordRequest(clientIp, "CONNECT", host, port, "/", "", null);
+        }
+
         BlockDecision decision = checkBlockedHostOrIp(host);
 
         if (decision.isBlocked()) {
@@ -181,10 +190,10 @@ public class ProxyHandler implements Runnable {
             clientSocket.setTcpNoDelay(true);
 
             String response = """
-                    HTTP/1.1 200 Connection established\r
-                    Proxy-Agent: MyProxy\r
-                    \r
-                    """;
+                HTTP/1.1 200 Connection established\r
+                Proxy-Agent: MyProxy\r
+                \r
+                """;
 
             clientOut.write(response.getBytes(StandardCharsets.ISO_8859_1));
             clientOut.flush();
@@ -643,6 +652,27 @@ public class ProxyHandler implements Runnable {
         String finalHost = hostAndPort.host;
         int finalPort = hostAndPort.port;
 
+        // Чтение тела запроса (если есть)
+        String body = null;
+        if (headers.contentLength > 0 && headers.contentLength <= maxBodyBytes) {
+            byte[] bodyBytes = new byte[(int) headers.contentLength];
+            int totalRead = 0;
+            while (totalRead < bodyBytes.length) {
+                int read = clientIn.read(bodyBytes, totalRead, bodyBytes.length - totalRead);
+                if (read == -1) break;
+                totalRead += read;
+            }
+            body = new String(bodyBytes, StandardCharsets.UTF_8);
+        }
+
+        // Отправка в HttpAnomalyDetector
+        if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) {
+            String path = extractHttpPath(target);
+            httpAnomalyDetector.recordRequest(clientIp, method, finalHost, finalPort, path,
+                    headers.rawHeaders, body);
+        }
+
+        // Проверка blacklist
         BlockDecision decision = checkBlockedHostOrIp(finalHost);
 
         if (decision.isBlocked()) {
@@ -693,7 +723,10 @@ public class ProxyHandler implements Runnable {
 
             remoteOut.write(finalRequest.getBytes(StandardCharsets.ISO_8859_1));
 
-            if (headers.chunked) {
+            // Отправляем тело на удалённый сервер
+            if (body != null && !body.isEmpty()) {
+                remoteOut.write(body.getBytes(StandardCharsets.UTF_8));
+            } else if (headers.chunked) {
                 relayChunkedRequestBody(clientIn, remoteOut);
             } else if (headers.contentLength > 0) {
                 if (headers.contentLength > maxBodyBytes) {
@@ -723,6 +756,8 @@ public class ProxyHandler implements Runnable {
             sendError(clientOut, 504, "Gateway Timeout");
         }
     }
+
+
 
     private HttpHeaders readHttpHeaders(InputStream clientIn, String firstLine) throws IOException {
         StringBuilder headersBuilder = new StringBuilder();

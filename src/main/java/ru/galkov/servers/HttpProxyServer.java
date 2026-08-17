@@ -2,6 +2,7 @@ package ru.galkov.servers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.util.BlacklistLoader;
 
 import java.io.IOException;
@@ -22,7 +23,7 @@ import static ru.galkov.Main.getConfig;
 public class HttpProxyServer {
 
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
-
+    private final HttpAnomalyDetector httpAnomalyDetector;  // НОВОЕ
     private final BlacklistLoader blacklist;
     private final int port;
     private final ExecutorService workerPool;
@@ -43,9 +44,10 @@ public class HttpProxyServer {
     private volatile ServerSocket serverSocket;
     private volatile Thread serverThread;
 
-    public HttpProxyServer(int port, BlacklistLoader blacklist) {
+    public HttpProxyServer(int port, BlacklistLoader blacklist, HttpAnomalyDetector httpAnomalyDetector) {
         this.port = port;
         this.blacklist = Objects.requireNonNull(blacklist);
+        this.httpAnomalyDetector = httpAnomalyDetector;
         this.maxConnections = getConfig().getInt("proxy.max-connections");
         this.maxConnectionsPerClient = getConfig().getInt("proxy.max-connections-per-client");
 
@@ -166,7 +168,7 @@ public class HttpProxyServer {
         try {
             workerPool.execute(() -> {
                 try {
-                    new ProxyHandler(clientSocket, clientIp, blacklist).run();
+                    new ProxyHandler(clientSocket, clientIp, blacklist, httpAnomalyDetector).run();
 
                 } finally {
                     activeClientSockets.remove(clientSocket);

@@ -7,6 +7,7 @@ import ru.galkov.blacklist_source.BlacklistSource;
 import ru.galkov.blacklist_source.FileBlacklistSource;
 import ru.galkov.blacklist_source.RknBlacklistSource;
 import ru.galkov.llm.DnsAnomalyDetector;
+import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
 import ru.galkov.util.BlacklistLoader;
@@ -28,6 +29,7 @@ public class Main {
     private static AppConfig config;
     private static BlacklistLoader blacklist;
     private static DnsAnomalyDetector dnsAnomalyDetector;
+    private static HttpAnomalyDetector httpAnomalyDetector;
 
     public static void main(String[] args) {
         try {
@@ -45,6 +47,9 @@ public class Main {
 
             dnsAnomalyDetector = new DnsAnomalyDetector();
             dnsAnomalyDetector.start();
+
+            httpAnomalyDetector = new HttpAnomalyDetector();
+            httpAnomalyDetector.start();
 
             registerShutdownHook();
 
@@ -129,6 +134,14 @@ public class Main {
     private static synchronized void stopApplication() {
         logger.info("Начата штатная остановка системы");
 
+        if (httpAnomalyDetector != null) {
+            try {
+                httpAnomalyDetector.stop();
+            } catch (Exception e) {
+                logger.error("Ошибка остановки HttpAnomalyDetector", e);
+            }
+        }
+
         if (dnsAnomalyDetector != null) {
             try {
                 dnsAnomalyDetector.stop();
@@ -209,7 +222,7 @@ public class Main {
                 Optional.of(port)
         );
 
-        proxyServer = new HttpProxyServer(port, blacklist);
+        proxyServer = new HttpProxyServer(port, blacklist, httpAnomalyDetector);
         proxyServer.start();
     }
 
