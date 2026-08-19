@@ -59,6 +59,9 @@ public final class DnsServerHelper {
         private volatile long nextCleanupNanos;
         private static final Logger logger = LoggerFactory.getLogger(DnsRateLimiter.class);
 
+        // ✅ П.17: Логирование rate limit событий
+        private static final boolean RATE_LIMIT_LOGGING_ENABLED = getConfig().getBoolean("dns.logging.rate-limit-enabled");
+
         private DnsRateLimiter(boolean enabled, int requestsPerSecond, int burst, long clientIdleNanos, ConcurrentHashMap<String, TokenBucket> buckets) {
             this.enabled = enabled;
             this.requestsPerSecond = requestsPerSecond;
@@ -81,7 +84,15 @@ public final class DnsServerHelper {
             long now = System.nanoTime();
             cleanupIfNeeded(now);
             TokenBucket bucket = buckets.computeIfAbsent(clientIp, ignored -> new TokenBucket(burst, now));
-            return bucket.tryAcquire(now, requestsPerSecond, burst);
+
+            // ✅ П.17: Логирование отклонённых запросов
+            if (!bucket.tryAcquire(now, requestsPerSecond, burst)) {
+                if (RATE_LIMIT_LOGGING_ENABLED) {
+                    logger.debug("Rate limit exceeded for client: {} (active={})", clientIp, buckets.size());
+                }
+                return false;
+            }
+            return true;
         }
 
         private void cleanupIfNeeded(long now) {

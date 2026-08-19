@@ -56,6 +56,17 @@ public class DnsServer {
             ? ThreadLocal.withInitial(() -> null)
             : null;
 
+    // ✅ П.11: TCP socket timeout
+    private static final int TCP_SOCKET_TIMEOUT_MILLIS = getConfig().getInt("dns.tcp.socket-timeout-millis");
+    private static final boolean TCP_KEEP_ALIVE = getConfig().getBoolean("dns.tcp.keep-alive");
+    private static final boolean TCP_NO_DELAY = getConfig().getBoolean("dns.tcp.no-delay");
+
+    // ✅ П.17: Логирование проблемных клиентов
+    private static final boolean RATE_LIMIT_LOGGING_ENABLED = getConfig().getBoolean("dns.logging.rate-limit-enabled");
+
+    // ✅ П.19: Защита от гонок
+    private static final int MAX_CONCURRENT_RETRIES = getConfig().getInt("dns.concurrent.max-retries");
+
     private final DnsAnomalyDetector dnsAnomalyDetector;
     private final ExecutorService workerPool;
     private final BlacklistLoader blacklist;
@@ -107,8 +118,8 @@ public class DnsServer {
         this.maxQueriesPerClient = rps;
         this.maxActiveSockets = this.maxClients * maxActiveSocketsMultiplier;
 
-        logger.info("DNS server config: maxPacketSize={}, poolSize={}, maxClients={}, maxQueriesPerClient={}, maxActiveSockets={}",
-                maxPacketSize, poolSize, maxClients, maxQueriesPerClient, maxActiveSockets);
+        logger.info("DNS server config: maxPacketSize={}, poolSize={}, maxClients={}, maxQueriesPerClient={}, maxActiveSockets={}, TCP_TIMEOUT={}ms",
+                maxPacketSize, poolSize, maxClients, maxQueriesPerClient, maxActiveSockets, TCP_SOCKET_TIMEOUT_MILLIS);
     }
 
     public void run() {
@@ -172,11 +183,8 @@ public class DnsServer {
                     continue;
                 }
 
-                // ✅ П.2 + П.4: Оптимизировано (get + computeIfAbsent)
-                AtomicInteger clientQueries = queriesByClient.get(clientIp);
-                if (clientQueries == null) {
-                    clientQueries = queriesByClient.computeIfAbsent(clientIp, k -> new AtomicInteger());
-                }
+                // ✅ П.2 + П.4 + П.19: Оптимизировано + защита от гонок
+                AtomicInteger clientQueries = getOrComputeAtomicInteger(queriesByClient, clientIp);
                 if (clientQueries.incrementAndGet() > maxQueriesPerClient) {
                     clientQueries.decrementAndGet();
                     if (clientQueries.get() >= maxQueriesPerClient * 2) {
@@ -196,11 +204,8 @@ public class DnsServer {
                     continue;
                 }
 
-                // ✅ П.2: Оптимизировано (get + computeIfAbsent)
-                AtomicInteger count = activeUdpSockets.get(clientIp);
-                if (count == null) {
-                    count = activeUdpSockets.computeIfAbsent(clientIp, k -> new AtomicInteger());
-                }
+                // ✅ П.2 + П.19: Оптимизировано + защита от гонок
+                AtomicInteger count = getOrComputeAtomicInteger(activeUdpSockets, clientIp);
                 count.incrementAndGet();
 
                 try {
@@ -329,8 +334,12 @@ public class DnsServer {
     private Message processQuery(Message query, String clientIp, String qname) {
         BlacklistSnapshot snapshot = blacklist.snapshot();
 
-        // ✅ Проверка rate limit
+        // ✅ П.17: Логирование rate limit
         if (!rateLimiter.tryAcquire(clientIp)) {
+            if (RATE_LIMIT_LOGGING_ENABLED) {
+                logger.warn(LocaleUtil.getString("dns_server_rate_limit_exceeded"),
+                        clientIp, rateLimiter.getActiveClients());
+            }
             return null;
         }
 
@@ -425,7 +434,15 @@ public class DnsServer {
 
     private void handleSingleTcpSession(Socket socket, String clientIp) {
         try {
-            AtomicInteger clientQueries = queriesByClient.computeIfAbsent(clientIp, k -> new AtomicInteger());
+            // ✅ П.11: Настройка TCP socket timeout
+            socket.setSoTimeout(TCP_SOCKET_TIMEOUT_MILLIS);
+            socket.setKeepAlive(TCP_KEEP_ALIVE);
+            socket.setTcpNoDelay(TCP_NO_DELAY);
+            logger.debug(LocaleUtil.getString("dns_server_tcp_socket_timeout"),
+                    TCP_SOCKET_TIMEOUT_MILLIS, TCP_KEEP_ALIVE);
+
+            // ✅ П.19: Защита от гонок
+            AtomicInteger clientQueries = getOrComputeAtomicInteger(queriesByClient, clientIp);
             // ✅ П.2: Оптимизировано (было 5 строк, стало 3)
             if (clientQueries.incrementAndGet() > maxQueriesPerClient) {
                 clientQueries.decrementAndGet();
@@ -481,6 +498,9 @@ public class DnsServer {
                     output.write(responseBytes);
                     output.flush();
                 }
+            } catch (SocketTimeoutException e) {
+                // ✅ П.11: Логирование timeout
+                logger.debug("TCP [{}]: socket timeout ({}ms)", clientIp, TCP_SOCKET_TIMEOUT_MILLIS);
             } catch (IOException e) {
                 if (running.get() && !(e instanceof java.nio.channels.ClosedChannelException)) logger.debug("TCP [{}]: ошибка сессии", clientIp, e);
             } finally {
@@ -488,6 +508,8 @@ public class DnsServer {
                 int remaining = clientQueries.decrementAndGet();
                 if (remaining <= 0) queriesByClient.remove(clientIp, clientQueries);
             }
+        } catch (SocketException e) {
+            logger.warn("TCP [{}]: ошибка настройки сокета", clientIp, e);
         } catch (Throwable t) {
             logger.error("Unexpected error in handleSingleTcpSession", t);
         }
@@ -524,6 +546,17 @@ public class DnsServer {
             resolver.setTCP(false);
             return null;
         }
+    }
+
+    /**
+     * ✅ П.19: Защита от гонок — атомарное get/compute
+     */
+    private AtomicInteger getOrComputeAtomicInteger(Map<String, AtomicInteger> map, String key) {
+        AtomicInteger value = map.get(key);
+        if (value == null) {
+            value = map.computeIfAbsent(key, k -> new AtomicInteger());
+        }
+        return value;
     }
 
     /**
