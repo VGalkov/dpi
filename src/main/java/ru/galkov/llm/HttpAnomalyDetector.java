@@ -8,18 +8,33 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
 public final class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord> {
     private static final Logger logger = LoggerFactory.getLogger(HttpAnomalyDetector.class);
 
     private final boolean inspectBody;
-    private final BlockingQueue<HttpQueryRecord> queue = new LinkedBlockingQueue<>();
+    private final int maxQueueSize;
+    private final BlockingQueue<HttpQueryRecord> queue;
 
     public HttpAnomalyDetector() {
         super("http.anomaly-detector");
-        this.inspectBody = getConfigBoolean("http.anomaly-detector.inspect-body");
+
+        boolean inspectBodyValue;
+        try {
+            inspectBodyValue = getConfigBoolean("http.anomaly-detector.inspect-body");
+        } catch (IllegalStateException e) {
+            inspectBodyValue = false;
+        }
+        this.inspectBody = inspectBodyValue;
+
+        int maxQueueSizeValue;
+        try {
+            maxQueueSizeValue = getConfigInt("http.anomaly-detector.max-queue-size", 10000);
+        } catch (Exception e) {
+            maxQueueSizeValue = 10000;
+        }
+        this.maxQueueSize = maxQueueSizeValue;
+        this.queue = new LinkedBlockingQueue<>(this.maxQueueSize);
+
         logger.info(LocaleUtil.getString("http_anomaly_detector_initialized"), enabled,
                 getConfigString("http.anomaly-detector.llm-studio.model"),
                 getConfigString("http.anomaly-detector.llm-studio.url"),
@@ -35,12 +50,13 @@ public final class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQuery
     public void record(HttpQueryRecord record) {
         if (!enabled || !running || record == null) return;
 
-        try {
-            queue.offer(record);
+        boolean added = queue.offer(record);
+        if (!added) {
+            logger.warn("HTTP anomaly queue full (size={}), dropping record for client={}",
+                    queue.size(), record.getClientIp());
+        } else {
             logger.debug(LocaleUtil.getString("http_anomaly_detector_record_added"),
                     record.getClientIp(), record.getHost(), record.getMethod());
-        } catch (Exception e) {
-            logger.error(LocaleUtil.getString("http_anomaly_detector_queue_add_error"), e.getMessage(), e);
         }
     }
 
@@ -76,17 +92,22 @@ public final class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQuery
                     record.getBody().substring(0, 500) + "..." : record.getBody();
         }
 
-        return llmClient.loadPromptTemplate("prompts/http_anomaly_prompt.txt")
-                .replace("{clientIp}", record.getClientIp())
-                .replace("{method}", record.getMethod())
-                .replace("{host}", record.getHost())
+        String template = llmClient.loadPromptTemplate("prompts/http_anomaly_prompt.txt");
+        return template
+                .replace("{clientIp}", escapePlaceholder(record.getClientIp()))
+                .replace("{method}", escapePlaceholder(record.getMethod()))
+                .replace("{host}", escapePlaceholder(record.getHost()))
                 .replace("{port}", String.valueOf(record.getPort()))
-                .replace("{path}", record.getPath())
-                .replace("{headers}", record.getHeaders())
-                .replace("{bodyPreview}", bodyPreview);
+                .replace("{path}", escapePlaceholder(record.getPath()))
+                .replace("{headers}", escapePlaceholder(record.getHeaders()))
+                .replace("{bodyPreview}", escapePlaceholder(bodyPreview));
     }
 
-    // ✅ Метод для обратной совместимости
+    private String escapePlaceholder(String value) {
+        if (value == null) return "";
+        return value.replace("{", "{{").replace("}", "}}");
+    }
+
     public void recordRequest(String clientIp, String method, String host, int port, String path,
                               String headers, String body) {
         record(new HttpQueryRecord(clientIp, method, host, port, path, headers, body, System.currentTimeMillis()));

@@ -8,8 +8,13 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ *
+ * ✅ П.61: Memory leak: pipe() — закрытие потоков в finally
+ * ✅ П.62: DoS уязвимость: readLine() — лимит на чтение
+ * ✅ П.63: Проверка на null в relayChunked(), relayFixed(), relayUntilEof()
  */
 public final class ProxyHandlerHelper {
 
@@ -221,20 +226,34 @@ public final class ProxyHandlerHelper {
         finally { closeQuietly(client); closeQuietly(remote); }
     }
 
+    /**
+     * ✅ П.61: Закрытие потоков в finally
+     */
     private static void pipe(Socket src, Socket dst) {
         if (src == null || dst == null) return;
         byte[] buf = new byte[8192];
+        InputStream in = null;
+        OutputStream out = null;
         try {
-            InputStream in = src.getInputStream();
-            OutputStream out = dst.getOutputStream();
+            in = src.getInputStream();
+            out = dst.getOutputStream();
             int len;
             while ((len = in.read(buf)) != -1) { out.write(buf, 0, len); out.flush(); }
         } catch (IOException e) {  }
+        finally {
+            // ✅ Закрываем потоки
+            if (in != null) { try { in.close(); } catch (IOException ignored) {} }
+            if (out != null) { try { out.close(); } catch (IOException ignored) {} }
+        }
     }
 
+    /**
+     * ✅ П.62: Лимит на чтение
+     */
     public static String readLine(InputStream in, int max) throws IOException {
         StringBuilder sb = null;
         int b;
+        int total = 0;  // ✅ Счётчик прочитанных байт
         while ((b = in.read()) != -1) {
             if (b == '\n') {
                 if (sb != null && !sb.isEmpty() && sb.charAt(sb.length() - 1) == '\r')
@@ -244,6 +263,10 @@ public final class ProxyHandlerHelper {
             if (sb == null) sb = new StringBuilder();
             if (sb.length() >= max) throw new RequestTooLargeException("Line exceeds " + max + " bytes");
             sb.append((char) b);
+            total++;
+            if (total > max * 2) {  // ✅ Защита от бесконечного чтения
+                throw new RequestTooLargeException("Line exceeds " + max + " bytes");
+            }
         }
         return sb == null ? null : sb.toString();
     }
@@ -253,7 +276,13 @@ public final class ProxyHandlerHelper {
         out.write('\r'); out.write('\n');
     }
 
+    /**
+     * ✅ П.63: Проверка на null
+     */
     public static void relayChunked(InputStream in, OutputStream out, long maxBodyBytes) throws IOException {
+        if (in == null || out == null) {  // ✅ Проверка на null
+            throw new IllegalArgumentException("in and out must not be null");
+        }
         byte[] buf = new byte[8192];
         long total = 0;
         while (true) {
@@ -273,13 +302,25 @@ public final class ProxyHandlerHelper {
         }
     }
 
+    /**
+     * ✅ П.63: Проверка на null
+     */
     public static void relayFixed(InputStream in, OutputStream out, long len) throws IOException {
+        if (in == null || out == null) {  // ✅ Проверка на null
+            throw new IllegalArgumentException("in and out must not be null");
+        }
         byte[] buf = new byte[8192];
         long rem = len;
         while (rem > 0) { int r = in.read(buf, 0, (int) Math.min(rem, buf.length)); if (r == -1) throw new IOException("Unexpected end of body"); out.write(buf, 0, r); rem -= r; }
     }
 
+    /**
+     * ✅ П.63: Проверка на null
+     */
     public static void relayUntilEof(InputStream in, OutputStream out) throws IOException {
+        if (in == null || out == null) {  // ✅ Проверка на null
+            throw new IllegalArgumentException("in and out must not be null");
+        }
         byte[] buf = new byte[8192];
         int len;
         while ((len = in.read(buf)) != -1) out.write(buf, 0, len);

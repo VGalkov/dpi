@@ -12,21 +12,16 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Galkov V A [s0506777@yandex.ru](mailto:s0506777@yandex.ru)
- *
- * ✅ П.14: Расширенная валидация security-related настроек
- */
 public final class AppConfig {
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
     private static final String DEFAULT_PATH = "application.properties";
     private final Properties props;
 
-    // ✅ П.27: Кэш для parsed значений
     private final Map<String, Integer> intCache = new ConcurrentHashMap<>(256);
     private final Map<String, Long> longCache = new ConcurrentHashMap<>(256);
     private final Map<String, Boolean> booleanCache = new ConcurrentHashMap<>(256);
     private final Map<String, List<String>> listCache = new ConcurrentHashMap<>(64);
+    private final Map<String, Short> shortCache = new ConcurrentHashMap<>(64);
 
     private AppConfig(String path) throws IOException {
         this.props = load(path);
@@ -54,28 +49,44 @@ public final class AppConfig {
         Properties raw = new Properties();
         File configFile = new File(path);
 
+        boolean loadedFromFile = false;
+
         try {
             if (configFile.exists() && configFile.isFile()) {
-                logger.info(LocaleUtil.getString("config_found_disk"), configFile.getAbsolutePath());
+                logger.info(
+                        LocaleUtil.getString("config_found_disk"),
+                        configFile.getAbsolutePath()
+                );
                 try (FileInputStream fis = new FileInputStream(configFile)) {
                     raw.load(fis);
-                }
-            } else {
-                logger.warn(LocaleUtil.getString("config_not_found_disk"), path);
-                URL resourceUrl = AppConfig.class.getResource("/application.properties");
-                if (resourceUrl != null) {
-                    logger.info(LocaleUtil.getString("config_found_jar"));
-                    try (InputStream is = resourceUrl.openStream()) {
-                        raw.load(is);
-                    }
-                } else {
-                    throw new IllegalStateException(LocaleUtil.getString("config_critical_not_found"));
+                    loadedFromFile = true;
                 }
             }
-            if (raw.isEmpty()) throw new IOException(LocaleUtil.getString("config_empty"));
         } catch (IOException e) {
-            logger.error(LocaleUtil.getString("config_load_error"), e);
-            throw e;
+            logger.warn(
+                    LocaleUtil.getString("config_load_error"),
+                    e.getMessage()
+            );
+            loadedFromFile = false;
+        }
+
+        if (!loadedFromFile || raw.isEmpty()) {
+            logger.warn(LocaleUtil.getString("config_not_found_disk"), path);
+            URL resourceUrl = AppConfig.class.getResource("/application.properties");
+            if (resourceUrl != null) {
+                logger.info(LocaleUtil.getString("config_found_jar"));
+                try (InputStream is = resourceUrl.openStream()) {
+                    raw.load(is);
+                }
+            } else {
+                throw new IllegalStateException(
+                        LocaleUtil.getString("config_critical_not_found")
+                );
+            }
+        }
+
+        if (raw.isEmpty()) {
+            throw new IOException(LocaleUtil.getString("config_empty"));
         }
 
         Properties expanded = new Properties();
@@ -91,180 +102,375 @@ public final class AppConfig {
         return expanded;
     }
 
-    /**
-     * ✅ П.14 + П.20: Расширенная валидация с проверкой security настроек
-     */
     private void validateConfig() {
         logger.info(LocaleUtil.getString("config_validation_started"));
 
-        // DNS настройки
-        validateIntRange("dns.local.port", 1, 65535, 53, "config_validation_dns_port_invalid");
-        validateIntRange("dns.thread.num", 1, 1000, 50, "config_validation_dns_threads_invalid");
-        validateIntRange("dns.timeout", 1, 300, 3, "config_validation_dns_timeout_invalid");
+        validateIntRange(
+                "dns.local.port",
+                1,
+                65535,
+                53,
+                "config_validation_dns_port_invalid"
+        );
+        validateIntRange(
+                "dns.thread.num",
+                1,
+                1000,
+                50,
+                "config_validation_dns_threads_invalid"
+        );
+        validateIntRange(
+                "dns.timeout",
+                1,
+                300,
+                3,
+                "config_validation_dns_timeout_invalid"
+        );
 
-        // Proxy настройки
-        validateIntRange("proxy.local.port", 1, 65535, 8888, "config_validation_proxy_port_invalid");
-        validateIntRange("proxy.max-header-bytes", 1024, 1048576, 32768, "config_validation_proxy_max_header_invalid");
-        validateLongRange("proxy.max-body-bytes", 0, 1073741824, 10485760, "config_validation_proxy_max_body_invalid");
-        validateIntRange("proxy.connect-timeout-millis", 1000, 60000, 10000, "config_validation_proxy_connect_timeout_invalid");
-        validateIntRange("proxy.max-connections", 1, 10000, 500, "config_validation_proxy_max_conn_invalid");
+        validateIntRange(
+                "proxy.local.port",
+                1,
+                65535,
+                8888,
+                "config_validation_proxy_port_invalid"
+        );
+        validateIntRange(
+                "proxy.max-header-bytes",
+                1024,
+                1048576,
+                32768,
+                "config_validation_proxy_max_header_invalid"
+        );
+        validateLongRange(
+                "proxy.max-body-bytes",
+                0,
+                1073741824,
+                10485760,
+                "config_validation_proxy_max_body_invalid"
+        );
+        validateIntRange(
+                "proxy.connect-timeout-millis",
+                1000,
+                60000,
+                10000,
+                "config_validation_proxy_connect_timeout_invalid"
+        );
+        validateIntRange(
+                "proxy.max-connections",
+                1,
+                10000,
+                500,
+                "config_validation_proxy_max_conn_invalid"
+        );
 
-        // Proxy max-connections-per-client (зависит от max-connections)
-        validateDependentIntRange("proxy.max-connections-per-client", 1, getInt("proxy.max-connections"), 20,
-                "config_validation_proxy_max_conn_client_invalid", "proxy.max-connections");
+        validateDependentIntRange(
+                "proxy.max-connections-per-client",
+                1,
+                getInt("proxy.max-connections"),
+                20,
+                "config_validation_proxy_max_conn_client_invalid",
+                "proxy.max-connections"
+        );
 
-        // DNS Rate Limit
-        validateIntRange("dns.rate-limit.requests-per-second", 1, 10000, 100, "config_validation_dns_rate_limit_rps_invalid");
-        validateIntRange("dns.rate-limit.burst", 1, 20000, 200, "config_validation_dns_rate_limit_burst_invalid");
-        validateIntRange("dns.rate-limit.client-idle-seconds", 60, 3600, 300, "config_validation_dns_rate_limit_idle_invalid");
+        validateIntRange(
+                "dns.rate-limit.requests-per-second",
+                1,
+                10000,
+                100,
+                "config_validation_dns_rate_limit_rps_invalid"
+        );
+        validateIntRange(
+                "dns.rate-limit.burst",
+                1,
+                20000,
+                200,
+                "config_validation_dns_rate_limit_burst_invalid"
+        );
+        validateIntRange(
+                "dns.rate-limit.client-idle-seconds",
+                60,
+                3600,
+                300,
+                "config_validation_dns_rate_limit_idle_invalid"
+        );
 
-        // Anomaly Detectors
-        validateDoubleRange("dns.anomaly-detector.trust-threshold", 0.0, 1.0, 0.7, "config_validation_dns_trust_threshold_invalid");
-        validateIntRange("dns.anomaly-detector.processed-ttl-seconds", 60, 86400, 60, "config_validation_dns_ttl_invalid");
-        validateIntRange("http.anomaly-detector.processed-ttl-seconds", 60, 86400, 3600, "config_validation_http_ttl_invalid");
+        validateDoubleRange(
+                "dns.anomaly-detector.trust-threshold",
+                0.0,
+                1.0,
+                0.7,
+                "config_validation_dns_trust_threshold_invalid"
+        );
+        validateIntRange(
+                "dns.anomaly-detector.processed-ttl-seconds",
+                60,
+                86400,
+                60,
+                "config_validation_dns_ttl_invalid"
+        );
+        validateIntRange(
+                "http.anomaly-detector.processed-ttl-seconds",
+                60,
+                86400,
+                3600,
+                "config_validation_http_ttl_invalid"
+        );
 
-        // Blacklist reload
-        validateIntRange("blacklist.reload.interval-seconds", 300, 86400, 36000, "config_validation_blacklist_reload_invalid");
+        validateIntRange(
+                "blacklist.reload.interval-seconds",
+                300,
+                86400,
+                36000,
+                "config_validation_blacklist_reload_invalid"
+        );
 
-        // ✅ П.14: Валидация security-related настроек
         validateSecuritySettings();
+
+        clearCaches();
 
         logger.info(LocaleUtil.getString("config_validation_completed"));
     }
 
-    /**
-     * ✅ П.14: Валидация security-related настроек
-     */
     private void validateSecuritySettings() {
-        // Проверка LLM URL на localhost/private ranges
-        try {
-            String dnsLlmUrl = get("dns.anomaly-detector.llm-studio.url");
-            if (dnsLlmUrl != null && (dnsLlmUrl.contains("localhost") || dnsLlmUrl.contains("127.0.0.1"))) {
-                logger.warn("⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: {}. Это может быть опасно в production", dnsLlmUrl);
-            }
-        } catch (Exception e) {
-            logger.debug("DNS LLM URL не настроен");
+        String dnsLlmUrl = getOptional("dns.anomaly-detector.llm-studio.url");
+        if (dnsLlmUrl != null
+                && (dnsLlmUrl.contains("localhost")
+                || dnsLlmUrl.contains("127.0.0.1"))) {
+            logger.warn(
+                    "⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: {}. "
+                            + "Это может быть опасно в production",
+                    dnsLlmUrl
+            );
         }
 
-        try {
-            String httpLlmUrl = get("http.anomaly-detector.llm-studio.url");
-            if (httpLlmUrl != null && (httpLlmUrl.contains("localhost") || httpLlmUrl.contains("127.0.0.1"))) {
-                logger.warn("⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: {}. Это может быть опасно в production", httpLlmUrl);
-            }
-        } catch (Exception e) {
-            logger.debug("HTTP LLM URL не настроен");
+        String httpLlmUrl = getOptional("http.anomaly-detector.llm-studio.url");
+        if (httpLlmUrl != null
+                && (httpLlmUrl.contains("localhost")
+                || httpLlmUrl.contains("127.0.0.1"))) {
+            logger.warn(
+                    "⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: {}. "
+                            + "Это может быть опасно в production",
+                    httpLlmUrl
+            );
         }
 
-        // Проверка blacklist URL на HTTP (не HTTPS)
-        try {
-            String adguardUrl = get("blacklist.adguard.url");
-            if (adguardUrl != null && adguardUrl.startsWith("http://")) {
-                logger.warn("⚠️ SECURITY WARNING: AdGuard blacklist URL использует HTTP (не HTTPS): {}. Возможна MITM атака", adguardUrl);
-            }
-        } catch (Exception e) {
-            logger.debug("AdGuard URL не настроен");
+        String adguardUrl = getOptional("blacklist.adguard.url");
+        if (adguardUrl != null && adguardUrl.startsWith("http://")) {
+            logger.warn(
+                    "⚠️ SECURITY WARNING: AdGuard blacklist URL использует HTTP (не HTTPS): {}. "
+                            + "Возможна MITM атака",
+                    adguardUrl
+            );
         }
 
-        try {
-            String mvpsUrl = get("blacklist.mvps_hosts.url");
-            if (mvpsUrl != null && mvpsUrl.startsWith("http://")) {
-                logger.warn("⚠️ SECURITY WARNING: MVPS hosts URL использует HTTP (не HTTPS): {}. Возможна MITM атака", mvpsUrl);
-            }
-        } catch (Exception e) {
-            logger.debug("MVPS URL не настроен");
+        String mvpsUrl = getOptional("blacklist.mvps_hosts.url");
+        if (mvpsUrl != null && mvpsUrl.startsWith("http://")) {
+            logger.warn(
+                    "⚠️ SECURITY WARNING: MVPS hosts URL использует HTTP (не HTTPS): {}. "
+                            + "Возможна MITM атака",
+                    mvpsUrl
+            );
         }
 
-        // Проверка dns.thread.num на разумность
         int dnsThreads = getInt("dns.thread.num");
         if (dnsThreads > 200) {
-            logger.warn("⚠️ PERFORMANCE WARNING: dns.thread.num = {} может быть слишком высоким. Рекомендуется 50-150", dnsThreads);
+            logger.warn(
+                    "⚠️ PERFORMANCE WARNING: dns.thread.num = {} может быть слишком высоким. "
+                            + "Рекомендуется 50-150",
+                    dnsThreads
+            );
         }
 
-        // Проверка proxy.max-connections
         int maxConnections = getInt("proxy.max-connections");
         int maxPerClient = getInt("proxy.max-connections-per-client");
         if (maxPerClient > maxConnections / 10) {
-            logger.warn("⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client ({}) слишком высок относительно max-connections ({}). Рекомендуется <= 10% от max-connections", maxPerClient, maxConnections);
+            logger.warn(
+                    "⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client ({}) "
+                            + "слишком высок относительно max-connections ({}). "
+                            + "Рекомендуется <= 10% от max-connections",
+                    maxPerClient,
+                    maxConnections
+            );
         }
     }
 
-    /**
-     * ✅ П.20: Единый метод валидации int диапазона
-     */
-    private void validateIntRange(String key, int min, int max, int defaultValue, String errorKey) {
+    private void validateIntRange(
+            String key,
+            int min,
+            int max,
+            int defaultValue,
+            String errorKey
+    ) {
         try {
             int value = getInt(key);
             if (value < min || value > max) {
-                logger.warn(LocaleUtil.getString(errorKey, key, value, min, max));
+                logger.warn(
+                        LocaleUtil.getString(errorKey, key, value, min, max)
+                );
                 props.setProperty(key, String.valueOf(defaultValue));
+                clearCaches();
             }
         } catch (Exception e) {
             logger.warn(LocaleUtil.getString(errorKey, key, "N/A", min, max));
             props.setProperty(key, String.valueOf(defaultValue));
+            clearCaches();
         }
     }
 
-    /**
-     * ✅ П.20: Валидация int с зависимостью от другого ключа
-     */
-    private void validateDependentIntRange(String key, int min, int maxFromOtherKey, int defaultValue, String errorKey, String dependencyKey) {
+    private void validateDependentIntRange(
+            String key,
+            int min,
+            int maxFromOtherKey,
+            int defaultValue,
+            String errorKey,
+            String dependencyKey
+    ) {
         try {
             int value = getInt(key);
             if (value < min || value > maxFromOtherKey) {
-                logger.warn(LocaleUtil.getString(errorKey, key, value, min, maxFromOtherKey));
+                logger.warn(
+                        LocaleUtil.getString(
+                                errorKey,
+                                key,
+                                value,
+                                min,
+                                maxFromOtherKey
+                        )
+                );
                 props.setProperty(key, String.valueOf(defaultValue));
+                clearCaches();
             }
         } catch (Exception e) {
-            logger.warn(LocaleUtil.getString(errorKey, key, "N/A", min, maxFromOtherKey));
+            logger.warn(
+                    LocaleUtil.getString(
+                            errorKey,
+                            key,
+                            "N/A",
+                            min,
+                            maxFromOtherKey
+                    )
+            );
             props.setProperty(key, String.valueOf(defaultValue));
+            clearCaches();
         }
     }
 
-    /**
-     * ✅ П.20: Единый метод валидации long диапазона
-     */
-    private void validateLongRange(String key, long min, long max, long defaultValue, String errorKey) {
+    private void validateLongRange(
+            String key,
+            long min,
+            long max,
+            long defaultValue,
+            String errorKey
+    ) {
         try {
             long value = getLong(key);
             if (value < min || value > max) {
-                logger.warn(LocaleUtil.getString(errorKey, key, value, min, max));
+                logger.warn(
+                        LocaleUtil.getString(errorKey, key, value, min, max)
+                );
                 props.setProperty(key, String.valueOf(defaultValue));
+                clearCaches();
             }
         } catch (Exception e) {
             logger.warn(LocaleUtil.getString(errorKey, key, "N/A", min, max));
             props.setProperty(key, String.valueOf(defaultValue));
+            clearCaches();
         }
     }
 
-    /**
-     * ✅ П.20: Единый метод валидации double диапазона
-     */
-    private void validateDoubleRange(String key, double min, double max, double defaultValue, String errorKey) {
+    private void validateDoubleRange(
+            String key,
+            double min,
+            double max,
+            double defaultValue,
+            String errorKey
+    ) {
         try {
-            double value = Double.parseDouble(get(key));
-            if (value < min || value > max) {
-                logger.warn(LocaleUtil.getString(errorKey, key, value, min, max));
+            String valueStr = getOptional(key);
+            if (valueStr == null) {
                 props.setProperty(key, String.valueOf(defaultValue));
+                clearCaches();
+                return;
+            }
+
+            double value = Double.parseDouble(valueStr);
+            if (value < min || value > max) {
+                logger.warn(
+                        LocaleUtil.getString(errorKey, key, value, min, max)
+                );
+                props.setProperty(key, String.valueOf(defaultValue));
+                clearCaches();
             }
         } catch (Exception e) {
             logger.warn(LocaleUtil.getString(errorKey, key, "N/A", min, max));
             props.setProperty(key, String.valueOf(defaultValue));
+            clearCaches();
         }
     }
 
     private String resolveValue(String value, Properties raw) {
-        if (value == null || raw == null) return value;
-        while (value.contains("${")) {
-            int start = value.indexOf("${");
-            if (start < 0) break;
-            int end = value.indexOf('}', start);
-            if (end < 0) throw new IllegalArgumentException(LocaleUtil.getString("unpaired_placeholder", value));
-            String keyInside = value.substring(start + 2, end).trim();
-            String replacement = raw.getProperty(keyInside);
-            if (replacement == null) throw new IllegalStateException(LocaleUtil.getString("value_not_found_for_key", keyInside));
-            value = value.substring(0, start) + resolveValue(replacement, raw) + value.substring(end + 1);
+        return resolveValue(value, raw, new HashSet<>());
+    }
+
+    private String resolveValue(
+            String value,
+            Properties raw,
+            Set<String> resolvingKeys
+    ) {
+        if (value == null || raw == null) {
+            return value;
         }
-        return value;
+
+        int start = value.indexOf("${");
+        if (start < 0) {
+            return value;
+        }
+
+        int end = value.indexOf('}', start);
+        if (end < 0) {
+            throw new IllegalArgumentException(
+                    LocaleUtil.getString("unpaired_placeholder", value)
+            );
+        }
+
+        String keyInside = value.substring(start + 2, end).trim();
+
+        if (!resolvingKeys.add(keyInside)) {
+            throw new IllegalStateException(
+                    "Cyclic config reference: " + resolvingKeys + " -> " + keyInside
+            );
+        }
+
+        try {
+            String replacement = raw.getProperty(keyInside);
+            if (replacement == null) {
+                throw new IllegalStateException(
+                        LocaleUtil.getString("value_not_found_for_key", keyInside)
+                );
+            }
+
+            String resolvedReplacement = resolveValue(
+                    replacement,
+                    raw,
+                    resolvingKeys
+            );
+
+            String result = value.substring(0, start)
+                    + resolvedReplacement
+                    + value.substring(end + 1);
+
+            return resolveValue(result, raw, resolvingKeys);
+        } finally {
+            resolvingKeys.remove(keyInside);
+        }
+    }
+
+    private void clearCaches() {
+        intCache.clear();
+        longCache.clear();
+        booleanCache.clear();
+        listCache.clear();
+        shortCache.clear();
     }
 
     public String get(String key) {
@@ -272,24 +478,38 @@ public final class AppConfig {
             throw new IllegalStateException("Properties not loaded");
         }
         String val = props.getProperty(key);
-        if (val == null) throw new IllegalStateException(LocaleUtil.getString("key_not_found", key));
+        if (val == null) {
+            throw new IllegalStateException(LocaleUtil.getString("key_not_found", key));
+        }
         return val;
     }
 
-    public List<String> getList(String key) {
-        // ✅ П.27: Кэш для list
-        List<String> cached = listCache.get(key);
-        if (cached != null) return cached;
+    public String getOptional(String key) {
+        if (props == null) {
+            return null;
+        }
+        return props.getProperty(key);
+    }
 
-        String raw = get(key).trim();
-        if (raw.isEmpty()) {
+    public List<String> getList(String key) {
+        List<String> cached = listCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+
+        String raw = getOptional(key);
+        if (raw == null || raw.trim().isEmpty()) {
             listCache.put(key, Collections.emptyList());
             return Collections.emptyList();
         }
+
+        raw = raw.trim();
         Set<String> seen = new LinkedHashSet<>();
         for (String part : raw.split("\\s*,\\s*")) {
             String value = part.trim();
-            if (!value.isEmpty()) seen.add(value);
+            if (!value.isEmpty()) {
+                seen.add(value);
+            }
         }
         List<String> result = List.copyOf(seen);
         listCache.put(key, result);
@@ -300,43 +520,47 @@ public final class AppConfig {
         return new HashSet<>(getList(key));
     }
 
-    /**
-     * ✅ П.27: Кэш для int значений
-     */
     public int getInt(String key) {
         Integer cached = intCache.get(key);
-        if (cached != null) return cached;
+        if (cached != null) {
+            return cached;
+        }
 
         int value = Integer.parseInt(get(key));
         intCache.put(key, value);
         return value;
     }
 
-    /**
-     * ✅ П.27: Кэш для long значений
-     */
     public long getLong(String key) {
         Long cached = longCache.get(key);
-        if (cached != null) return cached;
+        if (cached != null) {
+            return cached;
+        }
 
         long value = Long.parseLong(get(key));
         longCache.put(key, value);
         return value;
     }
 
-    /**
-     * ✅ П.27: Кэш для boolean значений
-     */
     public boolean getBoolean(String key) {
         Boolean cached = booleanCache.get(key);
-        if (cached != null) return cached;
+        if (cached != null) {
+            return cached;
+        }
 
         boolean value = Boolean.parseBoolean(get(key));
         booleanCache.put(key, value);
         return value;
     }
 
-    public Short getShort(String key) {
-        return Short.valueOf(get(key));
+    public short getShort(String key) {
+        Short cached = shortCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+
+        short value = Short.parseShort(get(key));
+        shortCache.put(key, value);
+        return value;
     }
 }

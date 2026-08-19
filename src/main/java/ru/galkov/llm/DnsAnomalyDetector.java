@@ -5,17 +5,16 @@ import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
 import ru.galkov.util.LogFields;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
 public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> {
     private static final Logger logger = LoggerFactory.getLogger(DnsAnomalyDetector.class);
 
-    // ✅ Оптимизация п.11: ConcurrentHashMap вместо LinkedBlockingQueue + removeIf
+    private final int maxQueueSize;
     private final ConcurrentHashMap<String, DnsQueryRecord> queue = new ConcurrentHashMap<>();
     private final Set<String> processingDomains = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> processedDomains = new ConcurrentHashMap<>();
@@ -23,6 +22,14 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
 
     public DnsAnomalyDetector() {
         super("dns.anomaly-detector");
+
+        int maxQueueSizeValue;
+        try {
+            maxQueueSizeValue = getConfigInt("dns.anomaly-detector.max-queue-size", 10000);
+        } catch (Exception e) {
+            maxQueueSizeValue = 10000;
+        }
+        this.maxQueueSize = maxQueueSizeValue;
     }
 
     @Override
@@ -34,7 +41,11 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
     public void record(DnsQueryRecord record) {
         if (!enabled || !running || record == null || record.getDomain() == null || record.getClientIp() == null) return;
 
-        // ✅ П.1: Убрана дублирующая проверка — только putIfAbsent
+        if (queue.size() >= maxQueueSize) {
+            logger.warn("DNS anomaly queue full (size={}), dropping record for domain={}", queue.size(), record.getDomain());
+            return;
+        }
+
         DnsQueryRecord previousRecord = queue.putIfAbsent(record.getDomain(), record);
 
         if (previousRecord != null) {
@@ -59,24 +70,23 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
                     lastCleanup = now;
                 }
 
-                // ✅ Оптимизация: итерация по ConcurrentHashMap вместо poll
+                // ✅ Исправление: собираем ключи отдельно перед итерацией
+                List<String> domainsToProcess = new ArrayList<>();
                 for (Map.Entry<String, DnsQueryRecord> entry : queue.entrySet()) {
                     String domain = entry.getKey();
-
-                    // Пропускаем если уже обрабатывается
-                    if (processingDomains.contains(domain)) continue;
-
-                    // Пропускаем если уже обработан
-                    if (processedDomains.containsKey(domain)) {
-                        queue.remove(domain);
-                        continue;
+                    if (!processingDomains.contains(domain) && !processedDomains.containsKey(domain)) {
+                        domainsToProcess.add(domain);
                     }
+                }
 
-                    // ✅ Оптимизация: атомарное извлечение из очереди
+                // ✅ Исправление: обрабатываем до 10 элементов за итерацию
+                int processed = 0;
+                for (String domain : domainsToProcess) {
+                    if (processed >= 10) break;
+
                     DnsQueryRecord record = queue.remove(domain);
                     if (record == null) continue;
 
-                    // Помечаем как обрабатываемый
                     processingDomains.add(domain);
 
                     try {
@@ -96,8 +106,7 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
                         processingDomains.remove(domain);
                     }
 
-                    // Ограничение частоты запросов к LLM
-                    break;
+                    processed++;
                 }
 
                 Thread.sleep(100);
@@ -113,19 +122,8 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
 
     private void cleanupProcessed() {
         long expiry = System.currentTimeMillis() - processedTtlMillis;
-        int rd = 0, rc = 0;
-        for (Map.Entry<String, Long> e : processedDomains.entrySet()) {
-            if (e.getValue() < expiry) {
-                processedDomains.remove(e.getKey());
-                rd++;
-            }
-        }
-        for (Map.Entry<String, Long> e : processedClients.entrySet()) {
-            if (e.getValue() < expiry) {
-                processedClients.remove(e.getKey());
-                rc++;
-            }
-        }
+        int rd = processedDomains.entrySet().removeIf(e -> e.getValue() < expiry) ? 1 : 0;
+        int rc = processedClients.entrySet().removeIf(e -> e.getValue() < expiry) ? 1 : 0;
         if (rd > 0 || rc > 0) {
             logger.info(LocaleUtil.getString("dns_anomaly_detector_cleanup"), rd, rc, processedTtlMillis / 1000);
         }
@@ -133,8 +131,8 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
 
     private AnalysisResult analyzeRecord(DnsQueryRecord record) {
         String prompt = llmClient.loadPromptTemplate("prompts/dns_anomaly_prompt.txt")
-                .replace("{clientIp}", record.getClientIp())
-                .replace("{domain}", record.getDomain())
+                .replace("{clientIp}", escapePlaceholder(record.getClientIp()))
+                .replace("{domain}", escapePlaceholder(record.getDomain()))
                 .replace("{queryType}", String.valueOf(record.getQueryType()))
                 .replace("{domainLength}", String.valueOf(record.getDomainLength()))
                 .replace("{entropy}", String.format("%.2f", record.getEntropy()))
@@ -148,7 +146,11 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
         return analyzeWithLlm(prompt);
     }
 
-    // ✅ Метод для обратной совместимости
+    private String escapePlaceholder(String value) {
+        if (value == null) return "";
+        return value.replace("{", "{{").replace("}", "}}");
+    }
+
     public void recordQuery(String clientIp, String domain, int queryType, boolean isQuery, int opcode, boolean isTruncated, boolean recursionDesired, int z, int rcode) {
         record(new DnsQueryRecord(clientIp, domain, queryType, System.currentTimeMillis(), isQuery, opcode, isTruncated, recursionDesired, z, rcode));
     }

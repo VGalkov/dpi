@@ -1,6 +1,9 @@
 package ru.galkov.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
@@ -17,11 +20,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- *
- * ✅ П.19: Jackson ObjectMapper для надёжного парсинга JSON
- */
 public final class LlmClient {
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
 
@@ -31,9 +29,7 @@ public final class LlmClient {
     private final String apiKey;
     private final HttpClient httpClient;
 
-    // ✅ П.19: Jackson ObjectMapper для парсинга
-    private static final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
-            new com.fasterxml.jackson.databind.ObjectMapper();
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public LlmClient(String llmUrl, String model, int timeoutSeconds, String apiKey) {
         this.llmUrl = llmUrl;
@@ -45,9 +41,6 @@ public final class LlmClient {
                 .build();
     }
 
-    /**
-     * ✅ Общий метод для отправки запроса в LLM
-     */
     public String sendRequest(String prompt) {
         if (llmUrl == null || llmUrl.isEmpty() || model == null || model.isEmpty()) {
             logger.warn(LocaleUtil.getString("dns_anomaly_detector_llm_url_not_configured"));
@@ -55,8 +48,21 @@ public final class LlmClient {
         }
 
         try {
-            String escapedPrompt = escapeJson(prompt);
-            String jsonBody = buildJsonBody(escapedPrompt);
+            ObjectNode root = objectMapper.createObjectNode();
+            root.put("model", model);
+
+            ObjectNode message = objectMapper.createObjectNode();
+            message.put("role", "user");
+            message.put("content", prompt);
+
+            ArrayNode messages = objectMapper.createArrayNode();
+            messages.add(message);
+            root.set("messages", messages);
+
+            root.put("temperature", 0.1);
+            root.put("max_tokens", 500);
+
+            String jsonBody = objectMapper.writeValueAsString(root);
 
             logger.info(LocaleUtil.getString("llm_client_sending_request"), model, llmUrl);
 
@@ -70,7 +76,10 @@ public final class LlmClient {
                 builder.header("Authorization", "Bearer " + apiKey);
             }
 
-            HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(
+                    builder.build(),
+                    HttpResponse.BodyHandlers.ofString()
+            );
 
             if (response.statusCode() != 200) {
                 logger.warn(LocaleUtil.getString("llm_client_response_received"), response.statusCode());
@@ -90,25 +99,23 @@ public final class LlmClient {
         }
     }
 
-    /**
-     * ✅ П.19: Jackson ObjectMapper для надёжного парсинга JSON
-     */
     public AnalysisResult parseResponse(String responseBody) {
+        if (responseBody == null || responseBody.trim().isEmpty()) {
+            logger.warn("Empty response body");
+            return null;
+        }
+
         try {
-            // ✅ П.19: Парсинг через Jackson
             JsonNode rootNode = objectMapper.readTree(responseBody);
 
-            // Извлечение content из choices[0].message.content
             String content = extractContentFromJson(rootNode);
             if (content == null || content.isEmpty()) {
                 logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "choices[0].message.content");
                 return null;
             }
 
-            // Парсинг JSON из content
             JsonNode resultNode = objectMapper.readTree(content);
 
-            // Валидация полей
             if (!resultNode.has("isSuspicious")) {
                 logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "isSuspicious");
                 return null;
@@ -122,7 +129,6 @@ public final class LlmClient {
                 return null;
             }
 
-            // Извлечение и валидация isSuspicious
             JsonNode suspiciousNode = resultNode.get("isSuspicious");
             if (!suspiciousNode.isBoolean()) {
                 logger.warn(LocaleUtil.getString("llm_client_invalid_suspicious_value"), suspiciousNode.asText());
@@ -130,7 +136,6 @@ public final class LlmClient {
             }
             boolean isSuspicious = suspiciousNode.asBoolean();
 
-            // Извлечение и валидация confidence
             JsonNode confidenceNode = resultNode.get("confidence");
             if (!confidenceNode.isNumber()) {
                 logger.warn(LocaleUtil.getString("llm_client_invalid_confidence_value"), confidenceNode.asText());
@@ -142,10 +147,8 @@ public final class LlmClient {
                 confidence = Math.max(0.0, Math.min(1.0, confidence));
             }
 
-            // Извлечение reason
             String reason = resultNode.has("reason") ? resultNode.get("reason").asText("") : "";
 
-            // Извлечение recommendedActions
             List<String> recommendedActions = new ArrayList<>();
             if (resultNode.has("recommendedActions") && resultNode.get("recommendedActions").isArray()) {
                 JsonNode actionsNode = resultNode.get("recommendedActions");
@@ -160,8 +163,14 @@ public final class LlmClient {
             logger.info(LocaleUtil.getString("dns_anomaly_detector_analysis_result"),
                     isSuspicious, confidence, reason);
 
-            return new AnalysisResult(isSuspicious, confidence, reason,
-                    recommendedActions.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(recommendedActions));
+            return new AnalysisResult(
+                    isSuspicious,
+                    confidence,
+                    reason,
+                    recommendedActions.isEmpty()
+                            ? Collections.emptyList()
+                            : Collections.unmodifiableList(recommendedActions)
+            );
 
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             logger.error(LocaleUtil.getString("llm_client_json_parse_error"), e.getMessage());
@@ -172,9 +181,6 @@ public final class LlmClient {
         }
     }
 
-    /**
-     * ✅ П.19: Извлечение content из JSON ответа через Jackson
-     */
     private String extractContentFromJson(JsonNode rootNode) {
         try {
             JsonNode choicesNode = rootNode.get("choices");
@@ -205,9 +211,6 @@ public final class LlmClient {
         }
     }
 
-    /**
-     * ✅ Общий метод для загрузки шаблона промпта
-     */
     public String loadPromptTemplate(String resourceName) {
         try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourceName)) {
             if (is == null) {
@@ -219,34 +222,5 @@ public final class LlmClient {
             logger.error("Ошибка загрузки шаблона промпта: {}", resourceName, e);
             return "";
         }
-    }
-
-    /**
-     * ✅ Экранирование JSON
-     */
-    private String escapeJson(String prompt) {
-        return prompt.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
-
-    /**
-     * ✅ Построение JSON тела запроса
-     */
-    private String buildJsonBody(String escapedPrompt) {
-        return String.format(
-                "{" +
-                        "\"model\": \"%s\"," +
-                        "\"messages\": [" +
-                        "  {\"role\": \"user\", \"content\": \"%s\"}" +
-                        "]," +
-                        "\"temperature\": 0.1," +
-                        "\"max_tokens\": 500" +
-                        "}",
-                model,
-                escapedPrompt
-        );
     }
 }

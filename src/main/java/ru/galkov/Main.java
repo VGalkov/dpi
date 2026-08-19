@@ -21,6 +21,10 @@ import java.util.List;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ *
+ * ✅ П.26: Закрытие общего worker pool
+ * ✅ П.64: Исправление порядка инициализации и остановки
+ * ✅ П.65: Проверка на пустой sources
  */
 public class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
@@ -36,7 +40,7 @@ public class Main {
             config = AppConfig.getInstance();
             if (config == null) {
                 logger.error(LocaleUtil.getString("main_config_null"));
-                Runtime.getRuntime().exit(-1);
+                return;  // ✅ П.64: return вместо exit()
             }
 
             List<BlacklistSource> sources = new ArrayList<>();
@@ -45,15 +49,20 @@ public class Main {
             addMvpsSource(sources);
             addRknSource(sources);
 
+            // ✅ П.65: Проверка на пустой sources
+            if (sources.isEmpty()) {
+                logger.error("No blacklist sources configured");
+                return;
+            }
+
             blacklist = new BlacklistLoader(sources);
             blacklist.load();
 
             dnsAnomalyDetector = new DnsAnomalyDetector();
-            dnsAnomalyDetector.start();
             httpAnomalyDetector = new HttpAnomalyDetector();
-            httpAnomalyDetector.start();
 
             registerShutdownHook();
+
             startProxyServer();
             startDnsServer();
 
@@ -139,17 +148,24 @@ public class Main {
 
     /**
      * ✅ П.26: Закрытие общего worker pool
+     * ✅ П.64: Правильный порядок остановки
      */
     private static synchronized void stopApplication() {
         logger.info(LocaleUtil.getString("shutdown_started"));
-        stop(httpAnomalyDetector, "error_stop_http_anomaly");
-        stop(dnsAnomalyDetector, "error_stop_dns_anomaly");
+
+        // ✅ П.64: Сначала серверы
         stop(proxyServer, "error_stop_http_proxy");
         stop(dnsServer, "error_stop_dns_server");
-        close(blacklist, "error_stop_blacklist");
 
         // ✅ П.26: Закрыть общий worker pool
         WorkerPool.shutdown();
+
+        // ✅ П.64: Затем детекторы
+        stop(httpAnomalyDetector, "error_stop_http_anomaly");
+        stop(dnsAnomalyDetector, "error_stop_dns_anomaly");
+
+        // ✅ П.64: Затем blacklist
+        close(blacklist, "error_stop_blacklist");
 
         logger.info(LocaleUtil.getString("shutdown_completed"));
     }
@@ -242,10 +258,11 @@ public class Main {
     }
 
     public static AppConfig getConfig() {
-        if (config == null) {
+        AppConfig localConfig = config;  // ✅ П.64: Локальная переменная
+        if (localConfig == null) {
             logger.error(LocaleUtil.getString("main_config_null"));
             throw new IllegalStateException("AppConfig not initialized");
         }
-        return config;
+        return localConfig;
     }
 }

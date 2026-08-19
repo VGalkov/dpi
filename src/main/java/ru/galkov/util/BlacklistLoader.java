@@ -5,9 +5,7 @@ import org.slf4j.LoggerFactory;
 import ru.galkov.blacklist_source.BlacklistSource;
 import ru.galkov.blacklist_source.RknBlacklistSource;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -18,6 +16,11 @@ import static ru.galkov.Main.getConfig;
  *
  * ✅ П.1: Лимит на количество правил для предотвращения OOM
  * ✅ П.5: Параллельная загрузка с лимитом памяти и pool size
+ * ✅ П.33: Замена Set.copyOf() на Collections.unmodifiableSet()
+ * ✅ П.50: Race condition в snapshot() — локальные переменные
+ * ✅ П.51: Memory leak: reloadExecutor — синхронизация в close()
+ * ✅ П.52: Race condition в startReloadScheduler() — атомарное присваивание
+ * ✅ П.53: Проверка на null в buildSnapshot()
  */
 public final class BlacklistLoader implements AutoCloseable {
 
@@ -39,6 +42,7 @@ public final class BlacklistLoader implements AutoCloseable {
     private volatile ScheduledExecutorService reloadExecutor;
 
     // ✅ П.4: Кэш для snapshot (избегаем повторного создания)
+    // ✅ П.50: Race condition — используем локальные переменные
     private volatile BlacklistSnapshot cachedSnapshot;
     private volatile long cachedSnapshotTime;
     private static final long SNAPSHOT_CACHE_TTL_MILLIS = 5000; // 5 секунд
@@ -48,13 +52,21 @@ public final class BlacklistLoader implements AutoCloseable {
         this.sources = List.copyOf(sources);
     }
 
+    /**
+     * ✅ П.4: Кэш для snapshot
+     * ✅ П.50: Race condition — локальные переменные
+     */
     public BlacklistSnapshot snapshot() {
         ensureLoaded();
 
         // ✅ П.4: Возвращаем кэш, если он ещё актуален
+        // ✅ П.50: Читаем в локальные переменные для атомарности
         long now = System.currentTimeMillis();
-        if (cachedSnapshot != null && (now - cachedSnapshotTime) < SNAPSHOT_CACHE_TTL_MILLIS) {
-            return cachedSnapshot;
+        BlacklistSnapshot localSnapshot = cachedSnapshot;
+        long localSnapshotTime = cachedSnapshotTime;
+
+        if (localSnapshot != null && (now - localSnapshotTime) < SNAPSHOT_CACHE_TTL_MILLIS) {
+            return localSnapshot;
         }
 
         // ✅ П.4: Обновляем кэш
@@ -102,6 +114,8 @@ public final class BlacklistLoader implements AutoCloseable {
 
     /**
      * ✅ П.1 + П.5: Параллельная загрузка с лимитами памяти и правил
+     * ✅ П.33: Замена Set.copyOf() на Collections.unmodifiableSet()
+     * ✅ П.53: Проверка на null в buildSnapshot()
      */
     private BlacklistSnapshot buildSnapshot() {
         DomainTrie domainTrie = new DomainTrie();
@@ -128,6 +142,11 @@ public final class BlacklistLoader implements AutoCloseable {
                             long startedAt = System.currentTimeMillis();
                             logger.info(LocaleUtil.getString("blacklist_source_loading"), source);
                             List<BlacklistRule> rules = source.loadRules();
+                            // ✅ П.53: Проверка на null
+                            if (rules == null) {
+                                logger.warn(LocaleUtil.getString("blacklist_source_null_rules"), source);
+                                return new SourceResult(source, null, 0, new IllegalStateException("null rules"));
+                            }
                             long duration = System.currentTimeMillis() - startedAt;
                             return new SourceResult(source, rules, duration, null);
                         } catch (Exception e) {
@@ -232,7 +251,9 @@ public final class BlacklistLoader implements AutoCloseable {
                 LogFields.kv("sourcesLoaded", loadedSources), LogFields.kv("rulesTotal", totalRules),
                 LogFields.kv("ipsUnique", ips.size()), LogFields.kv("ipsCidr", cidrs.size()),
                 LogFields.kv("ipsDuplicate", duplicateIps), LogFields.kv("rulesInvalid", invalidRules));
-        return new BlacklistSnapshot(domainTrie, Set.copyOf(ips), Set.copyOf(cidrs));
+
+        // ✅ П.33: Замена Set.copyOf() на Collections.unmodifiableSet()
+        return new BlacklistSnapshot(domainTrie, Collections.unmodifiableSet(ips), Collections.unmodifiableSet(cidrs));
     }
 
     /**
@@ -262,12 +283,14 @@ public final class BlacklistLoader implements AutoCloseable {
 
         synchronized (reloadLock) {
             if (reloadExecutor != null && !reloadExecutor.isShutdown()) return;
-            reloadExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            // ✅ П.52: Атомарное присваивание через локальную переменную
+            ScheduledExecutorService newExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "Blacklist-Reload-Thread");
                 t.setDaemon(true);
                 return t;
             });
-            reloadExecutor.scheduleWithFixedDelay(this::reloadNow, interval, interval, TimeUnit.SECONDS);
+            reloadExecutor = newExecutor;
+            newExecutor.scheduleWithFixedDelay(this::reloadNow, interval, interval, TimeUnit.SECONDS);
             logger.info(LocaleUtil.getString("blacklist_reload_enabled"), interval);
         }
     }
@@ -309,9 +332,16 @@ public final class BlacklistLoader implements AutoCloseable {
         return true;
     }
 
+    /**
+     * ✅ П.51: Синхронизация с startReloadScheduler()
+     */
     @Override
     public void close() {
-        ScheduledExecutorService executor = reloadExecutor;
+        ScheduledExecutorService executor;
+        synchronized (reloadLock) {  // ← Синхронизация с startReloadScheduler()
+            executor = reloadExecutor;
+            reloadExecutor = null;  // ← Предотвращаем повторный запуск
+        }
         if (executor == null) return;
         executor.shutdown();
         try { if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow(); }
