@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.util.BlacklistLoader;
+import ru.galkov.util.LocaleUtil;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -11,10 +12,14 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static ru.galkov.Main.getConfig;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
@@ -26,6 +31,7 @@ public class HttpProxyServer {
     private final int port;
     private final int maxConnections;
     private final int maxConnectionsPerClient;
+    private final int maxActiveSockets;  // ✅ П.10: новый лимит
 
     private final ExecutorService workerPool;
     private final Semaphore connectionSlots;
@@ -43,13 +49,14 @@ public class HttpProxyServer {
         this.httpAnomalyDetector = httpAnomalyDetector;
         this.maxConnections = getConfig().getInt("proxy.max-connections");
         this.maxConnectionsPerClient = getConfig().getInt("proxy.max-connections-per-client");
+        this.maxActiveSockets = maxConnections * 2;  // ✅ П.10: лимит = 2 × max-connections
 
         if (maxConnections <= 0) throw new IllegalArgumentException("proxy.max-connections > 0");
         if (maxConnectionsPerClient <= 0) throw new IllegalArgumentException("proxy.max-connections-per-client > 0");
         if (maxConnectionsPerClient > maxConnections) throw new IllegalArgumentException("max-connections-per-client <= max-connections");
 
         this.connectionSlots = new Semaphore(maxConnections, true);
-        this.workerPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2);
+        this.workerPool = WorkerPool.get();  // ✅ П.26: общий worker pool
     }
 
     public void start() {
@@ -59,7 +66,8 @@ public class HttpProxyServer {
                 return;
             }
             running = true;
-            logger.info("Инициализация HTTP proxy: port={}, maxConnections={}, maxConnectionsPerClient={}", port, maxConnections, maxConnectionsPerClient);
+            logger.info("Инициализация HTTP proxy: port={}, maxConnections={}, maxConnectionsPerClient={}, maxActiveSockets={}",
+                    port, maxConnections, maxConnectionsPerClient, maxActiveSockets);
             serverThread = new Thread(this::runServer, "HttpProxy-Server-Thread-" + port);
             serverThread.setDaemon(false);
             serverThread.start();
@@ -74,8 +82,9 @@ public class HttpProxyServer {
             running = false;
             closeQuietly(serverSocket);
             activeClientSockets.forEach(this::closeQuietly);
+            activeClientSockets.clear();
         }
-        shutdownWorkerPool();
+        // ✅ П.26: не закрываем общий worker pool
         joinServerThread();
         logger.info("Остановка HTTP proxy завершена: port={}", port);
     }
@@ -111,13 +120,24 @@ public class HttpProxyServer {
         } finally {
             this.serverSocket = null;
             running = false;
-            shutdownWorkerPool();
+            // ✅ П.26: не закрываем общий worker pool
             logger.info("HTTP Proxy server thread завершён");
         }
     }
 
+    /**
+     * ✅ П.10: Ограничение на activeClientSockets
+     */
     private void handleAcceptedConnection(Socket clientSocket) {
         String clientIp = clientSocket.getInetAddress().getHostAddress();
+
+        // ✅ П.10: Проверка на максимальное количество сокетов
+        if (activeClientSockets.size() >= maxActiveSockets) {
+            logger.warn(LocaleUtil.getString("http_proxy_max_sockets_reached"), activeClientSockets.size(), maxActiveSockets);
+            closeQuietly(clientSocket);
+            cleanupOldSockets();  // ✅ Очистка старых сокетов
+            return;
+        }
 
         if (!connectionSlots.tryAcquire()) {
             logger.warn("PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS", clientIp);
@@ -155,6 +175,24 @@ public class HttpProxyServer {
         }
     }
 
+    /**
+     * ✅ П.10: Очистка старых сокетов при переполнении
+     */
+    private void cleanupOldSockets() {
+        int removed = 0;
+        for (Socket socket : activeClientSockets) {
+            if (activeClientSockets.size() < maxActiveSockets) break;
+            if (socket != null && !socket.isClosed()) {
+                closeQuietly(socket);
+                activeClientSockets.remove(socket);
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            logger.info(LocaleUtil.getString("http_proxy_socket_cleaned"), removed);
+        }
+    }
+
     private void releaseConnectionSlot(String clientIp, AtomicInteger clientConnections) {
         int remaining = clientConnections.decrementAndGet();
         if (remaining <= 0) connectionsByClient.remove(clientIp, clientConnections);
@@ -162,18 +200,7 @@ public class HttpProxyServer {
         logger.debug("PROXY_CONNECTION_CLOSE client={} activeForClient={}", clientIp, Math.max(remaining, 0));
     }
 
-    private void shutdownWorkerPool() {
-        workerPool.shutdown();
-        try {
-            if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
-                logger.warn("Worker pool не завершился за 10 секунд, shutdownNow");
-                workerPool.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            workerPool.shutdownNow();
-        }
-    }
+    // ✅ П.26: удалён метод shutdownWorkerPool()
 
     private void joinServerThread() {
         Thread t = serverThread;

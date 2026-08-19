@@ -1,5 +1,7 @@
 package ru.galkov.llm;
 
+import java.util.Locale;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  * Запись HTTP/HTTPS-соединения или HTTP-запроса для асинхронного LLM-анализа.
@@ -63,5 +65,14 @@ public final class HttpQueryRecord {
 
     public long getTimestamp() {
         return timestamp;
+    }
+
+    /**
+     * ✅ П.7: toString() для логирования
+     */
+    @Override
+    public String toString() {
+        return String.format(Locale.ROOT, "HttpQueryRecord{clientIp='%s', method='%s', host='%s', port=%d, path='%s', timestamp=%d}",
+                clientIp, method, host, port, path, timestamp);
     }
 }

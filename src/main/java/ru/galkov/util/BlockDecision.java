@@ -1,5 +1,8 @@
 package ru.galkov.util;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class BlockDecision {
     public enum BlockReason { NONE, IP_EXACT, IP_CIDR, DOMAIN_EXACT, DOMAIN_WILDCARD, DOMAIN_SUBTREE }
     public enum BlockAction { ALLOW, BLOCK_HTTP_403, BLOCK_DROP, BLOCK_SINKHOLE, LOG_ONLY }
@@ -55,4 +58,16 @@ public final class BlockDecision {
     public BlockReason getReason() { return reason; }
     public String getSource() { return source; }
     public BlockAction getAction() { return action; }
+
+    /**
+     * ✅ П.19: toString() для логирования
+     */
+    @Override
+    public String toString() {
+        if (!blocked) {
+            return "BlockDecision{ALLOW}";
+        }
+        return String.format("BlockDecision{blocked=true, reason=%s, rule='%s', source='%s', action=%s}",
+                reason, matchedRule, source, action);
+    }
 }

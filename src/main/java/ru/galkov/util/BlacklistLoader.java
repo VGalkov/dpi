@@ -8,13 +8,14 @@ import ru.galkov.blacklist_source.RknBlacklistSource;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static ru.galkov.Main.getConfig;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class BlacklistLoader implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
 
@@ -24,6 +25,11 @@ public final class BlacklistLoader implements AutoCloseable {
     private volatile boolean loaded;
     private volatile ScheduledExecutorService reloadExecutor;
 
+    // ✅ П.4: Кэш для snapshot (избегаем повторного создания)
+    private volatile BlacklistSnapshot cachedSnapshot;
+    private volatile long cachedSnapshotTime;
+    private static final long SNAPSHOT_CACHE_TTL_MILLIS = 5000; // 5 секунд
+
     public BlacklistLoader(List<BlacklistSource> sources) {
         if (sources == null) throw new IllegalArgumentException(LocaleUtil.getString("blacklist_sources_cannot_be_null"));
         this.sources = List.copyOf(sources);
@@ -31,7 +37,18 @@ public final class BlacklistLoader implements AutoCloseable {
 
     public BlacklistSnapshot snapshot() {
         ensureLoaded();
-        return snapshot.get();
+
+        // ✅ П.4: Возвращаем кэш, если он ещё актуален
+        long now = System.currentTimeMillis();
+        if (cachedSnapshot != null && (now - cachedSnapshotTime) < SNAPSHOT_CACHE_TTL_MILLIS) {
+            return cachedSnapshot;
+        }
+
+        // ✅ П.4: Обновляем кэш
+        BlacklistSnapshot freshSnapshot = snapshot.get();
+        cachedSnapshot = freshSnapshot;
+        cachedSnapshotTime = now;
+        return freshSnapshot;
     }
 
     public void load() {
@@ -43,6 +60,9 @@ public final class BlacklistLoader implements AutoCloseable {
         synchronized (reloadLock) {
             try {
                 snapshot.set(buildSnapshot());
+                // ✅ П.4: Сбрасываем кэш при reload
+                cachedSnapshot = null;
+                cachedSnapshotTime = 0;
                 loaded = true;
                 logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_ok")));
             } catch (Exception e) {
@@ -67,17 +87,54 @@ public final class BlacklistLoader implements AutoCloseable {
         }
     }
 
+    /**
+     * ✅ П.24: Async I/O для blacklist sources — параллельная загрузка
+     */
     private BlacklistSnapshot buildSnapshot() {
         DomainTrie domainTrie = new DomainTrie();
         Set<String> ips = new HashSet<>();
         Set<IpCidr> cidrs = new HashSet<>();
         int loadedSources = 0, totalRules = 0, invalidRules = 0, duplicateIps = 0;
-        for (BlacklistSource source : sources) {
-            try {
-                long startedAt = System.currentTimeMillis();
-                logger.info(LocaleUtil.getString("blacklist_source_loading"), source);
-                List<BlacklistRule> rules = source.loadRules();
-                if (rules == null) { logger.warn(LocaleUtil.getString("blacklist_source_null"), source); continue; }
+
+        // ✅ П.24: Параллельная загрузка источников
+        ExecutorService loaderExecutor = Executors.newFixedThreadPool(
+                Math.min(sources.size(), Runtime.getRuntime().availableProcessors()),
+                r -> {
+                    Thread t = new Thread(r, "Blacklist-Loader-Thread");
+                    t.setDaemon(true);
+                    return t;
+                }
+        );
+
+        try {
+            List<CompletableFuture<SourceResult>> futures = sources.stream()
+                    .map(source -> CompletableFuture.supplyAsync(() -> {
+                        try {
+                            long startedAt = System.currentTimeMillis();
+                            logger.info(LocaleUtil.getString("blacklist_source_loading"), source);
+                            List<BlacklistRule> rules = source.loadRules();
+                            long duration = System.currentTimeMillis() - startedAt;
+                            return new SourceResult(source, rules, duration, null);
+                        } catch (Exception e) {
+                            return new SourceResult(source, null, 0, e);
+                        }
+                    }, loaderExecutor))
+                    .toList();
+
+            // ✅ П.24: Сбор результатов
+            for (CompletableFuture<SourceResult> future : futures) {
+                SourceResult result = future.join();
+                if (result.error != null) {
+                    logger.error(LocaleUtil.getString("blacklist_source_load_error"), result.source, result.error);
+                    continue;
+                }
+
+                List<BlacklistRule> rules = result.rules;
+                if (rules == null) {
+                    logger.warn(LocaleUtil.getString("blacklist_source_null"), result.source);
+                    continue;
+                }
+
                 int accepted = 0, invalid = 0;
                 for (BlacklistRule rule : rules) {
                     if (rule == null || rule.value() == null) { invalid++; continue; }
@@ -93,7 +150,7 @@ public final class BlacklistLoader implements AutoCloseable {
                         if (domain == null) { invalid++; }
                         else {
                             DomainTrie.MatchType type = domain.startsWith("*.") ? DomainTrie.MatchType.WILDCARD
-                                    : (isSubtreeRule(source) ? DomainTrie.MatchType.SUBTREE : DomainTrie.MatchType.EXACT);
+                                    : (isSubtreeRule(result.source) ? DomainTrie.MatchType.SUBTREE : DomainTrie.MatchType.EXACT);
                             domainTrie.addDomain(type == DomainTrie.MatchType.WILDCARD ? domain.substring(2) : domain, type);
                             accepted++;
                         }
@@ -102,11 +159,20 @@ public final class BlacklistLoader implements AutoCloseable {
                 loadedSources++;
                 totalRules += accepted;
                 invalidRules += invalid;
-                logger.info(LocaleUtil.getString("blacklist_source_loaded"), source, rules.size(), accepted, invalid, System.currentTimeMillis() - startedAt);
-            } catch (Exception e) {
-                logger.error(LocaleUtil.getString("blacklist_source_load_error"), source, e);
+                logger.info(LocaleUtil.getString("blacklist_source_loaded"), result.source, rules.size(), accepted, invalid, result.duration);
+            }
+        } finally {
+            loaderExecutor.shutdown();
+            try {
+                if (!loaderExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                    loaderExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                loaderExecutor.shutdownNow();
             }
         }
+
         if (!sources.isEmpty() && loadedSources == 0) throw new IllegalStateException(LocaleUtil.getString("blacklist_no_sources_loaded"));
         logger.info("{} {} {} {} {} {} {}",
                 LogFields.kv("event", LocaleUtil.getString("blacklist_snapshot_built")),
@@ -114,6 +180,23 @@ public final class BlacklistLoader implements AutoCloseable {
                 LogFields.kv("ipsUnique", ips.size()), LogFields.kv("ipsCidr", cidrs.size()),
                 LogFields.kv("ipsDuplicate", duplicateIps), LogFields.kv("rulesInvalid", invalidRules));
         return new BlacklistSnapshot(domainTrie, Set.copyOf(ips), Set.copyOf(cidrs));
+    }
+
+    /**
+     * ✅ П.24: Вспомогательный класс для результата загрузки источника
+     */
+    private static class SourceResult {
+        final BlacklistSource source;
+        final List<BlacklistRule> rules;
+        final long duration;
+        final Exception error;
+
+        SourceResult(BlacklistSource source, List<BlacklistRule> rules, long duration, Exception error) {
+            this.source = source;
+            this.rules = rules;
+            this.duration = duration;
+            this.error = error;
+        }
     }
 
     private void startReloadScheduler() {

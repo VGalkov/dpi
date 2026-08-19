@@ -1,10 +1,13 @@
 package ru.galkov.util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.xbill.DNS.*;
 import org.xbill.DNS.Record;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.ServerSocket;
@@ -12,7 +15,40 @@ import java.net.Socket;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static ru.galkov.Main.getConfig;
+
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class DnsServerHelper {
+
+    private static final Logger logger = LoggerFactory.getLogger(DnsServerHelper.class);
+    private static final boolean QNAME_CACHE_ENABLED = getConfig().getBoolean("dns.qname-cache.enabled");
+    private static final int QNAME_CACHE_MAX_SIZE = getConfig().getInt("dns.qname-cache.max-size");
+    private static final long QNAME_CACHE_TTL_MILLIS = getConfig().getInt("dns.qname-cache.ttl-seconds") * 1000L;
+
+    private static final Map<Integer, CachedQname> qnameCache = QNAME_CACHE_ENABLED
+            ? new ConcurrentHashMap<>(QNAME_CACHE_MAX_SIZE)
+            : null;
+
+    // ✅ П.5: WeakReference для защиты от OOM
+    private static class CachedQname {
+        final WeakReference<String> qnameRef;  // ✅ П.5: WeakReference вместо String
+        final long timestamp;
+
+        CachedQname(String qname) {
+            this.qnameRef = new WeakReference<>(qname);  // ✅ П.5: Создаём WeakReference
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        String getQname() {
+            return qnameRef.get();  // ✅ П.5: Может вернуть null, если GC очистил
+        }
+
+        boolean isExpired() {
+            return (System.currentTimeMillis() - timestamp) > QNAME_CACHE_TTL_MILLIS;
+        }
+    }
 
     public static final class DnsRateLimiter {
         private final boolean enabled;
@@ -21,6 +57,7 @@ public final class DnsServerHelper {
         private final long clientIdleNanos;
         private final ConcurrentHashMap<String, TokenBucket> buckets;
         private volatile long nextCleanupNanos;
+        private static final Logger logger = LoggerFactory.getLogger(DnsRateLimiter.class);
 
         private DnsRateLimiter(boolean enabled, int requestsPerSecond, int burst, long clientIdleNanos, ConcurrentHashMap<String, TokenBucket> buckets) {
             this.enabled = enabled;
@@ -65,16 +102,34 @@ public final class DnsServerHelper {
             }
         }
 
-        public int getRequestsPerSecond() { return requestsPerSecond; }
-        public int getBurst() { return burst; }
-
+        /**
+         * ✅
+         */
         public int getActiveClients() {
             return buckets.size();
         }
 
-        public void clear() {
-            buckets.clear();
+        /**
+         * ✅
+         */
+        public void cleanupOldClients() {
+            long now = System.nanoTime();
+            List<String> toRemove = new ArrayList<>();
+            for (Map.Entry<String, TokenBucket> entry : buckets.entrySet()) {
+                if (now - entry.getValue().getLastSeenNanos() > clientIdleNanos) {
+                    toRemove.add(entry.getKey());
+                }
+            }
+            for (String key : toRemove) {
+                buckets.remove(key);
+            }
+            if (toRemove.size() > 0) {
+                logger.info("DNS RateLimiter: cleaned {} old clients", toRemove.size());
+            }
         }
+
+        public int getRequestsPerSecond() { return requestsPerSecond; }
+        public int getBurst() { return burst; }
     }
 
     private static final class TokenBucket {
@@ -140,10 +195,61 @@ public final class DnsServerHelper {
         return new byte[] { (byte) ((value >> 8) & 0xFF), (byte) (value & 0xFF) };
     }
 
+    /**
+     * ✅ П.5: Кэш для getQuestionName() с TTL
+     * ✅ П.1: Очистка кэша при переполнении
+     * ✅ П.5: WeakReference для защиты от OOM
+     */
     public static String getQuestionName(Message message) {
         Record question = message.getQuestion();
         if (question == null || question.getName() == null) return "unknown";
-        return question.getName().toString();
+
+        // ✅ П.5: Если кэш отключён — возвращаем напрямую
+        if (!QNAME_CACHE_ENABLED || qnameCache == null) {
+            return question.getName().toString();
+        }
+
+        // ✅ П.5: Проверяем кэш
+        int hashCode = System.identityHashCode(question);
+        CachedQname cached = qnameCache.get(hashCode);
+        if (cached != null && !cached.isExpired()) {
+            String qname = cached.getQname();  // ✅ П.5: Может вернуть null
+            if (qname != null) {  // ✅ П.5: Проверка на null (защита от NPE)
+                return qname;
+            }
+            // ← Если null — GC очистил WeakReference, создаём заново
+        }
+
+        // ✅ П.5: Кэшируем новое значение
+        String qname = question.getName().toString();
+        qnameCache.put(hashCode, new CachedQname(qname));
+
+        // ✅ П.1: Очистка кэша при переполнении
+        if (qnameCache.size() > QNAME_CACHE_MAX_SIZE) {
+            // ✅ Исправлено: removeIf возвращает boolean, считаем удалённые отдельно
+            int removed = 0;
+            Iterator<Map.Entry<Integer, CachedQname>> iterator = qnameCache.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<Integer, CachedQname> entry = iterator.next();
+                if (entry.getValue().isExpired()) {
+                    iterator.remove();
+                    removed++;
+                }
+            }
+            if (removed > 0) {
+                logger.info("Qname cache cleanup: removed={} entries", removed);
+            }
+            // Если всё ещё переполнен — удаляем oldest
+            if (qnameCache.size() > QNAME_CACHE_MAX_SIZE) {
+                qnameCache.entrySet().stream()
+                        .sorted(Comparator.comparingLong(e -> e.getValue().timestamp))
+                        .limit(qnameCache.size() - QNAME_CACHE_MAX_SIZE)
+                        .map(Map.Entry::getKey)
+                        .forEach(qnameCache::remove);
+            }
+        }
+
+        return qname;
     }
 
     public static String extractIpv4FromPtrQuery(String ptrName) {
@@ -261,10 +367,18 @@ public final class DnsServerHelper {
         return null;
     }
 
+    /**
+     * ✅ П.9: Убран clone() — создаём новый Message с тем же ID
+     */
     public static Message createRefusedResponse(Message query) {
-        Message response = query.clone();
+        // ✅ П.9: Вместо clone() создаём новый Message (быстрее)
+        Message response = new Message(query.getHeader().getID());
         response.getHeader().setFlag(Flags.QR);
         response.getHeader().setRcode(Rcode.REFUSED);
+        // Копируем только вопрос (не весь ответ)
+        if (query.getQuestion() != null) {
+            response.addRecord(query.getQuestion(), Section.QUESTION);
+        }
         return response;
     }
 

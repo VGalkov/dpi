@@ -5,6 +5,9 @@ import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class IpCidr {
     private final InetAddress network;
     private final int prefixLength;
@@ -12,9 +15,10 @@ public final class IpCidr {
     private final byte[] maskBytes;
 
     private static final Map<String, InetAddress> addressCache = new ConcurrentHashMap<>(256);
+    private static final int MAX_CACHE_SIZE = 512;
 
     public IpCidr(String cidr) throws UnknownHostException {
-        if (cidr == null || cidr.isEmpty()) throw new UnknownHostException("CIDR is null or empty");
+        if (cidr == null || cidr.isEmpty()) throw new UnknownHostException(LocaleUtil.getString("invalid_cidr", cidr));
         int slash = cidr.indexOf('/');
         if (slash <= 0 || slash == cidr.length() - 1)
             throw new UnknownHostException(LocaleUtil.getString("invalid_cidr", cidr));
@@ -41,13 +45,15 @@ public final class IpCidr {
 
     public boolean contains(String ip) {
         try {
-            // Проверка кэша
+            // ✅ П.12: Проверка кэша с ограничением размера
             InetAddress address = addressCache.get(ip);
             if (address == null) {
                 address = InetAddress.getByName(ip);
-                if (addressCache.size() < 512) {
-                    addressCache.put(ip, address);
+                // ✅ П.12: Ограничение размера кэша
+                if (addressCache.size() >= MAX_CACHE_SIZE) {
+                    addressCache.clear();
                 }
+                addressCache.put(ip, address);
             }
             return contains(address);
         } catch (UnknownHostException e) {
@@ -61,5 +67,20 @@ public final class IpCidr {
         for (int i = 0; i < networkBytes.length; i++)
             if ((addr[i] & maskBytes[i]) != (networkBytes[i] & maskBytes[i])) return false;
         return true;
+    }
+
+    /**
+     * toString() для логирования
+     */
+    @Override
+    public String toString() {
+        return String.format("%s/%d", network.getHostAddress(), prefixLength);
+    }
+
+    /**
+     * Очистка кэша (вызывать при reload blacklist)
+     */
+    public static void clearCache() {
+        addressCache.clear();
     }
 }

@@ -5,6 +5,9 @@ import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class HostNormalizer {
     private static final Map<String, String> ipCache = new ConcurrentHashMap<>(256);
     private static final Map<String, String> domainCache = new ConcurrentHashMap<>(256);
@@ -31,5 +34,13 @@ public final class HostNormalizer {
         String result = host.toLowerCase().replaceAll("\\.$", "").trim();
         if (domainCache.size() < MAX_CACHE_SIZE) domainCache.put(host, result);
         return result;
+    }
+
+    /**
+     * ✅ П.13: Очистка кэша (вызывать при reload blacklist)
+     */
+    public static void clearCache() {
+        ipCache.clear();
+        domainCache.clear();
     }
 }
