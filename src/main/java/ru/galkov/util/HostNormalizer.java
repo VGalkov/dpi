@@ -1,70 +1,35 @@
 package ru.galkov.util;
 
 import java.net.InetAddress;
-import java.util.Locale;
-/**
- * s0506777@yandex.ru Galkov V.A.
- */
+import java.net.UnknownHostException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 public final class HostNormalizer {
+    private static final Map<String, String> ipCache = new ConcurrentHashMap<>(256);
+    private static final Map<String, String> domainCache = new ConcurrentHashMap<>(256);
+    private static final int MAX_CACHE_SIZE = 512;
 
-    private HostNormalizer() {
-    }
-
-    public static String normalizeHost(String value) {
-        if (value == null || value.trim().isEmpty()) return null;
-        String host = value.trim().toLowerCase(Locale.ROOT);
-        host = removeTrailingDot(host);
-        if (host.isEmpty()) return null;
-        if (host.indexOf(':') >= 0) return null;
-        if (host.indexOf(' ') >= 0 || host.indexOf('/') >= 0) return null;
-
-        return host;
-    }
-
-    public static String normalizeIp(String value) {
-        if (value == null || value.trim().isEmpty()) return null;
-        String ip = value.trim();
-        if (ip.indexOf('/') >= 0) return null;
-        if (!looksLikeIp(ip)) return null;
-
+    public static String normalizeIp(String ip) {
+        if (ip == null || ip.isEmpty()) return null;
+        String cached = ipCache.get(ip);
+        if (cached != null) return cached;
         try {
-            return InetAddress.getByName(ip).getHostAddress().toLowerCase(Locale.ROOT);
-
-        } catch (Exception e) {
+            InetAddress addr = InetAddress.getByName(ip);
+            String result = addr.getHostAddress();
+            if (ipCache.size() < MAX_CACHE_SIZE) ipCache.put(ip, result);
+            return result;
+        } catch (UnknownHostException e) {
             return null;
         }
     }
 
-    public static String removeTrailingDot(String value) {
-        if (value == null) return null;
-        String result = value;
-        while (result.endsWith(".")) {
-            result = result.substring(0, result.length() - 1);
-        }
+    public static String normalizeHost(String host) {
+        if (host == null || host.isEmpty()) return null;
+        String cached = domainCache.get(host);
+        if (cached != null) return cached;
+        String result = host.toLowerCase().replaceAll("\\.$", "").trim();
+        if (domainCache.size() < MAX_CACHE_SIZE) domainCache.put(host, result);
         return result;
-    }
-
-    private static boolean looksLikeIp(String value) {
-
-        if (value.indexOf(':') >= 0) return true;
-        String[] parts = value.split("\\.", -1);
-        if (parts.length != 4) return false;
-
-        for (String part : parts) {
-            if (part.isEmpty()) return false;
-
-            for (int i = 0; i < part.length(); i++) {
-                if (!Character.isDigit(part.charAt(i))) return false;
-            }
-
-            try {
-                int number = Integer.parseInt(part);
-                if (number < 0 || number > 255) return false;
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

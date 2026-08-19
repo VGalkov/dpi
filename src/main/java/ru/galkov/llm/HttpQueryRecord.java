@@ -1,6 +1,7 @@
 package ru.galkov.llm;
 
 /**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  * Запись HTTP/HTTPS-соединения или HTTP-запроса для асинхронного LLM-анализа.
  */
 public final class HttpQueryRecord {

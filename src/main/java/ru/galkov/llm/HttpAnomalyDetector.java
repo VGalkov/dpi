@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.util.concurrent.*;
 
 import static ru.galkov.Main.getConfig;
-
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
@@ -50,31 +49,25 @@ public final class HttpAnomalyDetector {
         this.model = getConfig().get("http.anomaly-detector.llm-studio.model");
         this.timeout = Duration.ofSeconds(getConfig().getInt("http.anomaly-detector.llm-studio.timeout-seconds"));
         this.apiKey = getConfig().get("http.anomaly-detector.llm-studio.api-key");
-
-        String thresholdStr = getConfig().get("http.anomaly-detector.trust-threshold");
         double threshold = 0.7;
-        try {
-            threshold = Double.parseDouble(thresholdStr);
-        } catch (NumberFormatException e) {
-            // оставить 0.7
-        }
+        try { threshold = Double.parseDouble(getConfig().get("http.anomaly-detector.trust-threshold")); } catch (NumberFormatException ignored) {}
         this.trustThreshold = threshold;
-
         int ttlSeconds = 3600;
-        try {
-            String ttlStr = getConfig().get("http.anomaly-detector.processed-ttl-seconds");
-            if (!ttlStr.isEmpty()) {
-                ttlSeconds = Integer.parseInt(ttlStr);
-            }
-        } catch (NumberFormatException e) {
-            logger.warn(LocaleUtil.getString("http_anomaly_detector_invalid_ttl"));
-        }
+        try { ttlSeconds = Integer.parseInt(getConfig().get("http.anomaly-detector.processed-ttl-seconds")); } catch (Exception ignored) {}
         this.processedTtlMillis = ttlSeconds * 1000L;
-
         this.inspectBody = getConfig().getBoolean("http.anomaly-detector.inspect-body");
+        logger.info(LocaleUtil.getString("http_anomaly_detector_initialized"), enabled, model, llmUrl, processedTtlMillis / 1000, inspectBody);
+    }
 
-        logger.info(LocaleUtil.getString("http_anomaly_detector_initialized"),
-                enabled, model, llmUrl, processedTtlMillis / 1000, inspectBody);
+    public void processQueue() {
+        while (running) {
+            try {
+                HttpQueryRecord record = queue.poll(1, TimeUnit.SECONDS);
+                if (record == null) continue;
+                analyzeRecord(record);
+            } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+            catch (Exception e) { logger.error(LocaleUtil.getString("http_anomaly_detector_analysis_error"), e.getMessage(), e); }
+        }
     }
 
 
@@ -128,34 +121,13 @@ public final class HttpAnomalyDetector {
         }
     }
 
-    public void processQueue() {
-        while (running) {
-            try {
-                HttpQueryRecord record = queue.poll(1, TimeUnit.SECONDS);
-                if (record == null) continue;
-                analyzeRecord(record);
-                logger.debug(LocaleUtil.getString("http_anomaly_detector_record_processed"),
-                        record.getClientIp(), record.getHost());
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.warn(LocaleUtil.getString("http_anomaly_detector_thread_interrupted"));
-                break;
-            } catch (Exception e) {
-                logger.error(LocaleUtil.getString("http_anomaly_detector_analysis_error"), e.getMessage(), e);
-            }
-        }
-    }
-
-    private HttpAnalysisResult analyzeRecord(HttpQueryRecord record) {
+    private void analyzeRecord(HttpQueryRecord record) {
         if (llmUrl == null || llmUrl.isEmpty()) {
             logger.warn(LocaleUtil.getString("http_anomaly_detector_llm_url_not_configured"));
-            return null;
         }
 
         if (model == null || model.isEmpty()) {
             logger.warn(LocaleUtil.getString("http_anomaly_detector_llm_model_not_configured"));
-            return null;
         }
 
         try {
@@ -168,15 +140,13 @@ public final class HttpAnomalyDetector {
 
             if (response == null || response.isEmpty()) {
                 logger.warn(LocaleUtil.getString("http_anomaly_detector_empty_response"));
-                return null;
             }
 
             logger.debug(LocaleUtil.getString("http_anomaly_detector_response"), response);
-            return parseResponse(response);
+            parseResponse(response);
 
         } catch (Exception e) {
             logger.error(LocaleUtil.getString("http_anomaly_detector_analysis_error"), e.getMessage(), e);
-            return null;
         }
     }
 
@@ -252,7 +222,7 @@ public final class HttpAnomalyDetector {
         return response.body();
     }
 
-    private HttpAnalysisResult parseResponse(String responseBody) {
+    private AnalysisResult parseResponse(String responseBody) {
         try {
             int choicesStart = responseBody.indexOf("\"choices\"");
             if (choicesStart < 0) return null;
@@ -280,7 +250,7 @@ public final class HttpAnomalyDetector {
             String reason = extractField(content, "reason");
             logger.info(LocaleUtil.getString("http_anomaly_detector_analysis_result"),
                     isSuspicious, confidence, reason);
-            return new HttpAnalysisResult(isSuspicious, confidence, reason, null);
+            return new AnalysisResult(isSuspicious, confidence, reason, null);
         } catch (Exception e) {
             logger.debug(LocaleUtil.getString("http_anomaly_detector_parse_error"), e.getMessage());
             return null;

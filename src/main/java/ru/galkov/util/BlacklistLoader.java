@@ -15,11 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static ru.galkov.Main.getConfig;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
 public final class BlacklistLoader implements AutoCloseable {
-
     private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
 
     private final List<BlacklistSource> sources;
@@ -29,8 +25,7 @@ public final class BlacklistLoader implements AutoCloseable {
     private volatile ScheduledExecutorService reloadExecutor;
 
     public BlacklistLoader(List<BlacklistSource> sources) {
-        if (sources == null)
-            throw new IllegalArgumentException(LocaleUtil.getString("blacklist_sources_cannot_be_null"));
+        if (sources == null) throw new IllegalArgumentException(LocaleUtil.getString("blacklist_sources_cannot_be_null"));
         this.sources = List.copyOf(sources);
     }
 
@@ -39,46 +34,17 @@ public final class BlacklistLoader implements AutoCloseable {
         return snapshot.get();
     }
 
-    public BlockDecision checkIp(String ip) {
-        String normalizedIp = HostNormalizer.normalizeIp(ip);
-        return normalizedIp != null ? snapshot().checkIp(normalizedIp) : BlockDecision.allow();
-    }
-
-    public BlockDecision checkDomain(String domain) {
-        String normalizedDomain = HostNormalizer.normalizeHost(domain);
-        return normalizedDomain != null ? snapshot().checkDomain(normalizedDomain) : BlockDecision.allow();
-    }
-
-    @Deprecated
-    public boolean isBlockedIp(String ip) {
-        return checkIp(ip).isBlocked();
-    }
-
-    @Deprecated
-    public boolean isBlockedDomain(String domain) {
-        return checkDomain(domain).isBlocked();
-    }
-
-    /**
-     * Выполняет первую синхронную загрузку и запускает планировщик, если это включено в application.properties.
-     */
     public void load() {
         ensureLoaded();
         startReloadScheduler();
     }
 
-    /**
-     * Загружает источники.
-     * В отличие от первой загрузки не очищает активный blacklist при ошибке: прежний snapshot остаётся рабочим.
-     */
     public void reloadNow() {
         synchronized (reloadLock) {
             try {
-                BlacklistSnapshot newSnapshot = buildSnapshot();
-                snapshot.set(newSnapshot);
+                snapshot.set(buildSnapshot());
                 loaded = true;
                 logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_ok")));
-
             } catch (Exception e) {
                 logger.error("{} error={}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_error")), e.getMessage());
             }
@@ -87,12 +53,10 @@ public final class BlacklistLoader implements AutoCloseable {
 
     private void ensureLoaded() {
         if (loaded) return;
-
         synchronized (reloadLock) {
             if (loaded) return;
             try {
-                BlacklistSnapshot newSnapshot = buildSnapshot();
-                snapshot.set(newSnapshot);
+                snapshot.set(buildSnapshot());
                 logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_first_load_ok")));
             } catch (Exception e) {
                 logger.error(LocaleUtil.getString("blacklist_critical_load_error"), e);
@@ -104,132 +68,52 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     private BlacklistSnapshot buildSnapshot() {
-        DomainTrie newDomainTrie = new DomainTrie();
-        Set<String> newIps = new HashSet<>();
-        Set<IpCidr> newIpCidrs = new HashSet<>();
-        int loadedSources = 0;
-        int totalRules = 0;
-        int invalidRules = 0;
-        int duplicateIps = 0;
-
+        DomainTrie domainTrie = new DomainTrie();
+        Set<String> ips = new HashSet<>();
+        Set<IpCidr> cidrs = new HashSet<>();
+        int loadedSources = 0, totalRules = 0, invalidRules = 0, duplicateIps = 0;
         for (BlacklistSource source : sources) {
             try {
                 long startedAt = System.currentTimeMillis();
-                logger.info(LocaleUtil.getString("blacklist_source_loaded"), source);
+                logger.info(LocaleUtil.getString("blacklist_source_loading"), source);
                 List<BlacklistRule> rules = source.loadRules();
-
-                if (rules == null) {
-                    logger.warn(LocaleUtil.getString("blacklist_source_null"), source);
-                    continue;
-                }
-
-                int sourceAcceptedRules = 0;
-                int sourceInvalidRules = 0;
-
+                if (rules == null) { logger.warn(LocaleUtil.getString("blacklist_source_null"), source); continue; }
+                int accepted = 0, invalid = 0;
                 for (BlacklistRule rule : rules) {
-                    if (rule == null || rule.getValue() == null) {
-                        sourceInvalidRules++;
-                        continue;
-                    }
-
-                    String normalizedValue = normalizeRule(rule.getValue());
-
-                    if (normalizedValue == null) {
-                        sourceInvalidRules++;
-                        continue;
-                    }
-
-                    if (isCidrRule(normalizedValue)) {
-                        try {
-                            IpCidr cidr = new IpCidr(normalizedValue);
-                            newIpCidrs.add(cidr);
-                            sourceAcceptedRules++;
-                            totalRules++;
-                            continue;
-                        } catch (Exception e) {
-                            sourceInvalidRules++;
-                            logger.debug(LocaleUtil.getString("blacklist_invalid_cidr"), source, normalizedValue);
-                            continue;
-                        }
-                    }
-
-                    if (isIpLiteral(normalizedValue)) {
-                        String ip = HostNormalizer.normalizeIp(normalizedValue);
-
-                        if (ip == null) {
-                            sourceInvalidRules++;
-                            logger.debug(LocaleUtil.getString("blacklist_invalid_ip"), source, normalizedValue);
-                            continue;
-                        }
-
-                        if (!newIps.add(ip)) duplicateIps++;
-
-                        sourceAcceptedRules++;
-                        totalRules++;
-                        continue;
-                    }
-
-                    String domain = HostNormalizer.normalizeHost(normalizedValue);
-
-                    if (domain == null) {
-                        sourceInvalidRules++;
-                        logger.debug(LocaleUtil.getString("blacklist_invalid_domain"), source, normalizedValue);
-                        continue;
-                    }
-
-                    if (domain.startsWith("*.")) {
-                        String subdomain = domain.substring(2);
-                        newDomainTrie.addDomain(subdomain, DomainTrie.MatchType.WILDCARD);
-                    } else if (isSubtreeRule(normalizedValue, source)) {
-                        newDomainTrie.addDomain(domain, DomainTrie.MatchType.SUBTREE);
+                    if (rule == null || rule.value() == null) { invalid++; continue; }
+                    String value = normalizeRule(rule.value());
+                    if (value == null) { invalid++; continue; }
+                    if (value.indexOf('/') >= 0) {
+                        try { cidrs.add(new IpCidr(value)); accepted++; } catch (Exception e) { invalid++; }
+                    } else if (isIpLiteral(value)) {
+                        String ip = HostNormalizer.normalizeIp(value);
+                        if (ip == null) { invalid++; } else { if (!ips.add(ip)) duplicateIps++; accepted++; }
                     } else {
-                        newDomainTrie.addDomain(domain, DomainTrie.MatchType.EXACT);
+                        String domain = HostNormalizer.normalizeHost(value);
+                        if (domain == null) { invalid++; }
+                        else {
+                            DomainTrie.MatchType type = domain.startsWith("*.") ? DomainTrie.MatchType.WILDCARD
+                                    : (isSubtreeRule(source) ? DomainTrie.MatchType.SUBTREE : DomainTrie.MatchType.EXACT);
+                            domainTrie.addDomain(type == DomainTrie.MatchType.WILDCARD ? domain.substring(2) : domain, type);
+                            accepted++;
+                        }
                     }
-
-                    sourceAcceptedRules++;
-                    totalRules++;
                 }
-
                 loadedSources++;
-                invalidRules += sourceInvalidRules;
-
-                long durationMillis = System.currentTimeMillis() - startedAt;
-                logger.info(
-                        LocaleUtil.getString("blacklist_source_loaded"),
-                        source,
-                        rules.size(),
-                        sourceAcceptedRules,
-                        sourceInvalidRules,
-                        durationMillis
-                );
-
+                totalRules += accepted;
+                invalidRules += invalid;
+                logger.info(LocaleUtil.getString("blacklist_source_loaded"), source, rules.size(), accepted, invalid, System.currentTimeMillis() - startedAt);
             } catch (Exception e) {
                 logger.error(LocaleUtil.getString("blacklist_source_load_error"), source, e);
             }
         }
-
-        if (!sources.isEmpty() && loadedSources == 0)
-            throw new IllegalStateException(LocaleUtil.getString("blacklist_no_sources_loaded"));
-
-        Set<String> immutableIps = Set.copyOf(newIps);
-        Set<IpCidr> immutableIpCidrs = Set.copyOf(newIpCidrs);
-        BlacklistSnapshot newSnapshot = new BlacklistSnapshot(newDomainTrie, immutableIps, immutableIpCidrs);
-
+        if (!sources.isEmpty() && loadedSources == 0) throw new IllegalStateException(LocaleUtil.getString("blacklist_no_sources_loaded"));
         logger.info("{} {} {} {} {} {} {}",
                 LogFields.kv("event", LocaleUtil.getString("blacklist_snapshot_built")),
-                LogFields.kv("sourcesLoaded", loadedSources),
-                LogFields.kv("rulesTotal", totalRules),
-                LogFields.kv("ipsUnique", immutableIps.size()),
-                LogFields.kv("ipsCidr", immutableIpCidrs.size()),
-                LogFields.kv("ipsDuplicate", duplicateIps),
-                LogFields.kv("rulesInvalid", invalidRules));
-
-        return newSnapshot;
-    }
-
-    private static boolean isCidrRule(String value) {
-        if (value == null || value.isEmpty()) return false;
-        return value.indexOf('/') >= 0;
+                LogFields.kv("sourcesLoaded", loadedSources), LogFields.kv("rulesTotal", totalRules),
+                LogFields.kv("ipsUnique", ips.size()), LogFields.kv("ipsCidr", cidrs.size()),
+                LogFields.kv("ipsDuplicate", duplicateIps), LogFields.kv("rulesInvalid", invalidRules));
+        return new BlacklistSnapshot(domainTrie, Set.copyOf(ips), Set.copyOf(cidrs));
     }
 
     private void startReloadScheduler() {
@@ -237,31 +121,18 @@ public final class BlacklistLoader implements AutoCloseable {
             logger.info(LocaleUtil.getString("blacklist_reload_disabled"));
             return;
         }
-
-        int intervalSeconds = getConfig().getInt("blacklist.reload.interval-seconds");
-
-        if (intervalSeconds <= 0) {
-            logger.warn(
-                    LocaleUtil.getString("blacklist_reload_invalid_interval"),
-                    intervalSeconds
-            );
-            return;
-        }
+        int interval = getConfig().getInt("blacklist.reload.interval-seconds");
+        if (interval <= 0) { logger.warn(LocaleUtil.getString("blacklist_reload_invalid_interval"), interval); return; }
 
         synchronized (reloadLock) {
-            if (reloadExecutor != null && !reloadExecutor.isShutdown())
-                return;
-
-            reloadExecutor = Executors.newSingleThreadScheduledExecutor(
-                    runnable -> {
-                        Thread thread = new Thread(runnable, "Blacklist-Reload-Thread");
-                        thread.setDaemon(true);
-                        return thread;
-                    }
-            );
-
-            reloadExecutor.scheduleWithFixedDelay(this::reloadNow, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
-            logger.info(LocaleUtil.getString("blacklist_reload_enabled"), intervalSeconds);
+            if (reloadExecutor != null && !reloadExecutor.isShutdown()) return;
+            reloadExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "Blacklist-Reload-Thread");
+                t.setDaemon(true);
+                return t;
+            });
+            reloadExecutor.scheduleWithFixedDelay(this::reloadNow, interval, interval, TimeUnit.SECONDS);
+            logger.info(LocaleUtil.getString("blacklist_reload_enabled"), interval);
         }
     }
 
@@ -270,38 +141,35 @@ public final class BlacklistLoader implements AutoCloseable {
         String result = value.trim();
         if (result.isEmpty() || result.startsWith("#") || result.startsWith("!")) return null;
         int commentIndex = result.indexOf('#');
-
-        if (commentIndex >= 0)
-            result = result.substring(0, commentIndex).trim();
-
+        if (commentIndex >= 0) result = result.substring(0, commentIndex).trim();
         return result.isEmpty() ? null : result;
     }
 
     private static boolean isIpLiteral(String value) {
         if (value == null || value.isEmpty()) return false;
         if (value.indexOf(':') >= 0) return true;
-        return isIpv4Literal(value);
-    }
-
-    private static boolean isIpv4Literal(String value) {
-        String[] parts = value.split("\\.", -1);
-        if (parts.length != 4) return false;
-        for (String part : parts) {
-            if (part.isEmpty()) return false;
-
-            for (int i = 0; i < part.length(); i++)
-                if (!Character.isDigit(part.charAt(i))) return false;
-
+        // IPv4
+        int len = value.length(), dots = 0, lastDot = -1;
+        for (int i = 0; i < len; i++) {
+            char c = value.charAt(i);
+            if (c == '.') {
+                if (++dots > 3 || i - lastDot - 1 > 3) return false;
+                lastDot = i;
+            } else if (c < '0' || c > '9') {
+                return false;
+            }
+        }
+        if (dots != 3) return false;
+        // Проверка диапазонов 0-255
+        String[] parts = value.split("\\.");
+        for (String p : parts) {
             try {
-                int number = Integer.parseInt(part);
-                if (number < 0 || number > 255)
-                    return false;
-
+                int n = Integer.parseInt(p);
+                if (n < 0 || n > 255) return false;
             } catch (NumberFormatException e) {
                 return false;
             }
         }
-
         return true;
     }
 
@@ -310,23 +178,12 @@ public final class BlacklistLoader implements AutoCloseable {
         ScheduledExecutorService executor = reloadExecutor;
         if (executor == null) return;
         executor.shutdown();
-
-        try {
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS))
-                executor.shutdownNow();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            executor.shutdownNow();
-        }
+        try { if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow(); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); executor.shutdownNow(); }
         logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_scheduler_stopped")));
     }
 
-    private static boolean isSubtreeRule(String rule, BlacklistSource source) {
-        // RKN всегда subtree
-        if (source instanceof RknBlacklistSource)
-            return true;
-
-        // Остальные источники — exact
-        return false;
+    private static boolean isSubtreeRule(BlacklistSource source) {
+        return source instanceof RknBlacklistSource;
     }
 }

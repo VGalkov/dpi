@@ -10,7 +10,6 @@ import ru.galkov.util.BlacklistRule;
 import ru.galkov.util.LocaleUtil;
 
 import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -19,12 +18,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class RknBlacklistSource implements BlacklistSource {
-
     private static final Logger logger = LoggerFactory.getLogger(RknBlacklistSource.class);
     private final Path xmlFile;
 
@@ -43,112 +40,56 @@ public final class RknBlacklistSource implements BlacklistSource {
 
     private List<BlacklistRule> parseRegisterXml(byte[] xmlBytes) throws IOException {
         List<BlacklistRule> rules = new ArrayList<>();
-        Document document = parseXml(xmlBytes);
-
-        NodeList contentNodes = document.getElementsByTagNameNS("*", "content");
-
+        Document doc = parseXml(xmlBytes);
+        NodeList contentNodes = doc.getElementsByTagNameNS("*", "content");
         for (int c = 0; c < contentNodes.getLength(); c++) {
             Node content = contentNodes.item(c);
-            NodeList children = content.getChildNodes();
-
             String contentId = extractContentId(content);
             String blockType = extractBlockType(content);
-
-            for (int i = 0; i < children.getLength(); i++) {
-                Node node = children.item(i);
-                String tagName = node.getNodeName();
-
-                switch (tagName) {
-                    case "domain" -> {
-                        String domain = node.getTextContent().trim().toLowerCase(Locale.ROOT);
-                        if (domain.startsWith("*.")) {
-                            domain = domain.substring(2);
-                        }
-                        if (!domain.isBlank()) {
-                            rules.add(new BlacklistRule(
-                                    BlacklistRule.RuleType.DOMAIN,
-                                    domain,
-                                    "RKN",
-                                    contentId,
-                                    blockType
-                            ));
-                        }
-                    }
-                    case "ip" -> {
-                        String ip = node.getTextContent().trim();
-                        if (!ip.isBlank()) {
-                            rules.add(new BlacklistRule(
-                                    BlacklistRule.RuleType.IP,
-                                    ip,
-                                    "RKN",
-                                    contentId,
-                                    blockType
-                            ));
-                        }
-                    }
-                    case "ipv6" -> {
-                        String ipv6 = node.getTextContent().trim();
-                        if (!ipv6.isBlank()) {
-                            rules.add(new BlacklistRule(
-                                    BlacklistRule.RuleType.IP,
-                                    ipv6,
-                                    "RKN",
-                                    contentId,
-                                    blockType
-                            ));
-                        }
-                    }
-                }
+            for (Node node = content.getFirstChild(); node != null; node = node.getNextSibling()) {
+                String tag = node.getNodeName();
+                String value = node.getTextContent().trim();
+                if (value.isBlank()) continue;
+                BlacklistRule.RuleType type = "domain".equals(tag) ? BlacklistRule.RuleType.DOMAIN
+                        : ("ip".equals(tag) || "ipv6".equals(tag)) ? BlacklistRule.RuleType.IP : null;
+                if (type == null) continue;
+                if (value.startsWith("*.")) value = value.substring(2);
+                rules.add(new BlacklistRule(type, value.toLowerCase(Locale.ROOT), "RKN", contentId, blockType));
             }
         }
-
         logger.info(LocaleUtil.getString("rkn_rules_extracted"), rules.size());
         return rules;
     }
 
     private String extractContentId(Node content) {
-        NamedNodeMap attributes = content.getAttributes();
-
-        if (attributes == null)
-            return null;
-
-        Node idAttr = attributes.getNamedItem("id");
-
+        NamedNodeMap attrs = content.getAttributes();
+        if (attrs == null) return null;
+        Node idAttr = attrs.getNamedItem("id");
         return idAttr != null ? idAttr.getNodeValue() : null;
     }
 
     private String extractBlockType(Node content) {
-        NodeList children = content.getChildNodes();
-
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-
-            if ("blockType".equals(node.getNodeName()))
-                return node.getTextContent().trim();
-        }
-
+        for (Node n = content.getFirstChild(); n != null; n = n.getNextSibling())
+            if ("blockType".equals(n.getNodeName())) return n.getTextContent().trim();
         return null;
     }
 
     private Document parseXml(byte[] xmlBytes) throws IOException {
         try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
-            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            return builder.parse(new ByteArrayInputStream(xmlBytes));
+            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+            f.setNamespaceAware(true);
+            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            f.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            f.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            f.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            f.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            return f.newDocumentBuilder().parse(new ByteArrayInputStream(xmlBytes));
         } catch (Exception e) {
             throw new IOException(LocaleUtil.getString("rkn_xml_parse_error"), e);
         }
     }
 
     @Override
-    public String toString() {
-        return "RknBlacklistSource{xmlFile=" + xmlFile + '}';
-    }
+    public String toString() { return "RknBlacklistSource{xmlFile=" + xmlFile + '}'; }
 }

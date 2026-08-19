@@ -1,107 +1,64 @@
-package ru.galkov.blacklist_source;
+    package ru.galkov.blacklist_source;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import ru.galkov.util.BlacklistRule;
-import ru.galkov.util.LocaleUtil;
+    import ru.galkov.util.BlacklistRule;
+    import ru.galkov.util.LocaleUtil;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+    import java.io.IOException;
+    import java.net.HttpURLConnection;
+    import java.net.URL;
+    import java.util.List;
+    /**
+     * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+     */
+    public final class AdguardBlacklistSource extends AbstractBlacklistSource {
+        private final String url;
+        private final int connectTimeout, readTimeout;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
-public final class AdguardBlacklistSource implements BlacklistSource {
-    private static final Logger logger = LoggerFactory.getLogger(AdguardBlacklistSource.class);
-    private final String url;
-    private final int connectTimeout;
-    private final int readTimeout;
+        public AdguardBlacklistSource(String url, int connectTimeout, int readTimeout) {
+            this.url = url;
+            this.connectTimeout = connectTimeout;
+            this.readTimeout = readTimeout;
+        }
 
-    public AdguardBlacklistSource(String url, int connectTimeout, int readTimeout) {
-        this.url = url;
-        this.connectTimeout = connectTimeout;
-        this.readTimeout = readTimeout;
-    }
+        @Override
+        public List<BlacklistRule> loadRules() throws IOException {
+            logger.info(LocaleUtil.getString("adguard_load_started"), url);
+            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(connectTimeout);
+            conn.setReadTimeout(readTimeout);
+            conn.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
 
-    @Override
-    public List<BlacklistRule> loadRules() throws IOException {
-        logger.info(LocaleUtil.getString("adguard_load_started"), url);
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(connectTimeout);
-        connection.setReadTimeout(readTimeout);
-        connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
-        int status = connection.getResponseCode();
-        logger.info(LocaleUtil.getString("adguard_http_response"), status);
-        if (status != HttpURLConnection.HTTP_OK)
-            throw new IOException(LocaleUtil.getString("adguard_http_error") + status);
+            int status = conn.getResponseCode();
+            logger.info(LocaleUtil.getString("adguard_http_response"), status);
+            if (status != HttpURLConnection.HTTP_OK)
+                throw new IOException(LocaleUtil.getString("adguard_http_error") + status);
 
-        List<BlacklistRule> rules = new ArrayList<>();
-        try (
-                InputStream input = connection.getInputStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
-        ) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                BlacklistRule rule = parseLine(line);
-                if (rule != null)
-                    rules.add(rule);
+            List<BlacklistRule> rules = loadFromStream(conn.getInputStream(), "AdGuard");
+            conn.disconnect();
+            logger.info(LocaleUtil.getString("adguard_blacklist_loaded"), rules.size());
+            return rules;
+        }
+
+        @Override
+        protected BlacklistRule parseLine(String line, String sourceName) {
+            String value = line.trim();
+            if (value.isEmpty() || value.startsWith("#") || value.startsWith("!")) return null;
+            String[] parts = value.split("\\s+");
+            if (parts.length >= 2 && looksLikeIp(parts[0])) value = parts[1];
+            if (value.startsWith("||")) {
+                value = value.substring(2);
+                int sep = value.indexOf('^');
+                if (sep >= 0) value = value.substring(0, sep);
             }
-
-        } finally {
-            connection.disconnect();
+            int slash = value.indexOf('/');
+            if (slash >= 0) value = value.substring(0, slash);
+            value = value.trim();
+            return value.isEmpty() ? null : new BlacklistRule(BlacklistRule.RuleType.DOMAIN, value, sourceName, null, null);
         }
 
-        logger.info(LocaleUtil.getString("adguard_blacklist_loaded"), rules.size());
-        return rules;
+        private boolean looksLikeIp(String v) { return v.indexOf('.') >= 0 || v.indexOf(':') >= 0; }
+
+        @Override
+        public String toString() { return "AdguardBlacklistSource{url='" + url + "'}"; }
     }
-
-    private BlacklistRule parseLine(String line) {
-        if (line == null) return null;
-        String value = line.trim();
-        if (value.isEmpty() || value.startsWith("#") || value.startsWith("!"))
-            return null;
-
-        String[] parts = value.split("\\s+");
-        if (parts.length >= 2 && looksLikeIp(parts[0]))
-            value = parts[1];
-
-        if (value.startsWith("||")) {
-            value = value.substring(2);
-            int separator = value.indexOf('^');
-            if (separator >= 0)
-                value = value.substring(0, separator);
-        }
-
-        int slash = value.indexOf('/');
-        if (slash >= 0)
-            value = value.substring(0, slash);
-
-        value = value.trim();
-        if (value.isEmpty()) return null;
-
-        return new BlacklistRule(
-                BlacklistRule.RuleType.DOMAIN,
-                value,
-                "AdGuard",
-                null,
-                null
-        );
-    }
-
-    private boolean looksLikeIp(String value) {
-        return value.indexOf('.') >= 0 || value.indexOf(':') >= 0;
-    }
-
-    @Override
-    public String toString() {
-        return "AdguardBlacklistSource{" + "url='" + url + '\'' + '}';
-    }
-}

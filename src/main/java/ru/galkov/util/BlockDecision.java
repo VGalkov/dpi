@@ -1,26 +1,18 @@
 package ru.galkov.util;
 
-/**
- * Результат проверки blacklist с деталями о причине блокировки.
- */
 public final class BlockDecision {
+    public enum BlockReason { NONE, IP_EXACT, IP_CIDR, DOMAIN_EXACT, DOMAIN_WILDCARD, DOMAIN_SUBTREE }
+    public enum BlockAction { ALLOW, BLOCK_HTTP_403, BLOCK_DROP, BLOCK_SINKHOLE, LOG_ONLY }
 
-    public enum BlockReason {
-        NONE,
-        IP_EXACT,
-        IP_CIDR,
-        DOMAIN_EXACT,
-        DOMAIN_WILDCARD,
-        DOMAIN_SUBTREE
-    }
+    // Кэш для ALLOW
+    private static final BlockDecision ALLOW_DECISION = new BlockDecision(false, BlockReason.NONE, null, null, BlockAction.ALLOW);
 
-    public enum BlockAction {
-        ALLOW,
-        BLOCK_HTTP_403,
-        BLOCK_DROP,
-        BLOCK_SINKHOLE,
-        LOG_ONLY
-    }
+    // Кэш для заблокированных (без matchedRule)
+    private static final BlockDecision BLOCK_IP_EXACT = new BlockDecision(true, BlockReason.IP_EXACT, null, "blacklist", BlockAction.BLOCK_HTTP_403);
+    private static final BlockDecision BLOCK_IP_CIDR = new BlockDecision(true, BlockReason.IP_CIDR, null, "blacklist", BlockAction.BLOCK_HTTP_403);
+    private static final BlockDecision BLOCK_DOMAIN_EXACT = new BlockDecision(true, BlockReason.DOMAIN_EXACT, null, "blacklist", BlockAction.BLOCK_HTTP_403);
+    private static final BlockDecision BLOCK_DOMAIN_WILDCARD = new BlockDecision(true, BlockReason.DOMAIN_WILDCARD, null, "blacklist", BlockAction.BLOCK_HTTP_403);
+    private static final BlockDecision BLOCK_DOMAIN_SUBTREE = new BlockDecision(true, BlockReason.DOMAIN_SUBTREE, null, "blacklist", BlockAction.BLOCK_HTTP_403);
 
     private final boolean blocked;
     private final BlockReason reason;
@@ -37,32 +29,30 @@ public final class BlockDecision {
     }
 
     public static BlockDecision allow() {
-        return new BlockDecision(false, BlockReason.NONE, null, null, BlockAction.ALLOW);
+        return ALLOW_DECISION;
     }
 
-    public static BlockDecision blockIpExact(String matchedRule, String source) {
-        return new BlockDecision(true, BlockReason.IP_EXACT, matchedRule, source, BlockAction.BLOCK_HTTP_403);
+    public static BlockDecision blockIpExact(String rule, String source) {
+        return rule != null ? new BlockDecision(true, BlockReason.IP_EXACT, rule, source, BlockAction.BLOCK_HTTP_403) : BLOCK_IP_EXACT;
     }
 
-    public static BlockDecision blockIpCidr(String matchedRule, String source) {
-        return new BlockDecision(true, BlockReason.IP_CIDR, matchedRule, source, BlockAction.BLOCK_HTTP_403);
+    public static BlockDecision blockIpCidr(String rule, String source) {
+        return rule != null ? new BlockDecision(true, BlockReason.IP_CIDR, rule, source, BlockAction.BLOCK_HTTP_403) : BLOCK_IP_CIDR;
     }
 
-    public static BlockDecision blockDomain(DomainTrie.MatchType matchType, String matchedRule, String source) {
-        BlockReason reason = switch (matchType) {
+    public static BlockDecision blockDomain(DomainTrie.MatchType type, String rule, String source) {
+        BlockReason reason = switch (type) {
             case WILDCARD -> BlockReason.DOMAIN_WILDCARD;
             case SUBTREE -> BlockReason.DOMAIN_SUBTREE;
             default -> BlockReason.DOMAIN_EXACT;
         };
-        return new BlockDecision(true, reason, matchedRule, source, BlockAction.BLOCK_HTTP_403);
+        return rule != null ? new BlockDecision(true, reason, rule, source, BlockAction.BLOCK_HTTP_403)
+                : new BlockDecision(true, reason, null, "blacklist", BlockAction.BLOCK_HTTP_403);
     }
 
-    public boolean isBlocked() {
-        return blocked;
-    }
-
-    public String getMatchedRule() {
-        return matchedRule;
-    }
-
+    public boolean isBlocked() { return blocked; }
+    public String getMatchedRule() { return matchedRule; }
+    public BlockReason getReason() { return reason; }
+    public String getSource() { return source; }
+    public BlockAction getAction() { return action; }
 }
