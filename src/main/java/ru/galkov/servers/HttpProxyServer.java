@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.util.Iterator;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,6 +23,8 @@ import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ *
+ * ✅ П.20: Исправление итерации с удалением в cleanupOldSockets()
  */
 public class HttpProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
@@ -31,7 +34,7 @@ public class HttpProxyServer {
     private final int port;
     private final int maxConnections;
     private final int maxConnectionsPerClient;
-    private final int maxActiveSockets;  // ✅ П.10: новый лимит
+    private final int maxActiveSockets;
 
     private final ExecutorService workerPool;
     private final Semaphore connectionSlots;
@@ -49,14 +52,14 @@ public class HttpProxyServer {
         this.httpAnomalyDetector = httpAnomalyDetector;
         this.maxConnections = getConfig().getInt("proxy.max-connections");
         this.maxConnectionsPerClient = getConfig().getInt("proxy.max-connections-per-client");
-        this.maxActiveSockets = maxConnections * 2;  // ✅ П.10: лимит = 2 × max-connections
+        this.maxActiveSockets = maxConnections * 2;
 
         if (maxConnections <= 0) throw new IllegalArgumentException("proxy.max-connections > 0");
         if (maxConnectionsPerClient <= 0) throw new IllegalArgumentException("proxy.max-connections-per-client > 0");
         if (maxConnectionsPerClient > maxConnections) throw new IllegalArgumentException("max-connections-per-client <= max-connections");
 
         this.connectionSlots = new Semaphore(maxConnections, true);
-        this.workerPool = WorkerPool.get();  // ✅ П.26: общий worker pool
+        this.workerPool = WorkerPool.get();
     }
 
     public void start() {
@@ -84,7 +87,6 @@ public class HttpProxyServer {
             activeClientSockets.forEach(this::closeQuietly);
             activeClientSockets.clear();
         }
-        // ✅ П.26: не закрываем общий worker pool
         joinServerThread();
         logger.info("Остановка HTTP proxy завершена: port={}", port);
     }
@@ -120,7 +122,6 @@ public class HttpProxyServer {
         } finally {
             this.serverSocket = null;
             running = false;
-            // ✅ П.26: не закрываем общий worker pool
             logger.info("HTTP Proxy server thread завершён");
         }
     }
@@ -135,7 +136,7 @@ public class HttpProxyServer {
         if (activeClientSockets.size() >= maxActiveSockets) {
             logger.warn(LocaleUtil.getString("http_proxy_max_sockets_reached"), activeClientSockets.size(), maxActiveSockets);
             closeQuietly(clientSocket);
-            cleanupOldSockets();  // ✅ Очистка старых сокетов
+            cleanupOldSockets();
             return;
         }
 
@@ -177,19 +178,35 @@ public class HttpProxyServer {
 
     /**
      * ✅ П.10: Очистка старых сокетов при переполнении
+     * ✅ П.20: Исправление итерации с удалением — используем Iterator.remove()
      */
     private void cleanupOldSockets() {
+        int currentSize = activeClientSockets.size();
+        if (currentSize < maxActiveSockets) {
+            return;
+        }
+
+        // ✅ П.20: Используем Iterator для безопасного удаления
+        int toRemoveCount = getConfig().getInt("proxy.cleanup-sockets-per-iteration");
         int removed = 0;
-        for (Socket socket : activeClientSockets) {
-            if (activeClientSockets.size() < maxActiveSockets) break;
+
+        Iterator<Socket> iterator = activeClientSockets.iterator();
+        while (iterator.hasNext() && removed < toRemoveCount) {
+            Socket socket = iterator.next();
             if (socket != null && !socket.isClosed()) {
                 closeQuietly(socket);
-                activeClientSockets.remove(socket);
+                iterator.remove();
                 removed++;
+            } else {
+                // Удаляем уже закрытые сокеты из множества
+                iterator.remove();
             }
         }
+
         if (removed > 0) {
-            logger.info(LocaleUtil.getString("http_proxy_socket_cleaned"), removed);
+            int removedPercent = (removed * 100) / currentSize;
+            logger.info(LocaleUtil.getString("http_proxy_socket_cleanup_triggered"),
+                    removed, removedPercent, currentSize);
         }
     }
 
@@ -199,8 +216,6 @@ public class HttpProxyServer {
         connectionSlots.release();
         logger.debug("PROXY_CONNECTION_CLOSE client={} activeForClient={}", clientIp, Math.max(remaining, 0));
     }
-
-    // ✅ П.26: удалён метод shutdownWorkerPool()
 
     private void joinServerThread() {
         Thread t = serverThread;

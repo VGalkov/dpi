@@ -2,45 +2,89 @@ package ru.galkov.util;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ *
+ * ✅ П.15: Замена regex на простой String.endsWith() для производительности
  */
 public final class HostNormalizer {
+
     private static final Map<String, String> ipCache = new ConcurrentHashMap<>(256);
     private static final Map<String, String> domainCache = new ConcurrentHashMap<>(256);
     private static final int MAX_CACHE_SIZE = 512;
 
-    public static String normalizeIp(String ip) {
-        if (ip == null || ip.isEmpty()) return null;
-        String cached = ipCache.get(ip);
-        if (cached != null) return cached;
+    private HostNormalizer() {
+    }
+
+    public static String normalizeHost(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
+        String host = value.trim().toLowerCase(Locale.ROOT);
+
+        // ✅ П.15: Замена regex на простой String.endsWith()
+        host = removeTrailingDot(host);
+
+        if (host.isEmpty()) return null;
+        if (host.indexOf(':') >= 0) return null;
+        if (host.indexOf(' ') >= 0 || host.indexOf('/') >= 0) return null;
+
+        return host;
+    }
+
+    public static String normalizeIp(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
+        String ip = value.trim();
+        if (ip.indexOf('/') >= 0) return null;
+        if (!looksLikeIp(ip)) return null;
+
         try {
-            InetAddress addr = InetAddress.getByName(ip);
-            String result = addr.getHostAddress();
-            if (ipCache.size() < MAX_CACHE_SIZE) ipCache.put(ip, result);
-            return result;
-        } catch (UnknownHostException e) {
+            return InetAddress.getByName(ip).getHostAddress().toLowerCase(Locale.ROOT);
+
+        } catch (Exception e) {
             return null;
         }
     }
 
-    public static String normalizeHost(String host) {
-        if (host == null || host.isEmpty()) return null;
-        String cached = domainCache.get(host);
-        if (cached != null) return cached;
-        String result = host.toLowerCase().replaceAll("\\.$", "").trim();
-        if (domainCache.size() < MAX_CACHE_SIZE) domainCache.put(host, result);
+    /**
+     * ✅ П.15: Замена regex на простой String.endsWith()
+     */
+    public static String removeTrailingDot(String value) {
+        if (value == null) return null;
+        String result = value;
+
+        // ✅ П.15: Было: value.replaceAll("\\.$", "")
+        // ✅ П.15: Стало: простой цикл while с endsWith()
+        while (result.endsWith(".")) {
+            result = result.substring(0, result.length() - 1);
+        }
+
         return result;
     }
 
-    /**
-     * ✅ П.13: Очистка кэша (вызывать при reload blacklist)
-     */
-    public static void clearCache() {
-        ipCache.clear();
-        domainCache.clear();
+    private static boolean looksLikeIp(String value) {
+
+        if (value.indexOf(':') >= 0) return true;
+        String[] parts = value.split("\\.", -1);
+        if (parts.length != 4) return false;
+
+        for (String part : parts) {
+            if (part.isEmpty()) return false;
+
+            for (int i = 0; i < part.length(); i++) {
+                if (!Character.isDigit(part.charAt(i))) return false;
+            }
+
+            try {
+                int number = Integer.parseInt(part);
+                if (number < 0 || number > 255) return false;
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

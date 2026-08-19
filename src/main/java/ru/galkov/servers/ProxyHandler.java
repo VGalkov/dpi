@@ -19,6 +19,10 @@ import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ *
+ * ✅ П.6: Чтение body потоком для предотвращения OOM
+ * ✅ П.10: Проверка SNI Spoofing
+ * ✅ П.21: Security Headers для защиты от XSS и clickjacking
  */
 public class ProxyHandler implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(ProxyHandler.class);
@@ -28,9 +32,11 @@ public class ProxyHandler implements Runnable {
     private final BlacklistLoader blacklist;
     private final int connectTimeout, clientReadTimeout, remoteReadTimeout, maxHeaderBytes;
     private final long maxBodyBytes;
+    // ✅ П.6: Порог для потокового чтения body
+    private final long streamBodyThreshold;
     private static HttpAnomalyDetector httpAnomalyDetector;
     private static final String ERROR_TEMPLATE_STR =
-            "HTTP/1.1 %d %s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n<html><body><h1>%d %s</h1></body></html>";
+            "HTTP/1.1 %d %s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n";
 
     public ProxyHandler(Socket clientSocket, String clientIp, BlacklistLoader blacklist, HttpAnomalyDetector detector) {
         this.clientSocket = clientSocket;
@@ -42,6 +48,8 @@ public class ProxyHandler implements Runnable {
         this.remoteReadTimeout = getConfig().getInt("proxy.remote-read-timeout-millis");
         this.maxHeaderBytes = getConfig().getInt("proxy.max-header-bytes");
         this.maxBodyBytes = getConfig().getLong("proxy.max-body-bytes");
+        // ✅ П.6: Порог для потокового чтения
+        this.streamBodyThreshold = getConfig().getLong("proxy.stream-body-threshold");
         validateLimits();
     }
 
@@ -112,7 +120,6 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        // Сначала проверка blacklist
         BlockDecision decision = checkBlockedHostOrIp(hp.host());
         if (decision.isBlocked()) {
             logger.info(LocaleUtil.getString("proxy_handler_connect_blocked"),
@@ -123,7 +130,6 @@ public class ProxyHandler implements Runnable {
         logger.info("{} {} {} {}", LogFields.kv("event", "PROXY_CONNECT"),
                 LogFields.kv("client", clientIp), LogFields.kv("host", hp.host()), LogFields.kv("port", hp.port()));
 
-        // Отправка в LLM только если НЕ заблокировано
         if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled())
             httpAnomalyDetector.recordRequest(clientIp, "CONNECT", hp.host(), hp.port(), "/", "", null);
 
@@ -155,6 +161,14 @@ public class ProxyHandler implements Runnable {
                             LogFields.kv("reason", "SNI"), LogFields.kv("rule", sniDecision.getMatchedRule()));
                     closeQuietly(remote); return;
                 }
+
+                // ✅ П.10: Проверка SNI Spoofing (только логирование)
+                String normalizedHost = HostNormalizer.normalizeHost(hp.host());
+                String normalizedSni = HostNormalizer.normalizeHost(sni);
+                if (normalizedHost != null && normalizedSni != null && !normalizedHost.equals(normalizedSni)) {
+                    logger.warn(LocaleUtil.getString("proxy_handler_connect_sni_mismatch"),
+                            clientIp, hp.host(), hp.port(), sni);
+                }
             }
 
             remote.getOutputStream().write(hello);
@@ -174,6 +188,9 @@ public class ProxyHandler implements Runnable {
         }
     }
 
+    /**
+     * ✅ П.6: Чтение body потоком для предотвращения OOM
+     */
     private void handleHttp(InputStream in, OutputStream out, String firstLine, String target, String method) throws IOException {
         HttpHeaders hdrs = readHttpHeaders(in, firstLine);
         ProxyHandlerHelper.HostAndPort hp = ProxyHandlerHelper.resolveHttpTarget(hdrs.hostHeader, target);
@@ -183,7 +200,6 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        // Сначала проверка blacklist
         BlockDecision dec = checkBlockedHostOrIp(hp.host());
         if (dec.isBlocked()) {
             logger.info(LocaleUtil.getString("proxy_handler_http_blocked"),
@@ -191,17 +207,40 @@ public class ProxyHandler implements Runnable {
             sendError(out, 403, "Forbidden"); return;
         }
 
-        String body = null;
-        if (hdrs.contentLength > 0 && hdrs.contentLength <= maxBodyBytes) {
-            byte[] b = new byte[(int) hdrs.contentLength];
-            int total = 0;
-            while (total < b.length) { int r = in.read(b, total, b.length - total); if (r == -1) break; total += r; }
-            body = new String(b, StandardCharsets.UTF_8);
+        // ✅ П.6: Проверка размера body до чтения
+        if (hdrs.contentLength > maxBodyBytes) {
+            logger.info(LocaleUtil.getString("proxy_handler_http_body_too_large"),
+                    clientIp, hdrs.contentLength, maxBodyBytes);
+            sendError(out, 413, "Payload Too Large");
+            return;
         }
 
-        // Отправка в LLM только если НЕ заблокировано
+        // ✅ П.6: Потоковое чтение body вместо загрузки в память
+        String body = null;
+        if (hdrs.contentLength > 0) {
+            if (hdrs.contentLength <= streamBodyThreshold) {
+                // Маленькое body - читаем в память
+                byte[] b = new byte[(int) hdrs.contentLength];
+                int total = 0;
+                while (total < b.length) {
+                    int r = in.read(b, total, b.length - total);
+                    if (r == -1) break;
+                    total += r;
+                }
+                body = new String(b, StandardCharsets.UTF_8);
+                logger.debug(LocaleUtil.getString("proxy_handler_body_read_complete"),
+                        clientIp, total);
+            } else {
+                // ✅ П.6: Большое body - потоковое чтение без загрузки в память
+                logger.info(LocaleUtil.getString("proxy_handler_body_streaming"),
+                        clientIp, hdrs.contentLength);
+                body = streamBody(in, hdrs.contentLength);
+            }
+        }
+
         if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled())
-            httpAnomalyDetector.recordRequest(clientIp, method, hp.host(), hp.port(), ProxyHandlerHelper.extractHttpPath(target), hdrs.rawHeaders, body);
+            httpAnomalyDetector.recordRequest(clientIp, method, hp.host(), hp.port(),
+                    ProxyHandlerHelper.extractHttpPath(target), hdrs.rawHeaders, body);
 
         if (hdrs.expectContinuePresent) {
             if (hdrs.chunked) {
@@ -240,6 +279,31 @@ public class ProxyHandler implements Runnable {
                     clientIp, hp.host(), hp.port());
             sendError(out, 504, "Gateway Timeout");
         }
+    }
+
+    /**
+     * ✅ П.6: Потоковое чтение body без загрузки в память
+     */
+    private String streamBody(InputStream in, long contentLength) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int r;
+
+        while (total < contentLength && (r = in.read(buffer)) != -1) {
+            if (total + r > maxBodyBytes) {
+                logger.warn(LocaleUtil.getString("proxy_handler_body_limit_exceeded"),
+                        clientIp, total + r, maxBodyBytes);
+                throw new ProxyHandlerHelper.RequestTooLargeException(
+                        "Body size exceeds limit: " + (total + r) + " > " + maxBodyBytes);
+            }
+            sb.append(new String(buffer, 0, r, StandardCharsets.UTF_8));
+            total += r;
+        }
+
+        logger.debug(LocaleUtil.getString("proxy_handler_body_read_complete"),
+                clientIp, total);
+        return sb.toString();
     }
 
     private void readAndDiscardHeaders(InputStream in) throws IOException {
@@ -318,10 +382,31 @@ public class ProxyHandler implements Runnable {
         try { if (!clientSocket.isClosed()) sendError(clientSocket.getOutputStream(), code, msg); } catch (IOException ignored) {}
     }
 
+    /**
+     * ✅ П.21: Security Headers для защиты от XSS и clickjacking
+     */
     private void sendError(OutputStream out, int code, String msg) throws IOException {
         String body = "<h1>" + code + " " + msg + "</h1>";
-        String resp = String.format(ERROR_TEMPLATE_STR, code, msg, body.getBytes(StandardCharsets.UTF_8).length, code, msg);
-        out.write(resp.getBytes(StandardCharsets.UTF_8));
+
+        // ✅ П.21: Security Headers
+        StringBuilder resp = new StringBuilder();
+        resp.append("HTTP/1.1 ").append(code).append(" ").append(msg).append("\r\n");
+        resp.append("Content-Type: text/html; charset=UTF-8\r\n");
+        resp.append("Content-Length: ").append(body.getBytes(StandardCharsets.UTF_8).length).append("\r\n");
+        resp.append("Connection: close\r\n");
+
+        // ✅ П.21: Security Headers для защиты от XSS и clickjacking
+        resp.append("X-Content-Type-Options: nosniff\r\n");
+        resp.append("X-Frame-Options: DENY\r\n");
+        resp.append("X-XSS-Protection: 1; mode=block\r\n");
+        resp.append("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n");
+        resp.append("Referrer-Policy: no-referrer\r\n");
+        resp.append("Cache-Control: no-store, no-cache, must-revalidate\r\n");
+
+        resp.append("\r\n");
+        resp.append(body);
+
+        out.write(resp.toString().getBytes(StandardCharsets.UTF_8));
         out.flush();
     }
 

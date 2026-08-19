@@ -15,9 +15,22 @@ import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ *
+ * ✅ П.1: Лимит на количество правил для предотвращения OOM
+ * ✅ П.5: Параллельная загрузка с лимитом памяти и pool size
  */
 public final class BlacklistLoader implements AutoCloseable {
+
     private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
+
+    // ✅ П.1: Лимиты на количество правил
+    private static final int MAX_RULES_PER_SOURCE = getConfig().getInt("blacklist.max-rules-per-source");
+    private static final int MAX_RULES_RKN = getConfig().getInt("blacklist.max-rules-rkn");
+    private static final int MAX_RULES_TOTAL = getConfig().getInt("blacklist.max-rules-total");
+    private static final long MAX_MEMORY_MB = getConfig().getLong("blacklist.max-memory-mb");
+
+    // ✅ П.5: Размер пула потоков для параллельной загрузки
+    private static final int LOADER_THREAD_POOL_SIZE = getConfig().getInt("blacklist.loader-thread-pool-size");
 
     private final List<BlacklistSource> sources;
     private final AtomicReference<BlacklistSnapshot> snapshot = new AtomicReference<>(BlacklistSnapshot.empty());
@@ -88,7 +101,7 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     /**
-     * ✅ П.24: Async I/O для blacklist sources — параллельная загрузка
+     * ✅ П.1 + П.5: Параллельная загрузка с лимитами памяти и правил
      */
     private BlacklistSnapshot buildSnapshot() {
         DomainTrie domainTrie = new DomainTrie();
@@ -96,15 +109,17 @@ public final class BlacklistLoader implements AutoCloseable {
         Set<IpCidr> cidrs = new HashSet<>();
         int loadedSources = 0, totalRules = 0, invalidRules = 0, duplicateIps = 0;
 
-        // ✅ П.24: Параллельная загрузка источников
+        // ✅ П.5: Ограниченный пул потоков для параллельной загрузки
         ExecutorService loaderExecutor = Executors.newFixedThreadPool(
-                Math.min(sources.size(), Runtime.getRuntime().availableProcessors()),
+                LOADER_THREAD_POOL_SIZE,
                 r -> {
                     Thread t = new Thread(r, "Blacklist-Loader-Thread");
                     t.setDaemon(true);
                     return t;
                 }
         );
+
+        logger.info(LocaleUtil.getString("blacklist_loader_thread_pool_size"), LOADER_THREAD_POOL_SIZE);
 
         try {
             List<CompletableFuture<SourceResult>> futures = sources.stream()
@@ -121,7 +136,7 @@ public final class BlacklistLoader implements AutoCloseable {
                     }, loaderExecutor))
                     .toList();
 
-            // ✅ П.24: Сбор результатов
+            // ✅ П.1 + П.5: Сбор результатов с проверкой лимитов
             for (CompletableFuture<SourceResult> future : futures) {
                 SourceResult result = future.join();
                 if (result.error != null) {
@@ -133,6 +148,25 @@ public final class BlacklistLoader implements AutoCloseable {
                 if (rules == null) {
                     logger.warn(LocaleUtil.getString("blacklist_source_null"), result.source);
                     continue;
+                }
+
+                // ✅ П.1: Проверка и применение лимита на источник
+                int originalSize = rules.size();
+                int maxRulesForSource = (result.source instanceof RknBlacklistSource) ? MAX_RULES_RKN : MAX_RULES_PER_SOURCE;
+
+                if (originalSize > maxRulesForSource) {
+                    rules = rules.subList(0, maxRulesForSource);
+                    logger.warn(
+                            result.source instanceof RknBlacklistSource ?
+                                    LocaleUtil.getString("blacklist_max_rules_rkn_exceeded") :
+                                    LocaleUtil.getString("blacklist_max_rules_per_source_exceeded"),
+                            result.source, originalSize, maxRulesForSource, maxRulesForSource
+                    );
+
+                    // Логирование частичной загрузки
+                    int truncatedPercent = (int)((originalSize - maxRulesForSource) * 100.0 / originalSize);
+                    logger.warn(LocaleUtil.getString("blacklist_partial_load_warning"),
+                            result.source, maxRulesForSource, originalSize, truncatedPercent);
                 }
 
                 int accepted = 0, invalid = 0;
@@ -155,11 +189,30 @@ public final class BlacklistLoader implements AutoCloseable {
                             accepted++;
                         }
                     }
+
+                    // ✅ П.1: Проверка общего лимита правил
+                    totalRules++;
+                    if (totalRules > MAX_RULES_TOTAL) {
+                        logger.warn(LocaleUtil.getString("blacklist_max_rules_total_exceeded"), totalRules, MAX_RULES_TOTAL);
+                        break;
+                    }
                 }
+
                 loadedSources++;
-                totalRules += accepted;
                 invalidRules += invalid;
-                logger.info(LocaleUtil.getString("blacklist_source_loaded"), result.source, rules.size(), accepted, invalid, result.duration);
+
+                logger.info(LocaleUtil.getString("blacklist_source_loaded"),
+                        result.source, originalSize, accepted, invalid, result.duration);
+
+                // ✅ П.5: Проверка памяти после каждого источника
+                long usedMemoryMB = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024 / 1024;
+                logger.info(LocaleUtil.getString("blacklist_memory_check"), usedMemoryMB, MAX_MEMORY_MB);
+
+                if (usedMemoryMB > MAX_MEMORY_MB) {
+                    logger.error(LocaleUtil.getString("blacklist_max_memory_exceeded"), usedMemoryMB, MAX_MEMORY_MB);
+                    throw new IllegalStateException(
+                            "Превышен лимит памяти blacklist: " + usedMemoryMB + " MB > " + MAX_MEMORY_MB + " MB");
+                }
             }
         } finally {
             loaderExecutor.shutdown();
@@ -183,7 +236,7 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     /**
-     * ✅ П.24: Вспомогательный класс для результата загрузки источника
+     * ✅ П.1: Вспомогательный класс для результата загрузки источника
      */
     private static class SourceResult {
         final BlacklistSource source;

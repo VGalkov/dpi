@@ -1,5 +1,6 @@
 package ru.galkov.llm;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
@@ -12,12 +13,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
-/**
- * ✅ Оптимизация п.15: общий клиент для LLM Studio
+ *
+ * ✅ П.19: Jackson ObjectMapper для надёжного парсинга JSON
  */
 public final class LlmClient {
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
@@ -27,6 +30,10 @@ public final class LlmClient {
     private final Duration timeout;
     private final String apiKey;
     private final HttpClient httpClient;
+
+    // ✅ П.19: Jackson ObjectMapper для парсинга
+    private static final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     public LlmClient(String llmUrl, String model, int timeoutSeconds, String apiKey) {
         this.llmUrl = llmUrl;
@@ -84,25 +91,81 @@ public final class LlmClient {
     }
 
     /**
-     * ✅ П.3: Оптимизированный метод для парсинга ответа LLM
+     * ✅ П.19: Jackson ObjectMapper для надёжного парсинга JSON
      */
     public AnalysisResult parseResponse(String responseBody) {
         try {
-            // ✅ П.3: Упрощённый парсинг через indexOf
-            String content = extractContent(responseBody);
-            if (content == null) return null;
+            // ✅ П.19: Парсинг через Jackson
+            JsonNode rootNode = objectMapper.readTree(responseBody);
 
-            boolean isSuspicious = content.contains("\"isSuspicious\":true") ||
-                    content.contains("\"isSuspicious\": true");
-            double confidence = extractConfidence(content);
-            String reason = extractField(content, "reason");
+            // Извлечение content из choices[0].message.content
+            String content = extractContentFromJson(rootNode);
+            if (content == null || content.isEmpty()) {
+                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "choices[0].message.content");
+                return null;
+            }
+
+            // Парсинг JSON из content
+            JsonNode resultNode = objectMapper.readTree(content);
+
+            // Валидация полей
+            if (!resultNode.has("isSuspicious")) {
+                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "isSuspicious");
+                return null;
+            }
+            if (!resultNode.has("confidence")) {
+                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "confidence");
+                return null;
+            }
+            if (!resultNode.has("reason")) {
+                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "reason");
+                return null;
+            }
+
+            // Извлечение и валидация isSuspicious
+            JsonNode suspiciousNode = resultNode.get("isSuspicious");
+            if (!suspiciousNode.isBoolean()) {
+                logger.warn(LocaleUtil.getString("llm_client_invalid_suspicious_value"), suspiciousNode.asText());
+                return null;
+            }
+            boolean isSuspicious = suspiciousNode.asBoolean();
+
+            // Извлечение и валидация confidence
+            JsonNode confidenceNode = resultNode.get("confidence");
+            if (!confidenceNode.isNumber()) {
+                logger.warn(LocaleUtil.getString("llm_client_invalid_confidence_value"), confidenceNode.asText());
+                return null;
+            }
+            double confidence = confidenceNode.asDouble();
+            if (confidence < 0.0 || confidence > 1.0) {
+                logger.warn(LocaleUtil.getString("llm_client_invalid_confidence_value"), confidence);
+                confidence = Math.max(0.0, Math.min(1.0, confidence));
+            }
+
+            // Извлечение reason
+            String reason = resultNode.has("reason") ? resultNode.get("reason").asText("") : "";
+
+            // Извлечение recommendedActions
+            List<String> recommendedActions = new ArrayList<>();
+            if (resultNode.has("recommendedActions") && resultNode.get("recommendedActions").isArray()) {
+                JsonNode actionsNode = resultNode.get("recommendedActions");
+                for (JsonNode actionNode : actionsNode) {
+                    if (actionNode.isTextual()) {
+                        recommendedActions.add(actionNode.asText());
+                    }
+                }
+            }
 
             logger.debug(LocaleUtil.getString("dns_anomaly_detector_parsed_json"), content);
             logger.info(LocaleUtil.getString("dns_anomaly_detector_analysis_result"),
                     isSuspicious, confidence, reason);
 
-            return new AnalysisResult(isSuspicious, confidence, reason, null);
+            return new AnalysisResult(isSuspicious, confidence, reason,
+                    recommendedActions.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(recommendedActions));
 
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            logger.error(LocaleUtil.getString("llm_client_json_parse_error"), e.getMessage());
+            return null;
         } catch (Exception e) {
             logger.debug(LocaleUtil.getString("llm_client_parse_error"), e.getMessage());
             return null;
@@ -110,27 +173,36 @@ public final class LlmClient {
     }
 
     /**
-     * ✅ П.3: Выделение content из JSON ответа
+     * ✅ П.19: Извлечение content из JSON ответа через Jackson
      */
-    private String extractContent(String responseBody) {
-        int choicesStart = responseBody.indexOf("\"choices\"");
-        if (choicesStart < 0) return null;
+    private String extractContentFromJson(JsonNode rootNode) {
+        try {
+            JsonNode choicesNode = rootNode.get("choices");
+            if (choicesNode == null || !choicesNode.isArray() || choicesNode.size() == 0) {
+                return null;
+            }
 
-        int contentStart = responseBody.indexOf("\"content\"", choicesStart);
-        if (contentStart < 0) return null;
+            JsonNode firstChoice = choicesNode.get(0);
+            if (firstChoice == null) {
+                return null;
+            }
 
-        int colonPos = responseBody.indexOf(":", contentStart);
-        if (colonPos < 0) return null;
+            JsonNode messageNode = firstChoice.get("message");
+            if (messageNode == null) {
+                return null;
+            }
 
-        int quoteStart = responseBody.indexOf("\"", colonPos + 1);
-        if (quoteStart < 0) return null;
+            JsonNode contentNode = messageNode.get("content");
+            if (contentNode == null || !contentNode.isTextual()) {
+                return null;
+            }
 
-        int quoteEnd = findMatchingQuote(responseBody, quoteStart + 1);
-        if (quoteEnd < 0) return null;
+            return contentNode.asText();
 
-        return responseBody.substring(quoteStart + 1, quoteEnd)
-                .replace("\\\"", "\"")
-                .replace("\\n", "\n");
+        } catch (Exception e) {
+            logger.debug("Error extracting content from JSON: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -176,72 +248,5 @@ public final class LlmClient {
                 model,
                 escapedPrompt
         );
-    }
-
-    /**
-     * ✅ Поиск закрывающей кавычки
-     */
-    private int findMatchingQuote(String json, int start) {
-        boolean escaped = false;
-        for (int i = start; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaped = true;
-                continue;
-            }
-            if (c == '"') return i;
-        }
-        return -1;
-    }
-
-    /**
-     * ✅ Извлечение confidence
-     */
-    private double extractConfidence(String content) {
-        try {
-            int confStart = content.indexOf("\"confidence\":");
-            if (confStart < 0) return 0.0;
-
-            int colonPos = content.indexOf(":", confStart);
-            if (colonPos < 0) return 0.0;
-
-            int endPos = content.indexOf(",", colonPos);
-            if (endPos < 0) endPos = content.indexOf("}", colonPos);
-            if (endPos < 0) return 0.0;
-
-            String confStr = content.substring(colonPos + 1, endPos).trim();
-            return Double.parseDouble(confStr);
-
-        } catch (Exception e) {
-            return 0.0;
-        }
-    }
-
-    /**
-     * ✅ Извлечение поля из JSON
-     */
-    private String extractField(String content, String fieldName) {
-        try {
-            int fieldStart = content.indexOf("\"" + fieldName + "\"");
-            if (fieldStart < 0) return "";
-
-            int colonPos = content.indexOf(":", fieldStart);
-            if (colonPos < 0) return "";
-
-            int quoteStart = content.indexOf("\"", colonPos + 1);
-            if (quoteStart < 0) return "";
-
-            int quoteEnd = findMatchingQuote(content, quoteStart + 1);
-            if (quoteEnd < 0) return "";
-
-            return content.substring(quoteStart + 1, quoteEnd);
-
-        } catch (Exception e) {
-            return "";
-        }
     }
 }

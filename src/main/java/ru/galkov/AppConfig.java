@@ -13,7 +13,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * Galkov V A [s0506777@yandex.ru](mailto:s0506777@yandex.ru)
+ *
+ * ✅ П.14: Расширенная валидация security-related настроек
  */
 public final class AppConfig {
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
@@ -90,7 +92,7 @@ public final class AppConfig {
     }
 
     /**
-     * ✅ П.20: Оптимизация валидации — единый метод для всех типов
+     * ✅ П.14 + П.20: Расширенная валидация с проверкой security настроек
      */
     private void validateConfig() {
         logger.info(LocaleUtil.getString("config_validation_started"));
@@ -124,7 +126,66 @@ public final class AppConfig {
         // Blacklist reload
         validateIntRange("blacklist.reload.interval-seconds", 300, 86400, 36000, "config_validation_blacklist_reload_invalid");
 
+        // ✅ П.14: Валидация security-related настроек
+        validateSecuritySettings();
+
         logger.info(LocaleUtil.getString("config_validation_completed"));
+    }
+
+    /**
+     * ✅ П.14: Валидация security-related настроек
+     */
+    private void validateSecuritySettings() {
+        // Проверка LLM URL на localhost/private ranges
+        try {
+            String dnsLlmUrl = get("dns.anomaly-detector.llm-studio.url");
+            if (dnsLlmUrl != null && (dnsLlmUrl.contains("localhost") || dnsLlmUrl.contains("127.0.0.1"))) {
+                logger.warn("⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: {}. Это может быть опасно в production", dnsLlmUrl);
+            }
+        } catch (Exception e) {
+            logger.debug("DNS LLM URL не настроен");
+        }
+
+        try {
+            String httpLlmUrl = get("http.anomaly-detector.llm-studio.url");
+            if (httpLlmUrl != null && (httpLlmUrl.contains("localhost") || httpLlmUrl.contains("127.0.0.1"))) {
+                logger.warn("⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: {}. Это может быть опасно в production", httpLlmUrl);
+            }
+        } catch (Exception e) {
+            logger.debug("HTTP LLM URL не настроен");
+        }
+
+        // Проверка blacklist URL на HTTP (не HTTPS)
+        try {
+            String adguardUrl = get("blacklist.adguard.url");
+            if (adguardUrl != null && adguardUrl.startsWith("http://")) {
+                logger.warn("⚠️ SECURITY WARNING: AdGuard blacklist URL использует HTTP (не HTTPS): {}. Возможна MITM атака", adguardUrl);
+            }
+        } catch (Exception e) {
+            logger.debug("AdGuard URL не настроен");
+        }
+
+        try {
+            String mvpsUrl = get("blacklist.mvps_hosts.url");
+            if (mvpsUrl != null && mvpsUrl.startsWith("http://")) {
+                logger.warn("⚠️ SECURITY WARNING: MVPS hosts URL использует HTTP (не HTTPS): {}. Возможна MITM атака", mvpsUrl);
+            }
+        } catch (Exception e) {
+            logger.debug("MVPS URL не настроен");
+        }
+
+        // Проверка dns.thread.num на разумность
+        int dnsThreads = getInt("dns.thread.num");
+        if (dnsThreads > 200) {
+            logger.warn("⚠️ PERFORMANCE WARNING: dns.thread.num = {} может быть слишком высоким. Рекомендуется 50-150", dnsThreads);
+        }
+
+        // Проверка proxy.max-connections
+        int maxConnections = getInt("proxy.max-connections");
+        int maxPerClient = getInt("proxy.max-connections-per-client");
+        if (maxPerClient > maxConnections / 10) {
+            logger.warn("⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client ({}) слишком высок относительно max-connections ({}). Рекомендуется <= 10% от max-connections", maxPerClient, maxConnections);
+        }
     }
 
     /**

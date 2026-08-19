@@ -14,11 +14,14 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ *
+ * ✅ П.17: Быстрая очистка кэшей при каждом N-ном запросе
  */
 public final class DnsServerHelper {
 
@@ -33,16 +36,16 @@ public final class DnsServerHelper {
 
     // ✅ П.5: WeakReference для защиты от OOM
     private static class CachedQname {
-        final WeakReference<String> qnameRef;  // ✅ П.5: WeakReference вместо String
+        final WeakReference<String> qnameRef;
         final long timestamp;
 
         CachedQname(String qname) {
-            this.qnameRef = new WeakReference<>(qname);  // ✅ П.5: Создаём WeakReference
+            this.qnameRef = new WeakReference<>(qname);
             this.timestamp = System.currentTimeMillis();
         }
 
         String getQname() {
-            return qnameRef.get();  // ✅ П.5: Может вернуть null, если GC очистил
+            return qnameRef.get();
         }
 
         boolean isExpired() {
@@ -61,6 +64,13 @@ public final class DnsServerHelper {
 
         // ✅ П.17: Логирование rate limit событий
         private static final boolean RATE_LIMIT_LOGGING_ENABLED = getConfig().getBoolean("dns.logging.rate-limit-enabled");
+
+        // ✅ П.17: Настройки для быстрой очистки
+        private static final int CLEANUP_EVERY_N_REQUESTS = getConfig().getInt("dns.rate-limit.cleanup-every-n-requests");
+        private static final int CLEANUP_PERCENT_TO_REMOVE = getConfig().getInt("dns.rate-limit.cleanup-percent-to-remove");
+
+        // ✅ П.17: Счётчик запросов для триггера очистки
+        private final AtomicLong requestCounter = new AtomicLong(0);
 
         private DnsRateLimiter(boolean enabled, int requestsPerSecond, int burst, long clientIdleNanos, ConcurrentHashMap<String, TokenBucket> buckets) {
             this.enabled = enabled;
@@ -92,6 +102,13 @@ public final class DnsServerHelper {
                 }
                 return false;
             }
+
+            // ✅ П.17: Инкремент счётчика и триггер очистки
+            requestCounter.incrementAndGet();
+            if (requestCounter.get() % CLEANUP_EVERY_N_REQUESTS == 0) {
+                triggerFastCleanup(now);
+            }
+
             return true;
         }
 
@@ -111,6 +128,39 @@ public final class DnsServerHelper {
                 }
                 nextCleanupNanos = now + cleanupIntervalNanos;
             }
+        }
+
+        /**
+         * ✅ П.17: Быстрая очистка старых клиентов
+         */
+        private void triggerFastCleanup(long now) {
+            int currentSize = buckets.size();
+            int minSizeForCleanup = CLEANUP_EVERY_N_REQUESTS; // Минимум клиентов для очистки
+
+            if (currentSize < minSizeForCleanup) {
+                logger.debug(LocaleUtil.getString("dns_rate_limiter_cleanup_skipped"),
+                        currentSize, minSizeForCleanup);
+                return;
+            }
+
+            // ✅ П.17: Удаляем oldest клиентов
+            int toRemoveCount = Math.max(1, (currentSize * CLEANUP_PERCENT_TO_REMOVE) / 100);
+            List<String> toRemove = new ArrayList<>(toRemoveCount);
+
+            // Сортируем по lastSeenNanos (oldest first)
+            buckets.entrySet().stream()
+                    .sorted(Comparator.comparingLong(e -> e.getValue().getLastSeenNanos()))
+                    .limit(toRemoveCount)
+                    .forEach(e -> toRemove.add(e.getKey()));
+
+            // Удаляем
+            for (String key : toRemove) {
+                buckets.remove(key);
+            }
+
+            int removedPercent = (toRemove.size() * 100) / currentSize;
+            logger.info(LocaleUtil.getString("dns_rate_limiter_cleanup_triggered"),
+                    toRemove.size(), removedPercent, currentSize);
         }
 
         /**
@@ -224,11 +274,10 @@ public final class DnsServerHelper {
         int hashCode = System.identityHashCode(question);
         CachedQname cached = qnameCache.get(hashCode);
         if (cached != null && !cached.isExpired()) {
-            String qname = cached.getQname();  // ✅ П.5: Может вернуть null
-            if (qname != null) {  // ✅ П.5: Проверка на null (защита от NPE)
+            String qname = cached.getQname();
+            if (qname != null) {
                 return qname;
             }
-            // ← Если null — GC очистил WeakReference, создаём заново
         }
 
         // ✅ П.5: Кэшируем новое значение
@@ -237,7 +286,6 @@ public final class DnsServerHelper {
 
         // ✅ П.1: Очистка кэша при переполнении
         if (qnameCache.size() > QNAME_CACHE_MAX_SIZE) {
-            // ✅ Исправлено: removeIf возвращает boolean, считаем удалённые отдельно
             int removed = 0;
             Iterator<Map.Entry<Integer, CachedQname>> iterator = qnameCache.entrySet().iterator();
             while (iterator.hasNext()) {
@@ -382,11 +430,9 @@ public final class DnsServerHelper {
      * ✅ П.9: Убран clone() — создаём новый Message с тем же ID
      */
     public static Message createRefusedResponse(Message query) {
-        // ✅ П.9: Вместо clone() создаём новый Message (быстрее)
         Message response = new Message(query.getHeader().getID());
         response.getHeader().setFlag(Flags.QR);
         response.getHeader().setRcode(Rcode.REFUSED);
-        // Копируем только вопрос (не весь ответ)
         if (query.getQuestion() != null) {
             response.addRecord(query.getQuestion(), Section.QUESTION);
         }
