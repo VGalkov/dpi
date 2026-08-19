@@ -10,6 +10,7 @@ import ru.galkov.util.LocaleUtil;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -21,7 +22,15 @@ import java.util.Collections;
 import java.util.List;
 
 public final class LlmClient {
-    private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
+    private static final Logger logger =
+            LoggerFactory.getLogger(LlmClient.class);
+
+    private static final int MAX_RESPONSE_BYTES = 1_048_576;
+    private static final int MAX_REASON_LENGTH = 500;
+    private static final int MAX_OUTPUT_TOKENS = 1000;
+
+    private static final ObjectMapper objectMapper =
+            new ObjectMapper();
 
     private final String llmUrl;
     private final String model;
@@ -29,198 +38,456 @@ public final class LlmClient {
     private final String apiKey;
     private final HttpClient httpClient;
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    public LlmClient(
+            String llmUrl,
+            String model,
+            int timeoutSeconds,
+            String apiKey
+    ) {
+        if (llmUrl == null || llmUrl.isBlank()) {
+            throw new IllegalArgumentException(
+                    "LLM URL cannot be null or blank"
+            );
+        }
 
-    public LlmClient(String llmUrl, String model, int timeoutSeconds, String apiKey) {
+        if (model == null || model.isBlank()) {
+            throw new IllegalArgumentException(
+                    "LLM model cannot be null or blank"
+            );
+        }
+
+        if (timeoutSeconds <= 0) {
+            throw new IllegalArgumentException(
+                    "LLM timeout must be positive"
+            );
+        }
+
         this.llmUrl = llmUrl;
         this.model = model;
         this.timeout = Duration.ofSeconds(timeoutSeconds);
-        this.apiKey = apiKey;
+        this.apiKey = apiKey == null ? "" : apiKey;
+
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
+                .proxy(ProxySelector.of(null))
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
     }
 
     public String sendRequest(String prompt) {
-        if (llmUrl == null || llmUrl.isEmpty() || model == null || model.isEmpty()) {
-            logger.warn(LocaleUtil.getString("dns_anomaly_detector_llm_url_not_configured"));
+        if (prompt == null || prompt.isBlank()) {
+            logger.warn("Cannot send empty LLM prompt");
             return null;
         }
 
         try {
-            ObjectNode root = objectMapper.createObjectNode();
+            ObjectNode root =
+                    objectMapper.createObjectNode();
+
             root.put("model", model);
+            root.put("temperature", 0.0);
+            root.put("max_tokens", MAX_OUTPUT_TOKENS);
+            root.put("stream", false);
+            root.put("reasoning", false);
 
-            ObjectNode message = objectMapper.createObjectNode();
-            message.put("role", "user");
-            message.put("content", prompt);
+            ObjectNode systemMessage =
+                    objectMapper.createObjectNode();
 
-            ArrayNode messages = objectMapper.createArrayNode();
-            messages.add(message);
-            root.set("messages", messages);
-
-            root.put("temperature", 0.1);
-            root.put("max_tokens", 500);
-
-            String jsonBody = objectMapper.writeValueAsString(root);
-
-            logger.info(LocaleUtil.getString("llm_client_sending_request"), model, llmUrl);
-
-            HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(llmUrl))
-                    .timeout(timeout)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
-
-            if (apiKey != null && !apiKey.isEmpty()) {
-                builder.header("Authorization", "Bearer " + apiKey);
-            }
-
-            HttpResponse<String> response = httpClient.send(
-                    builder.build(),
-                    HttpResponse.BodyHandlers.ofString()
+            systemMessage.put("role", "system");
+            systemMessage.put(
+                    "content",
+                    "Return only one valid compact JSON object. "
+                            + "Do not reason aloud. "
+                            + "Do not use Markdown. "
+                            + "Do not add any text before or after JSON."
             );
 
+            ObjectNode userMessage =
+                    objectMapper.createObjectNode();
+
+            userMessage.put("role", "user");
+            userMessage.put("content", prompt);
+
+            ArrayNode messages =
+                    objectMapper.createArrayNode();
+
+            messages.add(systemMessage);
+            messages.add(userMessage);
+
+            root.set("messages", messages);
+
+            ObjectNode responseFormat =
+                    objectMapper.createObjectNode();
+
+            responseFormat.put("type", "json_object");
+            root.set("response_format", responseFormat);
+
+            String jsonBody =
+                    objectMapper.writeValueAsString(root);
+
+            logger.info(
+                    LocaleUtil.getString(
+                            "llm_client_sending_request"
+                    ),
+                    model,
+                    llmUrl
+            );
+
+            HttpRequest.Builder requestBuilder =
+                    HttpRequest.newBuilder()
+                            .uri(URI.create(llmUrl))
+                            .timeout(timeout)
+                            .header(
+                                    "Content-Type",
+                                    "application/json"
+                            )
+                            .header(
+                                    "Accept",
+                                    "application/json"
+                            )
+                            .POST(
+                                    HttpRequest.BodyPublishers.ofString(
+                                            jsonBody,
+                                            StandardCharsets.UTF_8
+                                    )
+                            );
+
+            if (!apiKey.isBlank()) {
+                requestBuilder.header(
+                        "Authorization",
+                        "Bearer " + apiKey
+                );
+            }
+
+            HttpResponse<String> response =
+                    httpClient.send(
+                            requestBuilder.build(),
+                            HttpResponse.BodyHandlers.ofString(
+                                    StandardCharsets.UTF_8
+                            )
+                    );
+
+            String responseBody = response.body();
+
             if (response.statusCode() != 200) {
-                logger.warn(LocaleUtil.getString("llm_client_response_received"), response.statusCode());
+                logger.warn(
+                        LocaleUtil.getString(
+                                "llm_client_response_received"
+                        ),
+                        response.statusCode()
+                );
+
+                logger.warn(
+                        "LM Studio error body: {}",
+                        truncate(responseBody, 4000)
+                );
+
                 return null;
             }
 
-            logger.debug(LocaleUtil.getString("llm_client_response_received"), response.statusCode());
-            return response.body();
+            if (responseBody == null
+                    || responseBody.isBlank()) {
+                logger.warn("LM Studio returned an empty response");
+                return null;
+            }
+
+            if (responseBody.length()
+                    > MAX_RESPONSE_BYTES) {
+                logger.warn("LLM response is too large");
+                return null;
+            }
+
+            logger.debug(
+                    LocaleUtil.getString(
+                            "llm_client_response_received"
+                    ),
+                    response.statusCode()
+            );
+
+            return responseBody;
 
         } catch (IOException e) {
-            logger.error(LocaleUtil.getString("llm_client_error"), e.getMessage(), e);
+            logger.error(
+                    LocaleUtil.getString("llm_client_error"),
+                    e.getMessage(),
+                    e
+            );
             return null;
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            logger.error(LocaleUtil.getString("llm_client_error"), e.getMessage(), e);
+
+            logger.error(
+                    LocaleUtil.getString("llm_client_error"),
+                    e.getMessage(),
+                    e
+            );
+            return null;
+
+        } catch (RuntimeException e) {
+            logger.error(
+                    LocaleUtil.getString("llm_client_error"),
+                    e.getMessage(),
+                    e
+            );
             return null;
         }
     }
 
     public AnalysisResult parseResponse(String responseBody) {
-        if (responseBody == null || responseBody.trim().isEmpty()) {
-            logger.warn("Empty response body");
+        if (responseBody == null || responseBody.isBlank()) {
+            logger.warn("Empty LLM response body");
             return null;
         }
 
         try {
-            JsonNode rootNode = objectMapper.readTree(responseBody);
+            JsonNode rootNode =
+                    objectMapper.readTree(responseBody);
 
-            String content = extractContentFromJson(rootNode);
-            if (content == null || content.isEmpty()) {
-                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "choices[0].message.content");
+            JsonNode choicesNode =
+                    rootNode.get("choices");
+
+            if (choicesNode == null
+                    || !choicesNode.isArray()
+                    || choicesNode.isEmpty()) {
+                logger.warn(
+                        "LLM response does not contain choices"
+                );
                 return null;
             }
 
-            JsonNode resultNode = objectMapper.readTree(content);
+            JsonNode firstChoice =
+                    choicesNode.get(0);
 
-            if (!resultNode.has("isSuspicious")) {
-                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "isSuspicious");
+            JsonNode messageNode =
+                    firstChoice.get("message");
+
+            if (messageNode == null
+                    || !messageNode.isObject()) {
+                logger.warn(
+                        "LLM response does not contain message"
+                );
                 return null;
             }
-            if (!resultNode.has("confidence")) {
-                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "confidence");
+
+            JsonNode finishReason =
+                    firstChoice.get("finish_reason");
+
+            if (finishReason != null
+                    && "length".equals(
+                    finishReason.asText()
+            )) {
+                logger.warn(
+                        "LLM output was truncated by max_tokens"
+                );
                 return null;
             }
-            if (!resultNode.has("reason")) {
-                logger.warn(LocaleUtil.getString("llm_client_invalid_response_structure"), "reason");
+
+            JsonNode contentNode =
+                    messageNode.get("content");
+
+            if (contentNode == null
+                    || !contentNode.isTextual()
+                    || contentNode.asText().isBlank()) {
+                JsonNode reasoningNode =
+                        messageNode.get("reasoning_content");
+
+                logger.warn(
+                        "LLM message.content is empty; "
+                                + "reasoningContent={}",
+                        reasoningNode == null
+                                ? "none"
+                                : truncate(
+                                reasoningNode.asText(),
+                                500
+                        )
+                );
+
                 return null;
             }
 
-            JsonNode suspiciousNode = resultNode.get("isSuspicious");
-            if (!suspiciousNode.isBoolean()) {
-                logger.warn(LocaleUtil.getString("llm_client_invalid_suspicious_value"), suspiciousNode.asText());
+            String content =
+                    contentNode.asText().trim();
+
+            JsonNode resultNode =
+                    objectMapper.readTree(content);
+
+            if (!resultNode.isObject()) {
+                logger.warn(
+                        "LLM content is not a JSON object"
+                );
                 return null;
             }
-            boolean isSuspicious = suspiciousNode.asBoolean();
 
-            JsonNode confidenceNode = resultNode.get("confidence");
-            if (!confidenceNode.isNumber()) {
-                logger.warn(LocaleUtil.getString("llm_client_invalid_confidence_value"), confidenceNode.asText());
+            JsonNode suspiciousNode =
+                    resultNode.get("isSuspicious");
+
+            JsonNode confidenceNode =
+                    resultNode.get("confidence");
+
+            JsonNode reasonNode =
+                    resultNode.get("reason");
+
+            JsonNode actionsNode =
+                    resultNode.get("recommendedActions");
+
+            if (suspiciousNode == null
+                    || confidenceNode == null
+                    || reasonNode == null
+                    || actionsNode == null) {
+                logger.warn(
+                        "LLM JSON misses required fields"
+                );
                 return null;
             }
-            double confidence = confidenceNode.asDouble();
-            if (confidence < 0.0 || confidence > 1.0) {
-                logger.warn(LocaleUtil.getString("llm_client_invalid_confidence_value"), confidence);
-                confidence = Math.max(0.0, Math.min(1.0, confidence));
+
+            if (!suspiciousNode.isBoolean()
+                    || !confidenceNode.isNumber()
+                    || !reasonNode.isTextual()
+                    || !actionsNode.isArray()) {
+                logger.warn(
+                        "LLM JSON contains invalid field types"
+                );
+                return null;
             }
 
-            String reason = resultNode.has("reason") ? resultNode.get("reason").asText("") : "";
+            double confidence =
+                    confidenceNode.asDouble();
 
-            List<String> recommendedActions = new ArrayList<>();
-            if (resultNode.has("recommendedActions") && resultNode.get("recommendedActions").isArray()) {
-                JsonNode actionsNode = resultNode.get("recommendedActions");
-                for (JsonNode actionNode : actionsNode) {
-                    if (actionNode.isTextual()) {
-                        recommendedActions.add(actionNode.asText());
-                    }
-                }
+            if (!Double.isFinite(confidence)
+                    || confidence < 0.0
+                    || confidence > 1.0) {
+                logger.warn(
+                        "Invalid confidence: {}",
+                        confidence
+                );
+                return null;
             }
 
-            logger.debug(LocaleUtil.getString("dns_anomaly_detector_parsed_json"), content);
-            logger.info(LocaleUtil.getString("dns_anomaly_detector_analysis_result"),
-                    isSuspicious, confidence, reason);
+            List<String> actions =
+                    parseActions(actionsNode);
+
+            if (actions.size() != 1) {
+                logger.warn(
+                        "LLM must return exactly one action"
+                );
+                return null;
+            }
+
+            String reason =
+                    reasonNode.asText("").trim();
+
+            if (reason.length() > MAX_REASON_LENGTH) {
+                reason = reason.substring(
+                        0,
+                        MAX_REASON_LENGTH
+                );
+            }
 
             return new AnalysisResult(
-                    isSuspicious,
+                    suspiciousNode.asBoolean(),
                     confidence,
                     reason,
-                    recommendedActions.isEmpty()
-                            ? Collections.emptyList()
-                            : Collections.unmodifiableList(recommendedActions)
+                    actions
             );
 
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            logger.error(LocaleUtil.getString("llm_client_json_parse_error"), e.getMessage());
+        } catch (IOException e) {
+            logger.error(
+                    LocaleUtil.getString(
+                            "llm_client_json_parse_error"
+                    ),
+                    e.getMessage()
+            );
             return null;
-        } catch (Exception e) {
-            logger.debug(LocaleUtil.getString("llm_client_parse_error"), e.getMessage());
-            return null;
-        }
-    }
 
-    private String extractContentFromJson(JsonNode rootNode) {
-        try {
-            JsonNode choicesNode = rootNode.get("choices");
-            if (choicesNode == null || !choicesNode.isArray() || choicesNode.size() == 0) {
-                return null;
-            }
-
-            JsonNode firstChoice = choicesNode.get(0);
-            if (firstChoice == null) {
-                return null;
-            }
-
-            JsonNode messageNode = firstChoice.get("message");
-            if (messageNode == null) {
-                return null;
-            }
-
-            JsonNode contentNode = messageNode.get("content");
-            if (contentNode == null || !contentNode.isTextual()) {
-                return null;
-            }
-
-            return contentNode.asText();
-
-        } catch (Exception e) {
-            logger.debug("Error extracting content from JSON: {}", e.getMessage());
+        } catch (RuntimeException e) {
+            logger.error(
+                    LocaleUtil.getString(
+                            "llm_client_parse_error"
+                    ),
+                    e.getMessage()
+            );
             return null;
         }
     }
 
-    public String loadPromptTemplate(String resourceName) {
-        try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourceName)) {
-            if (is == null) {
-                logger.warn("Шаблон промпта не найден: {}", resourceName);
-                return "";
+    private List<String> parseActions(
+            JsonNode actionsNode
+    ) {
+        List<String> result =
+                new ArrayList<>();
+
+        for (JsonNode actionNode : actionsNode) {
+            if (!actionNode.isTextual()) {
+                continue;
             }
-            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            logger.error("Ошибка загрузки шаблона промпта: {}", resourceName, e);
+
+            String action =
+                    actionNode.asText("").trim();
+
+            if ("BLOCK_DOMAIN".equals(action)
+                    || "BLOCK_REQUEST".equals(action)
+                    || "LOG_ONLY".equals(action)
+                    || "NONE".equals(action)) {
+                result.add(action);
+            }
+        }
+
+        return result.isEmpty()
+                ? Collections.emptyList()
+                : Collections.unmodifiableList(result);
+    }
+
+    public String loadPromptTemplate(
+            String resourceName
+    ) {
+        if (resourceName == null
+                || resourceName.isBlank()) {
             return "";
         }
+
+        try (InputStream input =
+                     getClass()
+                             .getClassLoader()
+                             .getResourceAsStream(
+                                     resourceName
+                             )) {
+
+            if (input == null) {
+                logger.warn(
+                        "Prompt template not found: {}",
+                        resourceName
+                );
+                return "";
+            }
+
+            return new String(
+                    input.readAllBytes(),
+                    StandardCharsets.UTF_8
+            );
+
+        } catch (IOException e) {
+            logger.error(
+                    "Prompt template loading failed: {}",
+                    resourceName,
+                    e
+            );
+            return "";
+        }
+    }
+
+    private static String truncate(
+            String value,
+            int maxLength
+    ) {
+        if (value == null) {
+            return "";
+        }
+
+        if (value.length() <= maxLength) {
+            return value;
+        }
+
+        return value.substring(0, maxLength);
     }
 }

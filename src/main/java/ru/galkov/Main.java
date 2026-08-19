@@ -19,250 +19,618 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- *
- * ✅ П.26: Закрытие общего worker pool
- * ✅ П.64: Исправление порядка инициализации и остановки
- * ✅ П.65: Проверка на пустой sources
- */
-public class Main {
+public final class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
-    private static DnsServer dnsServer;
-    private static HttpProxyServer proxyServer;
-    private static AppConfig config;
-    private static BlacklistLoader blacklist;
-    private static DnsAnomalyDetector dnsAnomalyDetector;
-    private static HttpAnomalyDetector httpAnomalyDetector;
+
+    private static volatile DnsServer dnsServer;
+    private static volatile HttpProxyServer proxyServer;
+    private static volatile AppConfig config;
+    private static volatile BlacklistLoader blacklist;
+    private static volatile DnsAnomalyDetector dnsAnomalyDetector;
+    private static volatile HttpAnomalyDetector httpAnomalyDetector;
+
+    private static volatile boolean shutdownStarted;
+
+    private Main() {
+    }
 
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
+
             if (config == null) {
-                logger.error(LocaleUtil.getString("main_config_null"));
-                return;  // ✅ П.64: return вместо exit()
+                logger.error(
+                        LocaleUtil.getString("main_config_null")
+                );
+                return;
             }
 
-            List<BlacklistSource> sources = new ArrayList<>();
-            addLocalFileSource(sources);
-            addAdguardSource(sources);
-            addMvpsSource(sources);
-            addRknSource(sources);
+            List<BlacklistSource> sources =
+                    createBlacklistSources();
 
-            // ✅ П.65: Проверка на пустой sources
             if (sources.isEmpty()) {
-                logger.error("No blacklist sources configured");
+                logger.error(
+                        "No blacklist sources configured"
+                );
                 return;
             }
 
             blacklist = new BlacklistLoader(sources);
             blacklist.load();
 
-            dnsAnomalyDetector = new DnsAnomalyDetector();
-            httpAnomalyDetector = new HttpAnomalyDetector();
+            dnsAnomalyDetector =
+                    new DnsAnomalyDetector();
+
+            httpAnomalyDetector =
+                    new HttpAnomalyDetector();
 
             registerShutdownHook();
+
+            startDetectors();
 
             startProxyServer();
             startDnsServer();
 
-            logger.info(LocaleUtil.getString("system_started"));
+            logger.info(
+                    LocaleUtil.getString("system_started")
+            );
+
         } catch (Exception e) {
-            logger.error(LocaleUtil.getString("system_not_started"), e);
+            logger.error(
+                    LocaleUtil.getString("system_not_started"),
+                    e
+            );
+
             stopApplication();
-            Runtime.getRuntime().exit(-1);
+
+            Runtime.getRuntime().exit(1);
         }
     }
 
-    private static void addLocalFileSource(List<BlacklistSource> sources) {
-        if (config == null) {
-            logger.error(LocaleUtil.getString("main_config_null"));
-            return;
-        }
-        try {
-            if (!config.getBoolean("blacklist.local.enabled")) return;
-            FileBlacklistSource source = new FileBlacklistSource(new File(config.get("blacklist.local.file")));
-            sources.add(source);
-            logger.info(LocaleUtil.getString("source_local_file_added"), source);
-        } catch (Exception e) {
-            logger.error(LocaleUtil.getString("main_source_add_error"), "LocalFile", e);
-        }
+    private static List<BlacklistSource> createBlacklistSources() {
+        List<BlacklistSource> sources =
+                new ArrayList<>();
+
+        addLocalFileSource(sources);
+        addAdguardSource(sources);
+        addMvpsSource(sources);
+        addRknSource(sources);
+
+        return sources;
     }
 
-    private static void addAdguardSource(List<BlacklistSource> sources) {
-        if (config == null) {
-            logger.error(LocaleUtil.getString("main_config_null"));
-            return;
+    private static void startDetectors() {
+        if (dnsAnomalyDetector != null) {
+            dnsAnomalyDetector.start();
         }
-        try {
-            if (!config.getBoolean("blacklist.adguard.enabled")) return;
-            AdguardBlacklistSource source = new AdguardBlacklistSource(
-                    config.get("blacklist.adguard.url"),
-                    config.getInt("blacklist.adguard.connect-timeout"),
-                    config.getInt("blacklist.adguard.read-timeout")
+
+        if (httpAnomalyDetector != null) {
+            httpAnomalyDetector.start();
+        }
+
+        logger.info(
+                "Anomaly detectors started: dns={}, http={}",
+                dnsAnomalyDetector != null
+                        && dnsAnomalyDetector.isEnabled(),
+                httpAnomalyDetector != null
+                        && httpAnomalyDetector.isEnabled()
+        );
+    }
+
+    private static void addLocalFileSource(
+            List<BlacklistSource> sources
+    ) {
+        if (config == null) {
+            logger.error(
+                    LocaleUtil.getString("main_config_null")
             );
-            sources.add(source);
-            logger.info(LocaleUtil.getString("source_adguard_added"), source);
-        } catch (Exception e) {
-            logger.error(LocaleUtil.getString("main_source_add_error"), "Adguard", e);
-        }
-    }
-
-    private static void addMvpsSource(List<BlacklistSource> sources) {
-        if (config == null) {
-            logger.error(LocaleUtil.getString("main_config_null"));
             return;
         }
+
         try {
-            if (!config.getBoolean("blacklist.mvps_hosts.enabled")) return;
-            AdguardBlacklistSource source = new AdguardBlacklistSource(
-                    config.get("blacklist.mvps_hosts.url"),
-                    config.getInt("blacklist.adguard.connect-timeout"),
-                    config.getInt("blacklist.adguard.read-timeout")
+            if (!config.getBoolean(
+                    "blacklist.local.enabled"
+            )) {
+                return;
+            }
+
+            String filePath =
+                    config.get("blacklist.local.file");
+
+            FileBlacklistSource source =
+                    new FileBlacklistSource(
+                            new File(filePath)
+                    );
+
+            sources.add(source);
+
+            logger.info(
+                    LocaleUtil.getString(
+                            "source_local_file_added"
+                    ),
+                    source
             );
-            sources.add(source);
-            logger.info(LocaleUtil.getString("source_mvps_hosts_added"), source);
+
         } catch (Exception e) {
-            logger.error(LocaleUtil.getString("main_source_add_error"), "MVPS", e);
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_source_add_error"
+                    ),
+                    "LocalFile",
+                    e
+            );
         }
     }
 
-    private static void addRknSource(List<BlacklistSource> sources) {
+    private static void addAdguardSource(
+            List<BlacklistSource> sources
+    ) {
         if (config == null) {
-            logger.error(LocaleUtil.getString("main_config_null"));
+            logger.error(
+                    LocaleUtil.getString("main_config_null")
+            );
             return;
         }
+
         try {
-            if (!config.getBoolean("blacklist.rkn.enabled")) return;
-            RknBlacklistSource source = new RknBlacklistSource(Path.of(config.get("blacklist.rkn.xml-file")));
+            if (!config.getBoolean(
+                    "blacklist.adguard.enabled"
+            )) {
+                return;
+            }
+
+            AdguardBlacklistSource source =
+                    new AdguardBlacklistSource(
+                            config.get("blacklist.adguard.url"),
+                            config.getInt(
+                                    "blacklist.adguard.connect-timeout"
+                            ),
+                            config.getInt(
+                                    "blacklist.adguard.read-timeout"
+                            )
+                    );
+
             sources.add(source);
-            logger.info(LocaleUtil.getString("source_rkn_added"), source);
+
+            logger.info(
+                    LocaleUtil.getString(
+                            "source_adguard_added"
+                    ),
+                    source
+            );
+
         } catch (Exception e) {
-            logger.error(LocaleUtil.getString("main_source_add_error"), "RKN", e);
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_source_add_error"
+                    ),
+                    "Adguard",
+                    e
+            );
+        }
+    }
+
+    private static void addMvpsSource(
+            List<BlacklistSource> sources
+    ) {
+        if (config == null) {
+            logger.error(
+                    LocaleUtil.getString("main_config_null")
+            );
+            return;
+        }
+
+        try {
+            if (!config.getBoolean(
+                    "blacklist.mvps_hosts.enabled"
+            )) {
+                return;
+            }
+
+            AdguardBlacklistSource source =
+                    new AdguardBlacklistSource(
+                            config.get("blacklist.mvps_hosts.url"),
+                            config.getInt(
+                                    "blacklist.mvps_hosts.connect-timeout"
+                            ),
+                            config.getInt(
+                                    "blacklist.mvps_hosts.read-timeout"
+                            )
+                    );
+
+            sources.add(source);
+
+            logger.info(
+                    LocaleUtil.getString(
+                            "source_mvps_hosts_added"
+                    ),
+                    source
+            );
+
+        } catch (Exception e) {
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_source_add_error"
+                    ),
+                    "MVPS",
+                    e
+            );
+        }
+    }
+
+    private static void addRknSource(
+            List<BlacklistSource> sources
+    ) {
+        if (config == null) {
+            logger.error(
+                    LocaleUtil.getString("main_config_null")
+            );
+            return;
+        }
+
+        try {
+            if (!config.getBoolean(
+                    "blacklist.rkn.enabled"
+            )) {
+                return;
+            }
+
+            Path xmlPath =
+                    Path.of(
+                            config.get(
+                                    "blacklist.rkn.xml-file"
+                            )
+                    );
+
+            RknBlacklistSource source =
+                    new RknBlacklistSource(xmlPath);
+
+            sources.add(source);
+
+            logger.info(
+                    LocaleUtil.getString(
+                            "source_rkn_added"
+                    ),
+                    source
+            );
+
+        } catch (Exception e) {
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_source_add_error"
+                    ),
+                    "RKN",
+                    e
+            );
         }
     }
 
     private static void registerShutdownHook() {
-        Runtime.getRuntime().addShutdownHook(new Thread(Main::stopApplication, "Dpi-Shutdown-Hook"));
+        Runtime.getRuntime().addShutdownHook(
+                new Thread(
+                        Main::stopApplication,
+                        "Dpi-Shutdown-Hook"
+                )
+        );
     }
 
-    /**
-     * ✅ П.26: Закрытие общего worker pool
-     * ✅ П.64: Правильный порядок остановки
-     */
     private static synchronized void stopApplication() {
-        logger.info(LocaleUtil.getString("shutdown_started"));
+        if (shutdownStarted) {
+            return;
+        }
 
-        // ✅ П.64: Сначала серверы
-        stop(proxyServer, "error_stop_http_proxy");
-        stop(dnsServer, "error_stop_dns_server");
+        shutdownStarted = true;
 
-        // ✅ П.26: Закрыть общий worker pool
-        WorkerPool.shutdown();
+        logger.info(
+                LocaleUtil.getString("shutdown_started")
+        );
 
-        // ✅ П.64: Затем детекторы
-        stop(httpAnomalyDetector, "error_stop_http_anomaly");
-        stop(dnsAnomalyDetector, "error_stop_dns_anomaly");
+        stopProxyServer();
+        stopDnsServer();
 
-        // ✅ П.64: Затем blacklist
-        close(blacklist, "error_stop_blacklist");
+        stopHttpAnomalyDetector();
+        stopDnsAnomalyDetector();
 
-        logger.info(LocaleUtil.getString("shutdown_completed"));
+        shutdownWorkerPool();
+        closeBlacklist();
+
+        logger.info(
+                LocaleUtil.getString("shutdown_completed")
+        );
     }
 
-    private static void stop(Object obj, String errorKey) {
-        if (obj == null) return;
+    private static void stopProxyServer() {
+        HttpProxyServer server = proxyServer;
+
+        if (server == null) {
+            return;
+        }
+
         try {
-            switch (obj) {
-                case DnsAnomalyDetector anomalyDetector -> anomalyDetector.stop();
-                case HttpAnomalyDetector anomalyDetector -> anomalyDetector.stop();
-                case HttpProxyServer httpProxyServer -> httpProxyServer.stop();
-                case DnsServer server -> server.stop();
-                default -> {}
-            }
+            server.stop();
         } catch (Exception e) {
-            logger.error(LocaleUtil.getString(errorKey), e);
+            logger.error(
+                    LocaleUtil.getString(
+                            "error_stop_http_proxy"
+                    ),
+                    e
+            );
+        } finally {
+            proxyServer = null;
         }
     }
 
-    private static void close(Object obj, String errorKey) {
-        if (obj == null) return;
+    private static void stopDnsServer() {
+        DnsServer server = dnsServer;
+
+        if (server == null) {
+            return;
+        }
+
         try {
-            if (obj instanceof BlacklistLoader) ((BlacklistLoader) obj).close();
+            server.stop();
         } catch (Exception e) {
-            logger.error(LocaleUtil.getString(errorKey), e);
+            logger.error(
+                    LocaleUtil.getString(
+                            "error_stop_dns_server"
+                    ),
+                    e
+            );
+        } finally {
+            dnsServer = null;
+        }
+    }
+
+    private static void stopHttpAnomalyDetector() {
+        HttpAnomalyDetector detector =
+                httpAnomalyDetector;
+
+        if (detector == null) {
+            return;
+        }
+
+        try {
+            detector.stop();
+        } catch (Exception e) {
+            logger.error(
+                    LocaleUtil.getString(
+                            "error_stop_http_anomaly"
+                    ),
+                    e
+            );
+        } finally {
+            httpAnomalyDetector = null;
+        }
+    }
+
+    private static void stopDnsAnomalyDetector() {
+        DnsAnomalyDetector detector =
+                dnsAnomalyDetector;
+
+        if (detector == null) {
+            return;
+        }
+
+        try {
+            detector.stop();
+        } catch (Exception e) {
+            logger.error(
+                    LocaleUtil.getString(
+                            "error_stop_dns_anomaly"
+                    ),
+                    e
+            );
+        } finally {
+            dnsAnomalyDetector = null;
+        }
+    }
+
+    private static void shutdownWorkerPool() {
+        try {
+            WorkerPool.shutdown();
+        } catch (Exception e) {
+            logger.error(
+                    "Failed to stop worker pool",
+                    e
+            );
+        }
+    }
+
+    private static void closeBlacklist() {
+        BlacklistLoader loader = blacklist;
+
+        if (loader == null) {
+            return;
+        }
+
+        try {
+            loader.close();
+        } catch (Exception e) {
+            logger.error(
+                    LocaleUtil.getString(
+                            "error_stop_blacklist"
+                    ),
+                    e
+            );
+        } finally {
+            blacklist = null;
         }
     }
 
     public static synchronized void startDnsServer() {
         if (dnsServer != null) {
-            logger.info(LocaleUtil.getString("dns_server_already_initialized"));
+            logger.info(
+                    LocaleUtil.getString(
+                            "dns_server_already_initialized"
+                    )
+            );
             return;
         }
+
         if (config == null) {
-            logger.error(LocaleUtil.getString("main_config_null"));
+            logger.error(
+                    LocaleUtil.getString("main_config_null")
+            );
             return;
         }
+
         if (!config.getBoolean("dns.start")) {
-            logger.info(LocaleUtil.getString("dns_server_disabled"));
+            logger.info(
+                    LocaleUtil.getString(
+                            "dns_server_disabled"
+                    )
+            );
             return;
         }
+
         if (blacklist == null) {
-            logger.error(LocaleUtil.getString("main_blacklist_null"), "DNS");
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_blacklist_null"
+                    ),
+                    "DNS"
+            );
             return;
         }
+
         if (dnsAnomalyDetector == null) {
-            logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "DnsAnomalyDetector");
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_anomaly_detector_null"
+                    ),
+                    "DnsAnomalyDetector"
+            );
             return;
         }
+
         try {
-            dnsServer = new DnsServer(blacklist, dnsAnomalyDetector);
-            Thread dnsThread = new Thread(dnsServer::run, "DnsServer-Main-Thread");
+            dnsServer =
+                    new DnsServer(
+                            blacklist,
+                            dnsAnomalyDetector
+                    );
+
+            Thread dnsThread =
+                    new Thread(
+                            dnsServer::run,
+                            "DnsServer-Main-Thread"
+                    );
+
             dnsThread.setDaemon(false);
             dnsThread.start();
-            logger.info(LocaleUtil.getString("dns_server_started"), config.getInt("dns.local.port"));
+
+            logger.info(
+                    LocaleUtil.getString(
+                            "dns_server_started"
+                    ),
+                    config.getInt("dns.local.port")
+            );
+
         } catch (Exception e) {
-            logger.error(LocaleUtil.getString("main_dns_server_start_error"), e);
+            dnsServer = null;
+
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_dns_server_start_error"
+                    ),
+                    e
+            );
         }
     }
 
     public static synchronized void startProxyServer() {
         if (proxyServer != null) {
-            logger.info(LocaleUtil.getString("http_proxy_already_initialized"));
+            logger.info(
+                    LocaleUtil.getString(
+                            "http_proxy_already_initialized"
+                    )
+            );
             return;
         }
+
         if (config == null) {
-            logger.error(LocaleUtil.getString("main_config_null"));
+            logger.error(
+                    LocaleUtil.getString("main_config_null")
+            );
             return;
         }
+
         if (!config.getBoolean("proxy.start")) {
-            logger.info(LocaleUtil.getString("http_proxy_disabled"));
+            logger.info(
+                    LocaleUtil.getString(
+                            "http_proxy_disabled"
+                    )
+            );
             return;
         }
+
         if (blacklist == null) {
-            logger.error(LocaleUtil.getString("main_blacklist_null"), "HTTP Proxy");
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_blacklist_null"
+                    ),
+                    "HTTP Proxy"
+            );
             return;
         }
+
         if (httpAnomalyDetector == null) {
-            logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "HttpAnomalyDetector");
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_anomaly_detector_null"
+                    ),
+                    "HttpAnomalyDetector"
+            );
             return;
         }
+
         try {
-            int port = config.getInt("proxy.local.port");
-            logger.info(LocaleUtil.getString("http_proxy_init_start"), port);
-            proxyServer = new HttpProxyServer(port, blacklist, httpAnomalyDetector);
+            int port =
+                    config.getInt("proxy.local.port");
+
+            logger.info(
+                    LocaleUtil.getString(
+                            "http_proxy_init_start"
+                    ),
+                    port
+            );
+
+            proxyServer =
+                    new HttpProxyServer(
+                            port,
+                            blacklist,
+                            httpAnomalyDetector
+                    );
+
             proxyServer.start();
+
         } catch (Exception e) {
-            logger.error(LocaleUtil.getString("main_proxy_server_start_error"), e);
+            proxyServer = null;
+
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_proxy_server_start_error"
+                    ),
+                    e
+            );
         }
     }
 
     public static AppConfig getConfig() {
-        AppConfig localConfig = config;  // ✅ П.64: Локальная переменная
+        AppConfig localConfig = config;
+
         if (localConfig == null) {
-            logger.error(LocaleUtil.getString("main_config_null"));
-            throw new IllegalStateException("AppConfig not initialized");
+            logger.error(
+                    LocaleUtil.getString(
+                            "main_config_null"
+                    )
+            );
+
+            throw new IllegalStateException(
+                    "AppConfig not initialized"
+            );
         }
+
         return localConfig;
     }
 }
