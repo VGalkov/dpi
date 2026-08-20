@@ -3,59 +3,89 @@ package ru.galkov.util;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public class BlacklistSnapshot {
     private static final Logger logger = LoggerFactory.getLogger(BlacklistSnapshot.class);
 
     private final DomainTrie domainTrie;
-    private final Set<String> ipSet;
-    private final Set<IpCidr> cidrSet;
     private final long timestamp;
 
-    private static final int DEFAULT_MAX_IP_CACHE_SIZE = 2000;
-    private final int maxIpCacheSize;
-    private final Map<String, BlockDecision> ipCache;
-    private final Map<String, BlockDecision> domainCache;
-    private final Object ipCacheLock = new Object();
+    private final Map<String, Boolean> ipExactMap;
+    private final Map<String, IpCidr> cidrPrefixMap;
+    private final Set<IpCidr> cidrSet;
 
-    public BlacklistSnapshot(
-            DomainTrie domainTrie,
-            Set<String> ipSet,
-            Set<IpCidr> cidrSet
-    ) {
+    private static final int DEFAULT_MAX_IP_CACHE_SIZE = 10000;
+    private static final int DEFAULT_MAX_DOMAIN_CACHE_SIZE = 20000;
+    private static final long DEFAULT_CACHE_TTL_MILLIS = 60_000L;
+
+    private final int maxIpCacheSize;
+    private final int maxDomainCacheSize;
+    private final long cacheTtlMillis;
+
+    private final Map<String, CacheEntry<BlockDecision>> ipCache;
+    private final Map<String, CacheEntry<BlockDecision>> domainCache;
+
+    public BlacklistSnapshot(DomainTrie domainTrie, Set<String> ipSet, Set<IpCidr> cidrSet) {
         this.domainTrie = domainTrie;
-        this.ipSet = ipSet;
-        this.cidrSet = cidrSet;
         this.timestamp = System.currentTimeMillis();
 
         this.maxIpCacheSize = getMaxIpCacheSize();
+        this.maxDomainCacheSize = getMaxDomainCacheSize();
+        this.cacheTtlMillis = getCacheTtlMillis();
+
+        this.ipExactMap = new ConcurrentHashMap<>(ipSet.size());
+        for (String ip : ipSet) {
+            ipExactMap.put(ip, true);
+        }
+
+        // ✅ заполняем изменяемый набор, затем оборачиваем (фикс UnsupportedOperationException)
+        this.cidrPrefixMap = new ConcurrentHashMap<>(cidrSet.size());
+        Set<IpCidr> mutableCidrSet = ConcurrentHashMap.newKeySet();
+        for (IpCidr cidr : cidrSet) {
+            mutableCidrSet.add(cidr);
+            String prefix = getCidrPrefix(cidr);
+            cidrPrefixMap.put(prefix, cidr);
+        }
+        this.cidrSet = Collections.unmodifiableSet(mutableCidrSet);
 
         this.ipCache = Collections.synchronizedMap(
-                new LinkedHashMap<String, BlockDecision>(16, 0.75f, true) {
+                new LinkedHashMap<String, CacheEntry<BlockDecision>>(16, 0.75f, true) {
                     @Override
                     protected boolean removeEldestEntry(
-                            Map.Entry<String, BlockDecision> eldest
+                            Map.Entry<String, CacheEntry<BlockDecision>> eldest
                     ) {
-                        if (size() > maxIpCacheSize) {
-                            logger.debug(
-                                    "BlacklistSnapshot.ipCache: evicted oldest entry (size={} > max={})",
-                                    size(),
-                                    maxIpCacheSize
-                            );
-                            return true;
-                        }
-                        return false;
+                        return size() > maxIpCacheSize;
                     }
                 }
         );
 
-        this.domainCache = new ConcurrentHashMap<>(1024);
+        this.domainCache = Collections.synchronizedMap(
+                new LinkedHashMap<String, CacheEntry<BlockDecision>>(16, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(
+                            Map.Entry<String, CacheEntry<BlockDecision>> eldest
+                    ) {
+                        return size() > maxDomainCacheSize;
+                    }
+                }
+        );
     }
 
-    public BlacklistSnapshot(DomainTrie domainTrie, Set<String> ipSet) {
-        this(domainTrie, ipSet, Collections.emptySet());
+    private String getCidrPrefix(IpCidr cidr) {
+        String network = cidr.toString();
+        int slashIndex = network.indexOf('/');
+        if (slashIndex > 0) {
+            return network.substring(0, slashIndex);
+        }
+        return network;
     }
 
     public static BlacklistSnapshot empty() {
@@ -73,18 +103,32 @@ public class BlacklistSnapshot {
                 return DEFAULT_MAX_IP_CACHE_SIZE;
             }
             return config.getInt("blacklist.snapshot.max-ip-cache-size");
-        } catch (IllegalStateException e) {
-            logger.debug(
-                    "BlacklistSnapshot: AppConfig not initialized, using default max-ip-cache-size={}",
-                    DEFAULT_MAX_IP_CACHE_SIZE
-            );
+        } catch (Exception e) {
+            logger.debug("BlacklistSnapshot: using default max-ip-cache-size={}", DEFAULT_MAX_IP_CACHE_SIZE);
             return DEFAULT_MAX_IP_CACHE_SIZE;
+        }
+    }
+
+    private static int getMaxDomainCacheSize() {
+        try {
+            ru.galkov.AppConfig config = ru.galkov.Main.getConfig();
+            return config.getInt("blacklist.snapshot.max-domain-cache-size");
         } catch (Exception e) {
             logger.debug(
-                    "BlacklistSnapshot: using default max-ip-cache-size={}",
-                    DEFAULT_MAX_IP_CACHE_SIZE
+                    "BlacklistSnapshot: using default max-domain-cache-size={}",
+                    DEFAULT_MAX_DOMAIN_CACHE_SIZE
             );
-            return DEFAULT_MAX_IP_CACHE_SIZE;
+            return DEFAULT_MAX_DOMAIN_CACHE_SIZE;
+        }
+    }
+
+    private static long getCacheTtlMillis() {
+        try {
+            ru.galkov.AppConfig config = ru.galkov.Main.getConfig();
+            int value = config.getInt("blacklist.snapshot.cache-ttl-millis");
+            return value > 0 ? value : DEFAULT_CACHE_TTL_MILLIS;
+        } catch (Exception e) {
+            return DEFAULT_CACHE_TTL_MILLIS;
         }
     }
 
@@ -93,53 +137,49 @@ public class BlacklistSnapshot {
             return BlockDecision.allow();
         }
 
-        synchronized (ipCacheLock) {
-            BlockDecision cached = ipCache.get(ip);
-            if (cached != null) {
-                return cached;
-            }
+        String normalizedIp = HostNormalizer.normalizeHost(ip);
+        if (normalizedIp == null) {
+            return BlockDecision.allow();
+        }
 
-            boolean blocked = ipSet.contains(ip);
+        CacheEntry<BlockDecision> cached = ipCache.get(normalizedIp);
+        if (cached != null && !cached.isExpired(cacheTtlMillis)) {
+            return cached.value;
+        }
 
-            if (!blocked && !cidrSet.isEmpty()) {
-                try {
-                    for (IpCidr cidr : cidrSet) {
-                        if (cidr.contains(ip)) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                } catch (Exception e) {
-                    logger.debug(
-                            "BlacklistSnapshot.checkIp: CIDR check failed for ip={}: {}",
-                            ip,
-                            e.getMessage()
-                    );
-                }
-            }
-
-            BlockDecision decision = blocked
-                    ? BlockDecision.blockIpExact("ip:" + ip, "blacklist")
-                    : BlockDecision.allow();
-
-            ipCache.put(ip, decision);
+        Boolean exactMatch = ipExactMap.get(normalizedIp);
+        if (exactMatch != null && exactMatch) {
+            BlockDecision decision = BlockDecision.blockIpExact("ip:" + normalizedIp, "blacklist");
+            ipCache.put(normalizedIp, new CacheEntry<>(decision));
             return decision;
         }
+
+        boolean blocked = !cidrPrefixMap.isEmpty()
+                && matchesCidr(normalizedIp);
+
+        BlockDecision decision = blocked
+                ? BlockDecision.blockIpExact("ip:" + normalizedIp, "blacklist")
+                : BlockDecision.allow();
+
+        ipCache.put(normalizedIp, new CacheEntry<>(decision));
+        return decision;
     }
 
+    // ✅ ГЛАВНЫЙ ФИКС: BloomFilter-гейт удалён. Всегда выполняем поиск в trie.
+    //    Раньше false->allow ложно пропускал поддомены SUBTREE-правил.
     public BlockDecision checkDomain(String domain) {
         if (domain == null || domain.isEmpty()) {
             return BlockDecision.allow();
         }
 
-        BlockDecision cached = domainCache.get(domain);
-        if (cached != null) {
-            return cached;
-        }
-
         String normalized = HostNormalizer.normalizeHost(domain);
         if (normalized == null) {
             return BlockDecision.allow();
+        }
+
+        CacheEntry<BlockDecision> cached = domainCache.get(normalized);
+        if (cached != null && !cached.isExpired(cacheTtlMillis)) {
+            return cached.value;
         }
 
         boolean blocked = domainTrie.matches(normalized);
@@ -151,23 +191,46 @@ public class BlacklistSnapshot {
         )
                 : BlockDecision.allow();
 
-        domainCache.put(domain, decision);
+        domainCache.put(normalized, new CacheEntry<>(decision));
         return decision;
     }
 
-    public long getTimestamp() {
-        return timestamp;
+    private boolean matchesCidr(String ip) {
+        String ipPrefix = getIpPrefix(ip);
+        IpCidr direct = cidrPrefixMap.get(ipPrefix);
+        if (direct != null && direct.contains(ip)) {
+            return true;
+        }
+
+        for (IpCidr cidr : cidrSet) {
+            if (cidr.contains(ip)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    public int getDomainRuleCount() {
-        return 0;
+    private String getIpPrefix(String ip) {
+        int lastDot = ip.lastIndexOf('.');
+        if (lastDot > 0) {
+            return ip.substring(0, lastDot);
+        }
+        return ip;
     }
 
-    public int getIpRuleCount() {
-        return ipSet.size() + cidrSet.size();
-    }
+    private static final class CacheEntry<V> {
+        private final V value;
+        private final long created;
 
-    public int getIpCacheSize() {
-        return ipCache.size();
+        CacheEntry(V value) {
+            this.value = value;
+            this.created = System.currentTimeMillis();
+        }
+
+        boolean isExpired(long ttlMillis) {
+            return ttlMillis > 0
+                    && (System.currentTimeMillis() - created) > ttlMillis;
+        }
     }
 }

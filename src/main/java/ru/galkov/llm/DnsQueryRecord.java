@@ -73,111 +73,36 @@ public final class DnsQueryRecord {
         this.suspiciousKeyword = containsSuspiciousKeyword(this.domain);
     }
 
-    public String getClientIp() {
-        return clientIp;
-    }
-
-    public String getDomain() {
-        return domain;
-    }
-
-    public int getQueryType() {
-        return queryType;
-    }
-
-    public long getTimestamp() {
-        return timestamp;
-    }
-
-    public boolean isQuery() {
-        return query;
-    }
-
-    public int getOpcode() {
-        return opcode;
-    }
-
-    public boolean isTruncated() {
-        return truncated;
-    }
-
-    public boolean isRecursionDesired() {
-        return recursionDesired;
-    }
-
-    public int getZ() {
-        return z;
-    }
-
-    public int getRcode() {
-        return rcode;
-    }
-
-    public int getDomainLength() {
-        return domainLength;
-    }
-
-    public double getEntropy() {
-        return entropy;
-    }
-
-    public int getSubdomainCount() {
-        return subdomainCount;
-    }
-
-    public String getParentDomain() {
-        return parentDomain;
-    }
-
-    public String getLeftmostLabel() {
-        return leftmostLabel;
-    }
-
-    public int getLeftmostLabelLength() {
-        return leftmostLabelLength;
-    }
-
-    public int getMaxLabelLength() {
-        return maxLabelLength;
-    }
-
-    public double getDigitRatio() {
-        return digitRatio;
-    }
-
-    public double getHyphenRatio() {
-        return hyphenRatio;
-    }
-
-    public double getUniqueCharacterRatio() {
-        return uniqueCharacterRatio;
-    }
-
-    public boolean isBase32Like() {
-        return base32Like;
-    }
-
-    public boolean isBase64Like() {
-        return base64Like;
-    }
-
-    public boolean hasPunycode() {
-        return punycode;
-    }
-
-    public boolean hasIpLikeLabel() {
-        return ipLikeLabel;
-    }
-
-    public boolean hasSuspiciousKeyword() {
-        return suspiciousKeyword;
-    }
+    public String getClientIp() { return clientIp; }
+    public String getDomain() { return domain; }
+    public int getQueryType() { return queryType; }
+    public long getTimestamp() { return timestamp; }
+    public boolean isQuery() { return query; }
+    public int getOpcode() { return opcode; }
+    public boolean isTruncated() { return truncated; }
+    public boolean isRecursionDesired() { return recursionDesired; }
+    public int getZ() { return z; }
+    public int getRcode() { return rcode; }
+    public int getDomainLength() { return domainLength; }
+    public double getEntropy() { return entropy; }
+    public int getSubdomainCount() { return subdomainCount; }
+    public String getParentDomain() { return parentDomain; }
+    public String getLeftmostLabel() { return leftmostLabel; }
+    public int getLeftmostLabelLength() { return leftmostLabelLength; }
+    public int getMaxLabelLength() { return maxLabelLength; }
+    public double getDigitRatio() { return digitRatio; }
+    public double getHyphenRatio() { return hyphenRatio; }
+    public double getUniqueCharacterRatio() { return uniqueCharacterRatio; }
+    public boolean isBase32Like() { return base32Like; }
+    public boolean isBase64Like() { return base64Like; }
+    public boolean hasPunycode() { return punycode; }
+    public boolean hasIpLikeLabel() { return ipLikeLabel; }
+    public boolean hasSuspiciousKeyword() { return suspiciousKeyword; }
 
     private static String normalizeNullable(String value) {
         if (value == null) {
             return null;
         }
-
         String result = value.trim();
         return result.isEmpty() ? null : result;
     }
@@ -186,7 +111,6 @@ public final class DnsQueryRecord {
         if (value == null) {
             return null;
         }
-
         String result = value.trim().toLowerCase(Locale.ROOT);
 
         while (result.endsWith(".")) {
@@ -206,11 +130,9 @@ public final class DnsQueryRecord {
 
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-
             if (c == '.') {
                 continue;
             }
-
             frequency[c]++;
             length++;
         }
@@ -220,16 +142,13 @@ public final class DnsQueryRecord {
         }
 
         double result = 0.0;
-
         for (int count : frequency) {
             if (count == 0) {
                 continue;
             }
-
             double probability = (double) count / length;
             result -= probability * Math.log(probability) / LOG_2;
         }
-
         return result;
     }
 
@@ -237,15 +156,12 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return 0;
         }
-
         int count = 0;
-
         for (int i = 0; i < value.length(); i++) {
             if (value.charAt(i) == '.') {
                 count++;
             }
         }
-
         return count;
     }
 
@@ -253,12 +169,10 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return "";
         }
-
         int index = value.indexOf('.');
         if (index < 0 || index == value.length() - 1) {
             return value;
         }
-
         return value.substring(index + 1);
     }
 
@@ -266,7 +180,6 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return "";
         }
-
         int index = value.indexOf('.');
         return index < 0 ? value : value.substring(0, index);
     }
@@ -275,10 +188,8 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return 0;
         }
-
         int max = 0;
         int current = 0;
-
         for (int i = 0; i < value.length(); i++) {
             if (value.charAt(i) == '.') {
                 if (current > max) {
@@ -289,7 +200,6 @@ public final class DnsQueryRecord {
                 current++;
             }
         }
-
         return Math.max(max, current);
     }
 
@@ -297,15 +207,12 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return 0.0;
         }
-
         int count = 0;
-
         for (int i = 0; i < value.length(); i++) {
             if (Character.isDigit(value.charAt(i))) {
                 count++;
             }
         }
-
         return (double) count / value.length();
     }
 
@@ -313,15 +220,12 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return 0.0;
         }
-
         int count = 0;
-
         for (int i = 0; i < value.length(); i++) {
             if (value.charAt(i) == '-') {
                 count++;
             }
         }
-
         return (double) count / value.length();
     }
 
@@ -329,19 +233,15 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return 0.0;
         }
-
         boolean[] seen = new boolean[Character.MAX_VALUE + 1];
         int unique = 0;
-
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-
             if (!seen[c]) {
                 seen[c] = true;
                 unique++;
             }
         }
-
         return (double) unique / value.length();
     }
 
@@ -349,17 +249,13 @@ public final class DnsQueryRecord {
         if (value == null || value.length() < 12) {
             return false;
         }
-
         int valid = 0;
-
         for (int i = 0; i < value.length(); i++) {
             char c = Character.toUpperCase(value.charAt(i));
-
             if ((c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7')) {
                 valid++;
             }
         }
-
         return (double) valid / value.length() >= 0.95;
     }
 
@@ -367,12 +263,9 @@ public final class DnsQueryRecord {
         if (value == null || value.length() < 16) {
             return false;
         }
-
         int valid = 0;
-
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-
             if ((c >= 'A' && c <= 'Z')
                     || (c >= 'a' && c <= 'z')
                     || (c >= '0' && c <= '9')
@@ -382,7 +275,6 @@ public final class DnsQueryRecord {
                 valid++;
             }
         }
-
         return (double) valid / value.length() >= 0.95;
     }
 
@@ -390,15 +282,12 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return false;
         }
-
         String[] labels = value.split("\\.");
-
         for (String label : labels) {
             if (label.startsWith("xn--")) {
                 return true;
             }
         }
-
         return false;
     }
 
@@ -406,28 +295,22 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return false;
         }
-
         String[] labels = value.split("\\.");
-
         for (String label : labels) {
             int digits = 0;
             int hyphens = 0;
-
             for (int i = 0; i < label.length(); i++) {
                 char c = label.charAt(i);
-
                 if (Character.isDigit(c)) {
                     digits++;
                 } else if (c == '-') {
                     hyphens++;
                 }
             }
-
             if (digits >= 4 && hyphens >= 1) {
                 return true;
             }
         }
-
         return false;
     }
 
@@ -435,9 +318,7 @@ public final class DnsQueryRecord {
         if (value == null || value.isEmpty()) {
             return false;
         }
-
         String lower = value.toLowerCase(Locale.ROOT);
-
         return lower.contains("malware")
                 || lower.contains("phishing")
                 || lower.contains("exploit")
@@ -447,15 +328,12 @@ public final class DnsQueryRecord {
                 || lower.contains("stealer");
     }
 
+    // ✅ П.44: toString через конкатенацию вместо String.format
     @Override
     public String toString() {
-        return String.format(
-                Locale.ROOT,
-                "DnsQueryRecord{clientIp='%s', domain='%s', queryType=%d, timestamp=%d}",
-                clientIp,
-                domain,
-                queryType,
-                timestamp
-        );
+        return "DnsQueryRecord{clientIp='" + clientIp
+                + "', domain='" + domain
+                + "', queryType=" + queryType
+                + ", timestamp=" + timestamp + '}';
     }
 }

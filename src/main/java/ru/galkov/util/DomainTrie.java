@@ -7,11 +7,6 @@ import java.util.Map;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- *
- * DomainTrie с режимами правил:
- * - EXACT: блокирует только сам домен;
- * - WILDCARD: блокирует только поддомены;
- * - SUBTREE: блокирует домен и все поддомены.
  */
 public final class DomainTrie {
 
@@ -81,6 +76,30 @@ public final class DomainTrie {
         }
     }
 
+    public synchronized boolean contains(String domain) {
+        String normalized = normalizeDomain(domain);
+        if (normalized == null) {
+            return false;
+        }
+
+        String[] labels = getLabelsCached(normalized);
+        if (labels.length == 0) {
+            return false;
+        }
+
+        TrieNode node = root;
+
+        for (int i = labels.length - 1; i >= 0; i--) {
+            node = node.children.get(labels[i]);
+
+            if (node == null) {
+                return false;
+            }
+        }
+
+        return node.exactBlocked || node.wildcardBlocked || node.subtreeBlocked;
+    }
+
     public synchronized boolean matches(String domain) {
         String normalized = normalizeDomain(domain);
         if (normalized == null) {
@@ -115,6 +134,19 @@ public final class DomainTrie {
         }
 
         return false;
+    }
+
+    public synchronized int size() {
+        return countNodes(root);
+    }
+
+    private int countNodes(TrieNode node) {
+        if (node == null) return 0;
+        int count = (node.exactBlocked || node.wildcardBlocked || node.subtreeBlocked) ? 1 : 0;
+        for (TrieNode child : node.children.values()) {
+            count += countNodes(child);
+        }
+        return count;
     }
 
     private static String normalizeDomain(String domain) {
@@ -171,10 +203,5 @@ public final class DomainTrie {
 
         return labels;
     }
-
-    public static void clearCache() {
-        synchronized (labelsCache) {
-            labelsCache.clear();
-        }
-    }
+    // ✅ П.48: метод clearCache() удалён (мёртвый код)
 }

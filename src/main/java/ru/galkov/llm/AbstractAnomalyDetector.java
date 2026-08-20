@@ -4,19 +4,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
 
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public abstract class AbstractAnomalyDetector<T> {
     protected static final Logger logger =
             LoggerFactory.getLogger(AbstractAnomalyDetector.class);
@@ -29,7 +29,12 @@ public abstract class AbstractAnomalyDetector<T> {
     private static final int DEFAULT_CIRCUIT_TIMEOUT_SECONDS = 60;
     private static final int DEFAULT_MAX_DOMAIN_LENGTH = 253;
     private static final int DEFAULT_MAX_REASON_LENGTH = 500;
-    private static final int LOCAL_LLM_PORT = 1234;
+    private static final int DEFAULT_MAX_PROMPT_LENGTH = 4096;
+    private static final int DEFAULT_LOCAL_LLM_PORT = 1234;
+
+    // ✅ П.35(опт.): Set валидных действий — константа
+    private static final Set<String> VALID_ACTIONS =
+            Set.of("BLOCK_DOMAIN", "LOG_ONLY", "NONE", "BLOCK_REQUEST");
 
     protected final boolean enabled;
     protected final LlmClient llmClient;
@@ -45,6 +50,8 @@ public abstract class AbstractAnomalyDetector<T> {
 
     protected final int maxDomainLength;
     protected final int maxReasonLength;
+    protected final int maxPromptLength;
+    protected final int localLlmPort;
 
     private final ConcurrentLinkedQueue<Long> requestTimestamps =
             new ConcurrentLinkedQueue<>();
@@ -70,19 +77,27 @@ public abstract class AbstractAnomalyDetector<T> {
                 configPrefix + ".llm-studio.allow-local"
         );
 
+        // ✅ Константа вынесена в конфиг: <prefix>.llm-studio.local-port
+        this.localLlmPort = readPositiveInt(
+                configPrefix + ".llm-studio.local-port",
+                DEFAULT_LOCAL_LLM_PORT,
+                configPrefix + ": invalid local LLM port"
+        );
+
         String llmUrl = validateLlmUrl(
                 getConfigString(
                         configPrefix + ".llm-studio.url"
                 ),
                 configPrefix,
-                allowLocalLlm
+                allowLocalLlm,
+                localLlmPort
         );
 
         String model = getConfigString(
                 configPrefix + ".llm-studio.model"
         );
 
-        if (model == null || model.isBlank()) {
+        if (model.isBlank()) {
             throw new IllegalArgumentException(
                     configPrefix + ": LLM model must be configured"
             );
@@ -122,42 +137,33 @@ public abstract class AbstractAnomalyDetector<T> {
 
         this.maxRequestsPerMinute = Math.max(
                 1,
-                getConfigInt(
-                        configPrefix + ".max-requests-per-minute",
-                        DEFAULT_MAX_REQUESTS_PER_MINUTE
-                )
+                getConfigInt(configPrefix + ".max-requests-per-minute", DEFAULT_MAX_REQUESTS_PER_MINUTE)
         );
 
         this.circuitBreakerFailureThreshold = Math.max(
                 1,
-                getConfigInt(
-                        configPrefix + ".circuit-breaker.failure-threshold",
-                        DEFAULT_FAILURE_THRESHOLD
-                )
+                getConfigInt(configPrefix + ".circuit-breaker.failure-threshold", DEFAULT_FAILURE_THRESHOLD)
         );
 
         this.circuitBreakerTimeoutSeconds = Math.max(
                 10,
-                getConfigInt(
-                        configPrefix + ".circuit-breaker.timeout-seconds",
-                        DEFAULT_CIRCUIT_TIMEOUT_SECONDS
-                )
+                getConfigInt(configPrefix + ".circuit-breaker.timeout-seconds", DEFAULT_CIRCUIT_TIMEOUT_SECONDS)
         );
 
         this.maxDomainLength = Math.max(
                 64,
-                getConfigInt(
-                        configPrefix + ".max-domain-length",
-                        DEFAULT_MAX_DOMAIN_LENGTH
-                )
+                getConfigInt(configPrefix + ".max-domain-length", DEFAULT_MAX_DOMAIN_LENGTH)
         );
 
         this.maxReasonLength = Math.max(
                 100,
-                getConfigInt(
-                        configPrefix + ".max-reason-length",
-                        DEFAULT_MAX_REASON_LENGTH
-                )
+                getConfigInt(configPrefix + ".max-reason-length", DEFAULT_MAX_REASON_LENGTH)
+        );
+
+        // ✅ П.35: лимит длины промпта — из конфига
+        this.maxPromptLength = Math.max(
+                256,
+                getConfigInt(configPrefix + ".max-prompt-length", DEFAULT_MAX_PROMPT_LENGTH)
         );
 
         this.executor = Executors.newSingleThreadExecutor(runnable -> {
@@ -181,60 +187,41 @@ public abstract class AbstractAnomalyDetector<T> {
         );
     }
 
-    private static String validateLlmUrl(
-            String urlString,
-            String configPrefix,
-            boolean allowLocalLlm
-    ) {
+    private static String validateLlmUrl(String urlString, String configPrefix,
+                                         boolean allowLocalLlm, int localLlmPort) {
         if (urlString == null || urlString.isBlank()) {
-            throw new IllegalArgumentException(
-                    configPrefix + ": LLM URL must be configured"
-            );
+            throw new IllegalArgumentException(configPrefix + ": LLM URL must be configured");
         }
 
         try {
             URI uri = new URI(urlString);
-
             String scheme = uri.getScheme();
             String host = uri.getHost();
 
-            if (!"http".equalsIgnoreCase(scheme)
-                    && !"https".equalsIgnoreCase(scheme)) {
-                throw new IllegalArgumentException(
-                        "Only HTTP and HTTPS schemes are allowed"
-                );
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new IllegalArgumentException("Only HTTP and HTTPS schemes are allowed");
             }
 
             if (host == null || host.isBlank()) {
-                throw new IllegalArgumentException(
-                        "LLM URL host is missing"
-                );
+                throw new IllegalArgumentException("LLM URL host is missing");
             }
 
             if (uri.getUserInfo() != null) {
-                throw new IllegalArgumentException(
-                        "User info in LLM URL is not allowed"
-                );
+                throw new IllegalArgumentException("User info in LLM URL is not allowed");
             }
 
             if (uri.getFragment() != null) {
-                throw new IllegalArgumentException(
-                        "Fragment in LLM URL is not allowed"
-                );
+                throw new IllegalArgumentException("Fragment in LLM URL is not allowed");
             }
 
             int port = uri.getPort();
 
             if (port == -1) {
-                port = "https".equalsIgnoreCase(scheme)
-                        ? 443
-                        : 80;
+                port = "https".equalsIgnoreCase(scheme) ? 443 : 80;
             }
 
             if (port < 1 || port > 65535) {
-                throw new IllegalArgumentException(
-                        "Invalid LLM URL port"
-                );
+                throw new IllegalArgumentException("Invalid LLM URL port");
             }
 
             if (isLocalHost(host)) {
@@ -247,12 +234,12 @@ public abstract class AbstractAnomalyDetector<T> {
                     );
                 }
 
-                if (port != LOCAL_LLM_PORT) {
+                if (port != localLlmPort) {
                     throw new IllegalArgumentException(
                             configPrefix
                                     + ": local LM Studio is allowed only "
                                     + "on port "
-                                    + LOCAL_LLM_PORT
+                                    + localLlmPort
                     );
                 }
 
@@ -272,10 +259,7 @@ public abstract class AbstractAnomalyDetector<T> {
             return uri.toString();
 
         } catch (URISyntaxException | UnknownHostException e) {
-            throw new IllegalArgumentException(
-                    "Invalid or unresolved LLM URL",
-                    e
-            );
+            throw new IllegalArgumentException("Invalid or unresolved LLM URL", e);
         }
     }
 
@@ -302,8 +286,7 @@ public abstract class AbstractAnomalyDetector<T> {
         }
 
         if (address instanceof Inet6Address) {
-            return isUniqueLocalIpv6(bytes)
-                    || isIpv4MappedBlockedAddress(bytes);
+            return isUniqueLocalIpv6(bytes) || isIpv4MappedBlockedAddress(bytes);
         }
 
         return false;
@@ -346,8 +329,7 @@ public abstract class AbstractAnomalyDetector<T> {
             }
         }
 
-        if (bytes[10] != (byte) 0xff
-                || bytes[11] != (byte) 0xff) {
+        if (bytes[10] != (byte) 0xff || bytes[11] != (byte) 0xff) {
             return false;
         }
 
@@ -361,28 +343,72 @@ public abstract class AbstractAnomalyDetector<T> {
         return isBlockedIpv4(ipv4);
     }
 
-    protected static String sanitizeForPrompt(
-            String input,
-            int maxLength
-    ) {
+    // ✅ П.35(опт.): санитизация одним проходом вместо 4 regex
+    protected static String sanitizeForPrompt(String input, int maxLength) {
         if (input == null || maxLength <= 0) {
             return "";
         }
 
-        String bounded = input.length() > maxLength
-                ? input.substring(0, maxLength)
-                : input;
+        StringBuilder sb = new StringBuilder(Math.min(input.length(), maxLength));
+        boolean lastWasSpace = false;
+        int dotRun = 0;
 
-        return bounded
-                .replaceAll("[\"'{}\\[\\]<>\\\\]", "_")
-                .replaceAll("\\r?\\n", " ")
-                .replaceAll("\\s+", " ")
-                .replaceAll("\\.{2,}", "...");
+        int limit = Math.min(input.length(), maxLength);
+        for (int i = 0; i < limit; i++) {
+            char c = input.charAt(i);
+
+            if (c == '"' || c == '\'' || c == '{' || c == '}' || c == '['
+                    || c == ']' || c == '<' || c == '>' || c == '\\') {
+                c = '_';
+            }
+
+            if (c == '\r' || c == '\n') {
+                c = ' ';
+            }
+
+            if (c == '.') {
+                dotRun++;
+                if (dotRun > 2) {
+                    continue;
+                }
+            } else {
+                dotRun = 0;
+            }
+
+            if (c == ' ') {
+                if (lastWasSpace) {
+                    continue;
+                }
+                lastWasSpace = true;
+            } else {
+                lastWasSpace = false;
+            }
+
+            sb.append(c);
+        }
+
+        return sb.toString();
     }
 
-    protected AnalysisResult validateAnalysisResult(
-            AnalysisResult result
-    ) {
+    // ✅ П.35: валидация отправляемых данных ДО вызова LLM
+    protected String sanitizePrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            logger.warn("Empty LLM prompt");
+            return null;
+        }
+
+        String sanitized = sanitizeForPrompt(prompt, maxPromptLength);
+
+        if (sanitized.isBlank()) {
+            logger.warn("LLM prompt is empty after sanitization");
+            return null;
+        }
+
+        return sanitized;
+    }
+
+    // ✅ Валидация ПОЛУЧАЕМЫХ данных — свой формат
+    protected AnalysisResult validateAnalysisResult(AnalysisResult result) {
         if (result == null) {
             return null;
         }
@@ -394,71 +420,46 @@ public abstract class AbstractAnomalyDetector<T> {
         }
 
         confidence = Math.max(0.0, Math.min(1.0, confidence));
-
-        String reason = sanitizeForPrompt(
-                result.reason(),
-                maxReasonLength
-        );
+        String reason = sanitizeForPrompt(result.reason(), maxReasonLength);
 
         List<String> actions = result.recommendedActions() == null
                 ? Collections.emptyList()
                 : result.recommendedActions();
 
         List<String> validActions = actions.stream()
-                .filter(action -> action != null)
+                .filter(Objects::nonNull)
                 .map(String::trim)
-                .filter(action -> Set.of(
-                        "BLOCK_DOMAIN",
-                        "LOG_ONLY",
-                        "NONE",
-                        "BLOCK_REQUEST"
-                ).contains(action))
+                .filter(VALID_ACTIONS::contains)
                 .limit(3)
                 .toList();
 
         boolean suspicious = confidence >= trustThreshold;
 
-        return new AnalysisResult(
-                suspicious,
-                confidence,
-                reason,
-                validActions
-        );
+        return new AnalysisResult(suspicious, confidence, reason, validActions);
     }
 
+    // ✅ П.35: промпт валидируется ДО отправки
     protected AnalysisResult analyzeWithLlm(String prompt) {
-        if (prompt == null || prompt.isBlank()) {
-            logger.warn("Empty LLM prompt");
+        String safePrompt = sanitizePrompt(prompt);
+        if (safePrompt == null) {
             return null;
         }
 
         if (!tryAcquireRateLimit()) {
-            logger.warn(
-                    LocaleUtil.getString(
-                            "anomaly_detector_rate_limit_exceeded"
-                    )
-            );
+            logger.warn(LocaleUtil.getString("anomaly_detector_rate_limit_exceeded"));
             return null;
         }
 
         if (!tryCircuitBreaker()) {
-            logger.warn(
-                    LocaleUtil.getString(
-                            "anomaly_detector_circuit_breaker_open"
-                    )
-            );
+            logger.warn(LocaleUtil.getString("anomaly_detector_circuit_breaker_open"));
             return null;
         }
 
         try {
-            String response = llmClient.sendRequest(prompt);
+            String response = llmClient.sendRequest(safePrompt);
 
             if (response == null || response.isBlank()) {
-                logger.warn(
-                        LocaleUtil.getString(
-                                getConfigPrefix() + "_empty_response"
-                        )
-                );
+                logger.warn(LocaleUtil.getString(getConfigPrefix() + "_empty_response"));
                 recordCircuitBreakerFailure();
                 return null;
             }
@@ -470,8 +471,7 @@ public abstract class AbstractAnomalyDetector<T> {
                 return null;
             }
 
-            AnalysisResult validated =
-                    validateAnalysisResult(result);
+            AnalysisResult validated = validateAnalysisResult(result);
 
             recordCircuitBreakerSuccess();
 
@@ -495,12 +495,9 @@ public abstract class AbstractAnomalyDetector<T> {
         long windowStart = now - 60_000L;
 
         synchronized (rateLimitLock) {
-            requestTimestamps.removeIf(
-                    timestamp -> timestamp < windowStart
-            );
+            requestTimestamps.removeIf(timestamp -> timestamp < windowStart);
 
-            if (requestTimestamps.size()
-                    >= maxRequestsPerMinute) {
+            if (requestTimestamps.size() >= maxRequestsPerMinute) {
                 return false;
             }
 
@@ -514,11 +511,9 @@ public abstract class AbstractAnomalyDetector<T> {
 
         synchronized (circuitBreakerLock) {
             if (circuitBreakerOpenTime > 0) {
-                long timeoutMillis =
-                        circuitBreakerTimeoutSeconds * 1000L;
+                long timeoutMillis = circuitBreakerTimeoutSeconds * 1000L;
 
-                if (now - circuitBreakerOpenTime
-                        < timeoutMillis) {
+                if (now - circuitBreakerOpenTime < timeoutMillis) {
                     return false;
                 }
 
@@ -544,15 +539,9 @@ public abstract class AbstractAnomalyDetector<T> {
         synchronized (circuitBreakerLock) {
             circuitBreakerFailureCount++;
 
-            if (circuitBreakerFailureCount
-                    >= circuitBreakerFailureThreshold) {
-                circuitBreakerOpenTime =
-                        System.currentTimeMillis();
-
-                logger.warn(
-                        "Circuit breaker opened after {} failures",
-                        circuitBreakerFailureCount
-                );
+            if (circuitBreakerFailureCount >= circuitBreakerFailureThreshold) {
+                circuitBreakerOpenTime = System.currentTimeMillis();
+                logger.warn("Circuit breaker opened after {} failures", circuitBreakerFailureCount);
             }
         }
     }
@@ -587,23 +576,13 @@ public abstract class AbstractAnomalyDetector<T> {
             running = true;
             executor.submit(this::processQueue);
 
-            logger.info(
-                    LocaleUtil.getString(
-                            getConfigPrefix() + "_started"
-                    ),
-                    getConfigString(
-                            getConfigPrefix()
-                                    + ".llm-studio.model"
-                    )
-            );
+            logger.info(LocaleUtil.getString(getConfigPrefix() + "_started"), getConfigString(getConfigPrefix() + ".llm-studio.model"));
         }
     }
 
     public void stop() {
         synchronized (lifecycleLock) {
-            if (stopped) {
-                return;
-            }
+            if (stopped) return;
 
             stopped = true;
             running = false;
@@ -611,10 +590,7 @@ public abstract class AbstractAnomalyDetector<T> {
         }
 
         try {
-            if (!executor.awaitTermination(
-                    5,
-                    TimeUnit.SECONDS
-            )) {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
                 executor.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -622,11 +598,7 @@ public abstract class AbstractAnomalyDetector<T> {
             executor.shutdownNow();
         }
 
-        logger.info(
-                LocaleUtil.getString(
-                        getConfigPrefix() + "_stopped"
-                )
-        );
+        logger.info(LocaleUtil.getString(getConfigPrefix() + "_stopped"));
     }
 
     public boolean isEnabled() {
@@ -655,10 +627,7 @@ public abstract class AbstractAnomalyDetector<T> {
         }
     }
 
-    protected static int getConfigInt(
-            String key,
-            int defaultValue
-    ) {
+    protected static int getConfigInt(String key, int defaultValue) {
         try {
             return ru.galkov.Main.getConfig().getInt(key);
         } catch (Exception e) {
@@ -674,70 +643,41 @@ public abstract class AbstractAnomalyDetector<T> {
         }
     }
 
-    private static int readPositiveInt(
-            String key,
-            int defaultValue,
-            String message
-    ) {
+    private static int readPositiveInt(String key, int defaultValue, String message) {
         try {
             int value = getConfigInt(key);
-
             if (value <= 0) {
-                logger.warn(
-                        "{}; using default {}",
-                        message,
-                        defaultValue
-                );
+                logger.warn("{}; using default {}", message, defaultValue);
                 return defaultValue;
             }
 
             return value;
 
         } catch (Exception e) {
-            logger.warn(
-                    "{}; using default {}",
-                    message,
-                    defaultValue
-            );
+            logger.warn("{}; using default {}", message, defaultValue);
             return defaultValue;
         }
     }
 
-    private static double readDoubleRange(
-            String key,
-            double min,
-            double max,
-            double defaultValue
-    ) {
+    private static double readDoubleRange(String key, double min, double max, double defaultValue) {
         try {
             String value = getConfigString(key);
 
-            if (value == null || value.isBlank()) {
+            if (value.isBlank()) {
                 return defaultValue;
             }
 
             double parsed = Double.parseDouble(value);
 
-            if (!Double.isFinite(parsed)
-                    || parsed < min
-                    || parsed > max) {
-                logger.warn(
-                        "Invalid value for {}: {}; using default {}",
-                        key,
-                        value,
-                        defaultValue
-                );
+            if (!Double.isFinite(parsed) || parsed < min || parsed > max) {
+                logger.warn("Invalid value for {}: {}; using default {}", key, value, defaultValue);
                 return defaultValue;
             }
 
             return parsed;
 
         } catch (Exception e) {
-            logger.warn(
-                    "Cannot parse {}; using default {}",
-                    key,
-                    defaultValue
-            );
+            logger.warn("Cannot parse {}; using default {}", key, defaultValue);
             return defaultValue;
         }
     }

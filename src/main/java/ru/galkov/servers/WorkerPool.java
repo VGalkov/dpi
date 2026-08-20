@@ -4,63 +4,50 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
 
-import java.util.Objects;
+import java.util.Locale;
 import java.util.concurrent.*;
 
 import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- *
- * ✅ П.25: WorkerPool с rejection policy и логированием переполнения
- * ✅ П.58: CallerRunsPolicy — защита от deadlock
- * ✅ П.59: Очистка taskQueue в shutdown()
- * ✅ П.60: Проверка на null в getConfig().get()
  */
 public final class WorkerPool {
     private static final Logger logger = LoggerFactory.getLogger(WorkerPool.class);
 
-    // ✅ П.25: Настройки из application.properties
-    private static final int POOL_SIZE = getConfig().getInt("dns.thread.num");
-    private static final int QUEUE_SIZE = getConfig().getInt("worker-pool.queue-size");
-    // ✅ П.60: Проверка на null
-    private static final String REJECTION_POLICY =
-            Objects.requireNonNull(getConfig().get("worker-pool.rejection-policy"),
-                    "worker-pool.rejection-policy is required");
+    // ✅ П.27: Валидация size — при отсутствии/<=0 берём дефолт,
+    //    вместо NPE/Invalid в static-ините
+    private static final int POOL_SIZE =
+            readPositiveInt("dns.thread.num", 4, "worker pool size");
 
-    // ✅ П.25: ThreadPoolExecutor с лимитированной очередью
+    private static final int QUEUE_SIZE =
+            readPositiveInt("worker-pool.queue-size", 100, "worker queue size");
+
+    // ✅ П.60: Больше НЕ requireNonNull → нет ExceptionInInitializerError.
+    //    Дефолт CALLER_RUNS
+    private static final String REJECTION_POLICY =
+            readRejectionPolicy("worker-pool.rejection-policy", "CALLER_RUNS");
+
     private static final ExecutorService POOL;
     private static final ArrayBlockingQueue<Runnable> taskQueue;
 
     static {
-        // ✅ П.25: Очередь с лимитом
         taskQueue = new ArrayBlockingQueue<>(QUEUE_SIZE);
 
-        // ✅ П.25: Выбор rejection policy
-        RejectedExecutionHandler rejectionHandler;
-        switch (REJECTION_POLICY.toUpperCase()) {
-            case "ABORT":
-                rejectionHandler = new ThreadPoolExecutor.AbortPolicy();
-                break;
-            case "DISCARD":
-                rejectionHandler = new ThreadPoolExecutor.DiscardPolicy();
-                break;
-            case "DISCARD_OLDEST":
-                rejectionHandler = new ThreadPoolExecutor.DiscardOldestPolicy();
-                break;
-            case "CALLER_RUNS":
-            default:
-                // ✅ П.58: CallerRunsPolicy с защитой от deadlock
-                rejectionHandler = (r, executor) -> {
-                    logger.warn(LocaleUtil.getString("worker_pool_queue_full"),
-                            taskQueue.size(), QUEUE_SIZE);
-                    // ✅ П.58: Не выполняем в calling thread — отбрасываем задачу
-                    logger.warn("Task rejected due to full queue, discarding");
-                };
-                break;
-        }
+        RejectedExecutionHandler rejectionHandler = switch (REJECTION_POLICY.toUpperCase(Locale.ROOT)) {
+            case "ABORT" -> new ThreadPoolExecutor.AbortPolicy();
+            case "DISCARD" -> new ThreadPoolExecutor.DiscardPolicy();
+            case "DISCARD_OLDEST" -> new ThreadPoolExecutor.DiscardOldestPolicy();
+            default ->
+                // ✅ П.58: НЕ выполняем в caller-потоке (иначе deadlock при
+                //    заблокированном вызывающем). Отбрасываем + логируем.
+                    (r, executor) -> {
+                        logger.warn(LocaleUtil.getString("worker_pool_queue_full"),
+                                taskQueue.size(), QUEUE_SIZE);
+                        logger.warn("Task rejected due to full queue, discarding");
+                    };
+        };
 
-        // ✅ П.25: ThreadPoolExecutor с лимитированной очередью
         POOL = new ThreadPoolExecutor(
                 POOL_SIZE,
                 POOL_SIZE,
@@ -85,52 +72,72 @@ public final class WorkerPool {
         return POOL;
     }
 
-    /**
-     * ✅ П.25: Метод для получения текущего размера очереди
-     */
-    public static int getQueueSize() {
-        return taskQueue.size();
-    }
-
-    /**
-     * ✅ П.25: Метод для получения количества активных задач
-     */
-    public static int getActiveCount() {
-        if (POOL instanceof ThreadPoolExecutor) {
-            return ((ThreadPoolExecutor) POOL).getActiveCount();
+    public static Future<?> submit(Runnable task) {
+        try {
+            return POOL.submit(task);
+        } catch (RejectedExecutionException e) {
+            logger.warn("Task rejected: queue full ({}), rejection aborted", taskQueue.size());
+            return null;
         }
-        return 0;
     }
 
-    /**
-     * ✅ П.25: Метод для получения общего количества выполненных задач
-     */
-    public static long getCompletedTaskCount() {
-        if (POOL instanceof ThreadPoolExecutor) {
-            return ((ThreadPoolExecutor) POOL).getCompletedTaskCount();
+    public static <T> Future<T> submit(Callable<T> task) {
+        try {
+            return POOL.submit(task);
+        } catch (RejectedExecutionException e) {
+            logger.warn("Task rejected: queue full ({}), rejection aborted", taskQueue.size());
+            return null;
         }
-        return 0;
     }
 
-    /**
-     * ✅ П.59: Очистка taskQueue в shutdown()
-     */
+
     public static void shutdown() {
         logger.info(LocaleUtil.getString("worker_pool_shutdown_initiated"));
         POOL.shutdown();
-        taskQueue.clear();  // ✅ Очистка очереди
+        taskQueue.clear();
         try {
             if (!POOL.awaitTermination(10, TimeUnit.SECONDS)) {
                 logger.warn("WorkerPool did not terminate in time, forcing shutdown");
                 POOL.shutdownNow();
-                taskQueue.clear();  // ✅ Очистка после shutdownNow
+                taskQueue.clear();
             }
             logger.info(LocaleUtil.getString("worker_pool_shutdown_completed"));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             POOL.shutdownNow();
-            taskQueue.clear();  // ✅ Очистка после прерывания
+            taskQueue.clear();
             logger.info(LocaleUtil.getString("worker_pool_shutdown_completed"));
+        }
+    }
+
+    private static int readPositiveInt(String key, int defaultVal, String what) {
+        try {
+            int value = getConfig().getInt(key);
+            if (value > 0) return value;
+            logger.warn("Invalid or missing {} ({}), using default {}", what, key, defaultVal);
+            return defaultVal;
+        } catch (Exception e) {
+            logger.warn("Cannot read {} ({}), using default {}", what, key, defaultVal);
+            return defaultVal;
+        }
+    }
+
+    private static String readRejectionPolicy(String key, String defaultVal) {
+        try {
+            String value = getConfig().get(key);
+            if (value == null || value.isBlank()) {
+                return defaultVal;
+            }
+            String upper = value.toUpperCase(Locale.ROOT);
+            return switch (upper) {
+                case "ABORT", "DISCARD", "DISCARD_OLDEST", "CALLER_RUNS" -> upper;
+                default -> {
+                    logger.warn("Unknown rejection policy {}, using {}", value, defaultVal);
+                    yield defaultVal;
+                }
+            };
+        } catch (Exception e) {
+            return defaultVal;
         }
     }
 }

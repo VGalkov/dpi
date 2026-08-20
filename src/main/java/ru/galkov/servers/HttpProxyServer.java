@@ -11,7 +11,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -25,13 +24,6 @@ import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- *
- * ✅ П.10: Ограничение на activeClientSockets
- * ✅ П.20: Исправление итерации с удалением в cleanupOldSockets()
- * ✅ П.54: Race condition в cleanupOldSockets() — snapshot для итерации
- * ✅ П.55: Race condition в handleAcceptedConnection() — атомарная проверка и добавление
- * ✅ П.56: Memory leak: connectionsByClient — дополнительная очистка
- * ✅ П.57: Проверка на null в handleAcceptedConnection()
  */
 public class HttpProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
@@ -48,6 +40,10 @@ public class HttpProxyServer {
     private final ConcurrentMap<String, AtomicInteger> connectionsByClient = new ConcurrentHashMap<>();
     private final Set<Socket> activeClientSockets = ConcurrentHashMap.newKeySet();
 
+    // ✅ п.11: отслеживаем последнюю активность сокета (для удаления только idle)
+    private final ConcurrentMap<Socket, Long> socketActivity = new ConcurrentHashMap<>();
+    private final long idleCleanupThresholdMillis;
+
     private final Object lifecycleLock = new Object();
     private volatile boolean running;
     private volatile ServerSocket serverSocket;
@@ -59,8 +55,16 @@ public class HttpProxyServer {
         this.httpAnomalyDetector = httpAnomalyDetector;
         this.maxConnections = getConfig().getInt("proxy.max-connections");
         this.maxConnectionsPerClient = getConfig().getInt("proxy.max-connections-per-client");
-        this.maxActiveSockets = maxConnections * 2;
 
+        // ✅ п.11 (доп.): множитель maxActiveSockets из конфига вместо хардкода *2
+        int multiplier = getConfig().getInt("proxy.max-active-sockets-multiplier");
+        this.maxActiveSockets = maxConnections * (multiplier > 0 ? multiplier : 2);
+
+        // ✅ п.11: порог "idle" для очистки (секунды)
+        int idleSec = getConfig().getInt("proxy.idle-socket-timeout-seconds");
+        this.idleCleanupThresholdMillis = (idleSec > 0 ? idleSec : 30) * 1000L;
+
+        // ✅ п.40: валидация в конструкторе (уже была)
         if (maxConnections <= 0) throw new IllegalArgumentException("proxy.max-connections > 0");
         if (maxConnectionsPerClient <= 0) throw new IllegalArgumentException("proxy.max-connections-per-client > 0");
         if (maxConnectionsPerClient > maxConnections) throw new IllegalArgumentException("max-connections-per-client <= max-connections");
@@ -93,6 +97,8 @@ public class HttpProxyServer {
             closeQuietly(serverSocket);
             activeClientSockets.forEach(this::closeQuietly);
             activeClientSockets.clear();
+            // ✅ п.11: очистка карты активности при остановке
+            socketActivity.clear();
         }
         joinServerThread();
         logger.info("Остановка HTTP proxy завершена: port={}", port);
@@ -134,14 +140,15 @@ public class HttpProxyServer {
     }
 
     /**
-     * ✅ П.10: Ограничение на activeClientSockets
-     * ✅ П.55: Атомарная проверка и добавление
+     * ✅ П.10: Ограничение activeClientSockets
+     * ✅ П.55: Атомарная проверка/добавление (оставлено, т.к. выбрано)
      * ✅ П.57: Проверка на null
+     * ✅ п.11: фиксация активности при принятии
      */
     private void handleAcceptedConnection(Socket clientSocket) {
         String clientIp = clientSocket.getInetAddress().getHostAddress();
 
-        // ✅ П.55: Атомарная проверка и добавление
+        // ✅ П.55: атомарная проверка и добавление
         if (!activeClientSockets.add(clientSocket)) {
             logger.warn(LocaleUtil.getString("http_proxy_max_sockets_reached"), activeClientSockets.size(), maxActiveSockets);
             closeQuietly(clientSocket);
@@ -149,9 +156,12 @@ public class HttpProxyServer {
             return;
         }
 
-        // ✅ П.55: Пост-проверка на превышение лимита
+        // ✅ п.11: фиксируем время принятия как "активность"
+        socketActivity.put(clientSocket, System.currentTimeMillis());
+
         if (activeClientSockets.size() > maxActiveSockets) {
             activeClientSockets.remove(clientSocket);
+            socketActivity.remove(clientSocket);
             logger.warn(LocaleUtil.getString("http_proxy_max_sockets_reached"), activeClientSockets.size(), maxActiveSockets);
             closeQuietly(clientSocket);
             cleanupOldSockets();
@@ -160,15 +170,16 @@ public class HttpProxyServer {
 
         if (!connectionSlots.tryAcquire()) {
             activeClientSockets.remove(clientSocket);
+            socketActivity.remove(clientSocket);
             logger.warn("PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS", clientIp);
             closeQuietly(clientSocket);
             return;
         }
 
         AtomicInteger clientConnections = connectionsByClient.computeIfAbsent(clientIp, k -> new AtomicInteger());
-        // ✅ П.57: Проверка на null
         if (clientConnections == null) {
             activeClientSockets.remove(clientSocket);
+            socketActivity.remove(clientSocket);
             connectionSlots.release();
             logger.error("computeIfAbsent вернул null для client={}", clientIp);
             closeQuietly(clientSocket);
@@ -179,6 +190,7 @@ public class HttpProxyServer {
 
         if (activeForClient > maxConnectionsPerClient) {
             activeClientSockets.remove(clientSocket);
+            socketActivity.remove(clientSocket);
             releaseConnectionSlot(clientIp, clientConnections);
             logger.warn("PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS_PER_CLIENT", clientIp);
             closeQuietly(clientSocket);
@@ -193,11 +205,13 @@ public class HttpProxyServer {
                     new ProxyHandler(clientSocket, clientIp, blacklist, httpAnomalyDetector).run();
                 } finally {
                     activeClientSockets.remove(clientSocket);
+                    socketActivity.remove(clientSocket);
                     releaseConnectionSlot(clientIp, clientConnections);
                 }
             });
         } catch (RuntimeException e) {
             activeClientSockets.remove(clientSocket);
+            socketActivity.remove(clientSocket);
             releaseConnectionSlot(clientIp, clientConnections);
             closeQuietly(clientSocket);
             logger.error("Не удалось передать соединение в worker pool: client={}", clientIp, e);
@@ -207,7 +221,8 @@ public class HttpProxyServer {
     /**
      * ✅ П.10: Очистка старых сокетов при переполнении
      * ✅ П.20: Исправление итерации с удалением
-     * ✅ П.54: Race condition — snapshot для итерации
+     * ✅ П.54: Snapshot для итерации
+     * ✅ п.11: закрываем ТОЛЬКО idle-сокеты (без активности дольше порога)
      */
     private void cleanupOldSockets() {
         int currentSize = activeClientSockets.size();
@@ -215,21 +230,28 @@ public class HttpProxyServer {
             return;
         }
 
-        // ✅ П.54: Копируем в список для безопасной итерации
         int toRemoveCount = getConfig().getInt("proxy.cleanup-sockets-per-iteration");
+        long now = System.currentTimeMillis();
         int removed = 0;
 
-        List<Socket> snapshot = new ArrayList<>(toRemoveCount);
-        Iterator<Socket> iterator = activeClientSockets.iterator();
-        while (iterator.hasNext() && snapshot.size() < toRemoveCount) {
-            snapshot.add(iterator.next());
+        // ✅ п.11: отбираем только idle сокеты
+        List<Socket> idleSockets = new ArrayList<>(toRemoveCount);
+        for (Socket socket : activeClientSockets) {
+            if (idleSockets.size() >= toRemoveCount) break;
+
+            Long lastActivity = socketActivity.get(socket);
+            if (lastActivity == null
+                    || (now - lastActivity) > idleCleanupThresholdMillis) {
+                idleSockets.add(socket);
+            }
         }
 
-        for (Socket socket : snapshot) {
+        for (Socket socket : idleSockets) {
             if (socket != null && !socket.isClosed()) {
                 closeQuietly(socket);
             }
             activeClientSockets.remove(socket);
+            socketActivity.remove(socket);
             removed++;
         }
 
@@ -241,17 +263,12 @@ public class HttpProxyServer {
     }
 
     /**
-     * ✅ П.56: Дополнительная очистка connectionsByClient
+     * ✅ П.56: Дополнительная очистка connectionsByClient (упрощена)
      */
     private void releaseConnectionSlot(String clientIp, AtomicInteger clientConnections) {
         int remaining = clientConnections.decrementAndGet();
         if (remaining <= 0) {
             connectionsByClient.remove(clientIp, clientConnections);
-            // ✅ П.56: Дополнительная очистка если всё ещё есть
-            AtomicInteger actual = connectionsByClient.get(clientIp);
-            if (actual != null && actual.get() <= 0) {
-                connectionsByClient.remove(clientIp, actual);
-            }
         }
         connectionSlots.release();
         logger.debug("PROXY_CONNECTION_CLOSE client={} activeForClient={}", clientIp, Math.max(remaining, 0));

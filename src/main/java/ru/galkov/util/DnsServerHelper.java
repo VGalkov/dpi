@@ -2,20 +2,8 @@ package ru.galkov.util;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.xbill.DNS.AAAARecord;
-import org.xbill.DNS.ARecord;
-import org.xbill.DNS.CNAMERecord;
-import org.xbill.DNS.DNAMERecord;
-import org.xbill.DNS.Flags;
-import org.xbill.DNS.MXRecord;
-import org.xbill.DNS.Message;
-import org.xbill.DNS.NSRecord;
-import org.xbill.DNS.Name;
-import org.xbill.DNS.PTRRecord;
-import org.xbill.DNS.Rcode;
+import org.xbill.DNS.*;
 import org.xbill.DNS.Record;
-import org.xbill.DNS.SRVRecord;
-import org.xbill.DNS.Section;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -23,56 +11,22 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static ru.galkov.Main.getConfig;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class DnsServerHelper {
 
     private static final Logger logger = LoggerFactory.getLogger(DnsServerHelper.class);
 
-    private static final boolean QNAME_CACHE_ENABLED =
-            getConfig().getBoolean("dns.qname-cache.enabled");
-
-    private static final int QNAME_CACHE_MAX_SIZE =
-            getPositiveInt("dns.qname-cache.max-size", 10_000);
-
-    private static final long QNAME_CACHE_TTL_MILLIS =
-            getPositiveLong(
-                    "dns.qname-cache.ttl-seconds",
-                    300L
-            ) * 1000L;
-
-    private static final Map<String, CachedQname> qnameCache =
-            QNAME_CACHE_ENABLED ? new ConcurrentHashMap<>() : null;
-
-    private static final Object qnameCacheLock = new Object();
-
-    private static final class CachedQname {
-        private final String qname;
-        private final long timestamp;
-
-        private CachedQname(String qname) {
-            this.qname = qname;
-            this.timestamp = System.currentTimeMillis();
-        }
-
-        private boolean isExpired(long now) {
-            return now - timestamp > QNAME_CACHE_TTL_MILLIS;
-        }
-    }
+    // ✅ П.6: бесполезный qname-кэш (ключ == значение) удалён полностью.
+    //        Убраны: QNAME_CACHE_ENABLED, QNAME_CACHE_MAX_SIZE, QNAME_CACHE_TTL_MILLIS,
+    //        qnameCache, qnameCacheLock, CachedQname, removeExpiredQnames.
 
     public static final class DnsRateLimiter {
         private final boolean enabled;
@@ -80,6 +34,7 @@ public final class DnsServerHelper {
         private final int burst;
         private final long clientIdleNanos;
         private final ConcurrentHashMap<String, TokenBucket> buckets;
+        // ✅ П.46 исключён: requestCounter оставлен — он триггерит быструю очистку
         private final AtomicLong requestCounter = new AtomicLong();
         private final Object cleanupLock = new Object();
 
@@ -290,14 +245,6 @@ public final class DnsServerHelper {
                 removeIdleBuckets(now);
             }
         }
-
-        public int getRequestsPerSecond() {
-            return requestsPerSecond;
-        }
-
-        public int getBurst() {
-            return burst;
-        }
     }
 
     private static final class TokenBucket {
@@ -360,22 +307,6 @@ public final class DnsServerHelper {
         );
     }
 
-    public static void shutdownWorkerPool(ExecutorService pool) {
-        if (pool == null) {
-            return;
-        }
-
-        pool.shutdown();
-
-        try {
-            if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
-                pool.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            pool.shutdownNow();
-        }
-    }
 
     public static void closeQuietly(DatagramSocket socket) {
         if (socket != null && !socket.isClosed()) {
@@ -418,57 +349,12 @@ public final class DnsServerHelper {
         };
     }
 
+    // ✅ П.6: getQuestionName упрощён — бесполезный кэш удалён
     public static String getQuestionName(Message message) {
-        if (message == null) {
-            return "unknown";
-        }
-
+        if (message == null) return "unknown";
         Record question = message.getQuestion();
-
-        if (question == null || question.getName() == null) {
-            return "unknown";
-        }
-
-        String qname = question.getName().toString();
-
-        if (!QNAME_CACHE_ENABLED) {
-            return qname;
-        }
-
-        long now = System.currentTimeMillis();
-
-        synchronized (qnameCacheLock) {
-            CachedQname cached = qnameCache.get(qname);
-
-            if (cached != null && !cached.isExpired(now)) {
-                return cached.qname;
-            }
-
-            qnameCache.put(qname, new CachedQname(qname));
-
-            if (qnameCache.size() > QNAME_CACHE_MAX_SIZE) {
-                removeExpiredQnames(now);
-
-                while (qnameCache.size() > QNAME_CACHE_MAX_SIZE) {
-                    String firstKey = qnameCache.keySet()
-                            .iterator()
-                            .next();
-
-                    qnameCache.remove(firstKey);
-                }
-            }
-        }
-
-        return qname;
-    }
-
-    private static void removeExpiredQnames(long now) {
-        for (Map.Entry<String, CachedQname> entry
-                : qnameCache.entrySet()) {
-            if (entry.getValue().isExpired(now)) {
-                qnameCache.remove(entry.getKey(), entry.getValue());
-            }
-        }
+        if (question == null || question.getName() == null) return "unknown";
+        return question.getName().toString();
     }
 
     public static String extractIpv4FromPtrQuery(String ptrName) {
@@ -627,6 +513,7 @@ public final class DnsServerHelper {
             return null;
         }
 
+        // ✅ П.28 исключён: уже один проход по секциям
         int[] sections = {
                 Section.ANSWER,
                 Section.AUTHORITY,
@@ -806,33 +693,9 @@ public final class DnsServerHelper {
         output.flush();
     }
 
-    public static DatagramPacket getFormattedReply(
-            Message response,
-            DatagramPacket requestPacket
-    ) {
-        if (response == null || requestPacket == null) {
-            throw new IllegalArgumentException(
-                    "response and requestPacket are required"
-            );
-        }
-
-        byte[] responseData = response.toWire();
-
-        return new DatagramPacket(
-                responseData,
-                responseData.length,
-                requestPacket.getAddress(),
-                requestPacket.getPort()
-        );
-    }
 
     private static int getPositiveInt(String key, int defaultValue) {
         int value = getConfig().getInt(key);
-        return value > 0 ? value : defaultValue;
-    }
-
-    private static long getPositiveLong(String key, long defaultValue) {
-        long value = getConfig().getLong(key);
         return value > 0 ? value : defaultValue;
     }
 

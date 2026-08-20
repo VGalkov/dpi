@@ -77,6 +77,9 @@ public class LocaleUtil {
         }
     }
 
+    /**
+     * ✅ Рекомендация: быстрая подстановка {} (и {0}/{1}) вместо String.format
+     */
     public static String getString(String key, Object... args) {
         if (messages == null) {
             synchronized (loadLock) {
@@ -93,12 +96,59 @@ public class LocaleUtil {
         if (cached != null) return cached;
 
         try {
-            String value = String.format(messages.getString(key), args);
+            String value = substitute(messages.getString(key), args);
             messagesCache.put(cacheKey, value);
             return value;
         } catch (Exception e) {
             return key;
         }
+    }
+
+    /**
+     * Подстановка плейсхолдеров без String.format.
+     * Поддерживает и {} (автонумерация), и {0}/{1} (явная нумерация).
+     */
+    private static String substitute(String template, Object[] args) {
+        if (template == null || args == null || args.length == 0) {
+            return template;
+        }
+
+        StringBuilder sb = new StringBuilder(template.length() + 16);
+        int i = 0;
+        int n = template.length();
+
+        while (i < n) {
+            char c = template.charAt(i);
+
+            if (c == '{' && i + 1 < n && template.charAt(i + 1) == '}') {
+                appendArg(sb, args, 0);
+                i += 2;
+                continue;
+            }
+
+            if (c == '{' && i + 2 < n
+                    && Character.isDigit(template.charAt(i + 1))
+                    && template.charAt(i + 2) == '}') {
+                int index = template.charAt(i + 1) - '0';
+                appendArg(sb, args, index);
+                i += 3;
+                continue;
+            }
+
+            sb.append(c);
+            i++;
+        }
+
+        return sb.toString();
+    }
+
+    private static void appendArg(StringBuilder sb, Object[] args, int index) {
+        if (index >= args.length) {
+            sb.append("{}");
+            return;
+        }
+        Object arg = args[index];
+        sb.append(arg != null ? arg : "null");
     }
 
     private static class Utf8Control extends ResourceBundle.Control {

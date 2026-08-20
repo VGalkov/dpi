@@ -11,6 +11,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
@@ -29,12 +30,17 @@ public abstract class AbstractBlacklistSource implements BlacklistSource {
         return rules;
     }
 
+    // ✅ Защита: источник, способный вернуть null/пустое значение — отсекается
     protected BlacklistRule parseLine(String line, String sourceName) {
         if (line == null) return null;
         String value = line.trim();
         if (value.isEmpty() || value.startsWith("#") || value.startsWith("!")) return null;
+
         int commentIndex = value.indexOf('#');
         if (commentIndex >= 0) value = value.substring(0, commentIndex).trim();
-        return value.isEmpty() ? null : new BlacklistRule(BlacklistRule.RuleType.DOMAIN, value, sourceName, null, null);
+
+        if (value.isEmpty()) return null;
+
+        return new BlacklistRule(BlacklistRule.RuleType.DOMAIN, value, sourceName, null, null);
     }
 }

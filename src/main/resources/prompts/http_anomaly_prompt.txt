@@ -143,3 +143,5 @@ IP-хост или TLD .xyz, .top, .tk, .club, .work сами по себе не
   "reason": "краткое объяснение на русском языке, максимум 2 предложения",
   "recommendedActions": ["NONE"]
 }
+
+Допустимые значения recommendedActions: NONE, LOG_ONLY, BLOCK_REQUEST.
