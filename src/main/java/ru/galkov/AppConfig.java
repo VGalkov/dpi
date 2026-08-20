@@ -129,7 +129,7 @@ public final class AppConfig {
                 "proxy.max-header-bytes", 1024, 1048576, 32768,
                 "config_validation_proxy_max_header_invalid");
         validateLongRange(
-                "proxy.max-body-bytes", 0, 1073741824, 10485760,
+                "proxy.max-body-bytes", 0, 10995116277760L, 10485760L,
                 "config_validation_proxy_max_body_invalid");
         validateIntRange(
                 "proxy.connect-timeout-millis", 1000, 60000, 10000,
@@ -143,8 +143,8 @@ public final class AppConfig {
                 1,
                 getInt("proxy.max-connections"),
                 20,
-                "config_validation_proxy_max_conn_client_invalid",
-                "proxy.max-connections");
+                "config_validation_proxy_max_conn_client_invalid"
+        );
 
         validateIntRange(
                 "dns.rate-limit.requests-per-second", 1, 10000, 100,
@@ -252,7 +252,7 @@ public final class AppConfig {
 
     private void validateDependentIntRange(
             String key, int min, int maxFromOtherKey, int defaultValue,
-            String errorKey, String dependencyKey) {
+            String errorKey) {
         try {
             int value = getInt(key);
             if (value < min || value > maxFromOtherKey) {
@@ -414,7 +414,10 @@ public final class AppConfig {
             return cached;
         }
 
-        int value = Integer.parseInt(get(key));
+        String raw = get(key);
+        String cleaned = trimComment(raw);
+        int value = Integer.parseInt(cleaned);
+
         if (intCache.size() < INT_CACHE_MAX) {
             intCache.put(key, value);
         }
@@ -427,7 +430,10 @@ public final class AppConfig {
             return cached;
         }
 
-        long value = Long.parseLong(get(key));
+        String raw = get(key);
+        String cleaned = trimComment(raw);
+        long value = Long.parseLong(cleaned);
+
         if (longCache.size() < LONG_CACHE_MAX) {
             longCache.put(key, value);
         }
@@ -453,10 +459,25 @@ public final class AppConfig {
             return cached;
         }
 
-        short value = Short.parseShort(get(key));
+        String raw = get(key);
+        String cleaned = trimComment(raw);
+        short value = Short.parseShort(cleaned);
+
         if (shortCache.size() < SHORT_CACHE_MAX) {
             shortCache.put(key, value);
         }
         return value;
     }
+
+    private static String trimComment(String value) {
+        if (value == null) {
+            return null;
+        }
+        int idx = value.indexOf('#');
+        if (idx >= 0) {
+            value = value.substring(0, idx);
+        }
+        return value.trim();
+    }
+
 }
