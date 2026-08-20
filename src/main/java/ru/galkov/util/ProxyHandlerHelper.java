@@ -11,10 +11,6 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- *
- * ✅ П.61: Memory leak: pipe() — закрытие потоков в finally
- * ✅ П.62: DoS уязвимость: readLine() — лимит на чтение
- * ✅ П.63: Проверка на null в relayChunked(), relayFixed(), relayUntilEof()
  */
 public final class ProxyHandlerHelper {
 
@@ -28,31 +24,72 @@ public final class ProxyHandlerHelper {
         int origTimeout = socket.getSoTimeout();
         try {
             socket.setSoTimeout(Math.min(clientReadTimeout, 10000));
+
+            // 1. Заголовок первой записи (5 байт)
             byte[] hdr = readExactly(in, 5);
             if (hdr == null) return null;
-            int ct = unsignedByte(hdr[0]), len = unsignedShort(hdr[3], hdr[4]);
-            if (len < 1 || len > MAX_TLS_RECORD) return hdr;
-            byte[] payload = readExactly(in, len);
+
+            int contentType = unsignedByte(hdr[0]);
+            int recordLen  = unsignedShort(hdr[3], hdr[4]);
+
+            // Не TLS-запись или пустая — вернуть как есть
+            if (recordLen < 1 || recordLen > MAX_TLS_RECORD) return hdr;
+
+            // 2. Полезная нагрузка первой записи
+            byte[] payload = readExactly(in, recordLen);
             if (payload == null) return hdr;
-            ByteArrayOutputStream res = new ByteArrayOutputStream(5 + len);
-            res.write(hdr); res.write(payload);
-            if (ct != 22) return res.toByteArray();
-            int hsLen = getTlsHandshakeLength(payload);
-            if (hsLen < 0 || hsLen > MAX_TLS_HELLO) return res.toByteArray();
-            int need = 4 + hsLen, have = payload.length;
-            while (have < need) {
-                byte[] next = readExactly(in, 5);
-                if (next == null) break;
-                int nct = unsignedByte(next[0]), nlen = unsignedShort(next[3], next[4]);
-                if (nlen < 1 || nlen > MAX_TLS_RECORD) { res.write(next); break; }
-                byte[] np = readExactly(in, nlen);
-                res.write(next);
-                if (np == null) break;
-                res.write(np);
-                if (nct != 22) break;
-                have += np.length;
-                if (res.size() > MAX_TLS_HELLO + 40) break;
+
+            ByteArrayOutputStream res = new ByteArrayOutputStream(5 + recordLen);
+            res.write(hdr);
+            res.write(payload);
+
+            // 3. Хендшейк может занимать несколько записей — дочитываем
+            if (contentType != 22) {
+                return res.toByteArray();
             }
+
+            int handshakeLen = getTlsHandshakeLength(payload);
+            if (handshakeLen < 0 || handshakeLen > MAX_TLS_HELLO) {
+                return res.toByteArray();
+            }
+
+            // need — полный размер сообщения ClientHello
+            int need = 4 + handshakeLen;
+            // have — сколько байт рукопожатия уже накоплено
+            int have = payload.length;
+
+            while (have < need) {
+                // Запись может выйти за MAX_TLS_HELLO — защита от бесконечного чтения
+                if (res.size() > MAX_TLS_HELLO + 40) break;
+
+                byte[] nextHdr = readExactly(in, 5);
+                if (nextHdr == null) break;
+
+                int nextContentType = unsignedByte(nextHdr[0]);
+                int nextLen = unsignedShort(nextHdr[3], nextHdr[4]);
+
+                if (nextLen < 1 || nextLen > MAX_TLS_RECORD) {
+                    res.write(nextHdr);
+                    break;
+                }
+
+                byte[] nextPayload = readExactly(in, nextLen);
+                res.write(nextHdr);
+
+                if (nextPayload == null) break;
+
+                res.write(nextPayload);
+
+                // Накапливаем только хендшейк-нагрузку
+                if (nextContentType == 22) {
+                    have += nextPayload.length;
+                    if (have >= need) break;
+                } else {
+                    // Не-хендшейк запись дальше не нужна для SNI
+                    break;
+                }
+            }
+
             return res.toByteArray();
         } catch (SocketTimeoutException e) {
             return null;
@@ -69,7 +106,7 @@ public final class ProxyHandlerHelper {
             while (off + 5 <= data.length) {
                 int ct = unsignedByte(data[off]), len = unsignedShort(data[off + 3], data[off + 4]);
                 off += 5;
-                if (len < 0 || off + len > data.length) return null;
+                if ( len < 0 || off + len > data.length) return null;
                 if (ct == 22) hs.write(data, off, len);
                 off += len;
             }
@@ -217,18 +254,39 @@ public final class ProxyHandlerHelper {
         }
     }
 
+    /**
+     * ✅ П.3: Устранение зависания туннеля.
+     * Когда один поток завершается (EOF на своей стороне), закрываем
+     * противоположный сокет, чтобы второй поток увидел EOF и завершился.
+     * join() с таймаутом — страховка от вечного ожидания.
+     */
     public static void runTunnel(Socket client, Socket remote) {
         Thread t1 = new Thread(() -> pipe(client, remote), "Proxy-Tunnel-ClientToRemote");
         Thread t2 = new Thread(() -> pipe(remote, client), "Proxy-Tunnel-RemoteToClient");
         t1.setDaemon(true); t2.setDaemon(true);
         t1.start(); t2.start();
-        try { t1.join(); t2.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        finally { closeQuietly(client); closeQuietly(remote); }
+
+        try {
+            t1.join();
+            // t1 завершился (client→remote кончился) → закрываем remote,
+            // чтобы t2 (remote→client) увидел EOF и не висел вечно
+            if (t1.isAlive() == false) {
+                closeQuietly(remote);
+            }
+            t2.join(30000);   // страховка: не ждём вечно
+            if (t2.isAlive()) {
+                t2.interrupt();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            t1.interrupt();
+            t2.interrupt();
+        } finally {
+            closeQuietly(client);
+            closeQuietly(remote);
+        }
     }
 
-    /**
-     * ✅ П.61: Закрытие потоков в finally
-     */
     private static void pipe(Socket src, Socket dst) {
         if (src == null || dst == null) return;
         byte[] buf = new byte[8192];
@@ -238,22 +296,28 @@ public final class ProxyHandlerHelper {
             in = src.getInputStream();
             out = dst.getOutputStream();
             int len;
-            while ((len = in.read(buf)) != -1) { out.write(buf, 0, len); out.flush(); }
-        } catch (IOException e) {  }
-        finally {
-            // ✅ Закрываем потоки
+            while ((len = in.read(buf)) != -1) {
+                out.write(buf, 0, len);
+                out.flush();
+            }
+            // src достиг EOF → подскажем dst, что больше данных не будет.
+            // Это заставит противоположный pipe() завершиться.
+            try {
+                dst.shutdownOutput();
+            } catch (IOException ignored) {
+            }
+        } catch (IOException e) {
+            // игнорируем — нормальное завершение при закрытии сокета
+        } finally {
             if (in != null) { try { in.close(); } catch (IOException ignored) {} }
             if (out != null) { try { out.close(); } catch (IOException ignored) {} }
         }
     }
 
-    /**
-     * ✅ П.62: Лимит на чтение
-     */
     public static String readLine(InputStream in, int max) throws IOException {
         StringBuilder sb = null;
         int b;
-        int total = 0;  // ✅ Счётчик прочитанных байт
+        int total = 0;
         while ((b = in.read()) != -1) {
             if (b == '\n') {
                 if (sb != null && !sb.isEmpty() && sb.charAt(sb.length() - 1) == '\r')
@@ -264,7 +328,7 @@ public final class ProxyHandlerHelper {
             if (sb.length() >= max) throw new RequestTooLargeException("Line exceeds " + max + " bytes");
             sb.append((char) b);
             total++;
-            if (total > max * 2) {  // ✅ Защита от бесконечного чтения
+            if (total > max * 2) {
                 throw new RequestTooLargeException("Line exceeds " + max + " bytes");
             }
         }
@@ -276,11 +340,8 @@ public final class ProxyHandlerHelper {
         out.write('\r'); out.write('\n');
     }
 
-    /**
-     * ✅ П.63: Проверка на null
-     */
     public static void relayChunked(InputStream in, OutputStream out, long maxBodyBytes) throws IOException {
-        if (in == null || out == null) {  // ✅ Проверка на null
+        if (in == null || out == null) {
             throw new IllegalArgumentException("in and out must not be null");
         }
         byte[] buf = new byte[8192];
@@ -306,7 +367,7 @@ public final class ProxyHandlerHelper {
      * ✅ П.63: Проверка на null
      */
     public static void relayFixed(InputStream in, OutputStream out, long len) throws IOException {
-        if (in == null || out == null) {  // ✅ Проверка на null
+        if (in == null || out == null) {
             throw new IllegalArgumentException("in and out must not be null");
         }
         byte[] buf = new byte[8192];
@@ -318,7 +379,7 @@ public final class ProxyHandlerHelper {
      * ✅ П.63: Проверка на null
      */
     public static void relayUntilEof(InputStream in, OutputStream out) throws IOException {
-        if (in == null || out == null) {  // ✅ Проверка на null
+        if (in == null || out == null) {
             throw new IllegalArgumentException("in and out must not be null");
         }
         byte[] buf = new byte[8192];

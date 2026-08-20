@@ -15,6 +15,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class AppConfig {
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
     private static final String DEFAULT_PATH = "application.properties";
+
+    private static final int INT_CACHE_MAX = 512;
+    private static final int LONG_CACHE_MAX = 512;
+    private static final int BOOLEAN_CACHE_MAX = 256;
+    private static final int LIST_CACHE_MAX = 128;
+    private static final int SHORT_CACHE_MAX = 128;
+
     private final Properties props;
 
     private final Map<String, Integer> intCache = new ConcurrentHashMap<>(256);
@@ -32,7 +39,7 @@ public final class AppConfig {
     }
 
     private static class Holder {
-        private static AppConfig INSTANCE;
+        private static volatile AppConfig INSTANCE;
     }
 
     public static synchronized AppConfig getInstance() throws IOException {
@@ -106,62 +113,30 @@ public final class AppConfig {
         logger.info(LocaleUtil.getString("config_validation_started"));
 
         validateIntRange(
-                "dns.local.port",
-                1,
-                65535,
-                53,
-                "config_validation_dns_port_invalid"
-        );
+                "dns.local.port", 1, 65535, 53,
+                "config_validation_dns_port_invalid");
         validateIntRange(
-                "dns.thread.num",
-                1,
-                1000,
-                50,
-                "config_validation_dns_threads_invalid"
-        );
+                "dns.thread.num", 1, 1000, 50,
+                "config_validation_dns_threads_invalid");
         validateIntRange(
-                "dns.timeout",
-                1,
-                300,
-                3,
-                "config_validation_dns_timeout_invalid"
-        );
+                "dns.timeout", 1, 300, 3,
+                "config_validation_dns_timeout_invalid");
 
         validateIntRange(
-                "proxy.local.port",
-                1,
-                65535,
-                8888,
-                "config_validation_proxy_port_invalid"
-        );
+                "proxy.local.port", 1, 65535, 8888,
+                "config_validation_proxy_port_invalid");
         validateIntRange(
-                "proxy.max-header-bytes",
-                1024,
-                1048576,
-                32768,
-                "config_validation_proxy_max_header_invalid"
-        );
+                "proxy.max-header-bytes", 1024, 1048576, 32768,
+                "config_validation_proxy_max_header_invalid");
         validateLongRange(
-                "proxy.max-body-bytes",
-                0,
-                1073741824,
-                10485760,
-                "config_validation_proxy_max_body_invalid"
-        );
+                "proxy.max-body-bytes", 0, 1073741824, 10485760,
+                "config_validation_proxy_max_body_invalid");
         validateIntRange(
-                "proxy.connect-timeout-millis",
-                1000,
-                60000,
-                10000,
-                "config_validation_proxy_connect_timeout_invalid"
-        );
+                "proxy.connect-timeout-millis", 1000, 60000, 10000,
+                "config_validation_proxy_connect_timeout_invalid");
         validateIntRange(
-                "proxy.max-connections",
-                1,
-                10000,
-                500,
-                "config_validation_proxy_max_conn_invalid"
-        );
+                "proxy.max-connections", 1, 10000, 500,
+                "config_validation_proxy_max_conn_invalid");
 
         validateDependentIntRange(
                 "proxy.max-connections-per-client",
@@ -169,60 +144,31 @@ public final class AppConfig {
                 getInt("proxy.max-connections"),
                 20,
                 "config_validation_proxy_max_conn_client_invalid",
-                "proxy.max-connections"
-        );
+                "proxy.max-connections");
 
         validateIntRange(
-                "dns.rate-limit.requests-per-second",
-                1,
-                10000,
-                100,
-                "config_validation_dns_rate_limit_rps_invalid"
-        );
+                "dns.rate-limit.requests-per-second", 1, 10000, 100,
+                "config_validation_dns_rate_limit_rps_invalid");
         validateIntRange(
-                "dns.rate-limit.burst",
-                1,
-                20000,
-                200,
-                "config_validation_dns_rate_limit_burst_invalid"
-        );
+                "dns.rate-limit.burst", 1, 20000, 200,
+                "config_validation_dns_rate_limit_burst_invalid");
         validateIntRange(
-                "dns.rate-limit.client-idle-seconds",
-                60,
-                3600,
-                300,
-                "config_validation_dns_rate_limit_idle_invalid"
-        );
+                "dns.rate-limit.client-idle-seconds", 60, 3600, 300,
+                "config_validation_dns_rate_limit_idle_invalid");
 
         validateDoubleRange(
-                "dns.anomaly-detector.trust-threshold",
-                0.0,
-                1.0,
-                0.7,
-                "config_validation_dns_trust_threshold_invalid"
-        );
+                "dns.anomaly-detector.trust-threshold", 0.0, 1.0, 0.7,
+                "config_validation_dns_trust_threshold_invalid");
         validateIntRange(
-                "dns.anomaly-detector.processed-ttl-seconds",
-                60,
-                86400,
-                60,
-                "config_validation_dns_ttl_invalid"
-        );
+                "dns.anomaly-detector.processed-ttl-seconds", 60, 86400, 60,
+                "config_validation_dns_ttl_invalid");
         validateIntRange(
-                "http.anomaly-detector.processed-ttl-seconds",
-                60,
-                86400,
-                3600,
-                "config_validation_http_ttl_invalid"
-        );
+                "http.anomaly-detector.processed-ttl-seconds", 60, 86400, 3600,
+                "config_validation_http_ttl_invalid");
 
         validateIntRange(
-                "blacklist.reload.interval-seconds",
-                300,
-                86400,
-                36000,
-                "config_validation_blacklist_reload_invalid"
-        );
+                "blacklist.reload.interval-seconds", 300, 86400, 36000,
+                "config_validation_blacklist_reload_invalid");
 
         validateSecuritySettings();
 
@@ -239,8 +185,7 @@ public final class AppConfig {
             logger.warn(
                     "⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: {}. "
                             + "Это может быть опасно в production",
-                    dnsLlmUrl
-            );
+                    dnsLlmUrl);
         }
 
         String httpLlmUrl = getOptional("http.anomaly-detector.llm-studio.url");
@@ -250,8 +195,7 @@ public final class AppConfig {
             logger.warn(
                     "⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: {}. "
                             + "Это может быть опасно в production",
-                    httpLlmUrl
-            );
+                    httpLlmUrl);
         }
 
         String adguardUrl = getOptional("blacklist.adguard.url");
@@ -259,8 +203,7 @@ public final class AppConfig {
             logger.warn(
                     "⚠️ SECURITY WARNING: AdGuard blacklist URL использует HTTP (не HTTPS): {}. "
                             + "Возможна MITM атака",
-                    adguardUrl
-            );
+                    adguardUrl);
         }
 
         String mvpsUrl = getOptional("blacklist.mvps_hosts.url");
@@ -268,8 +211,7 @@ public final class AppConfig {
             logger.warn(
                     "⚠️ SECURITY WARNING: MVPS hosts URL использует HTTP (не HTTPS): {}. "
                             + "Возможна MITM атака",
-                    mvpsUrl
-            );
+                    mvpsUrl);
         }
 
         int dnsThreads = getInt("dns.thread.num");
@@ -277,8 +219,7 @@ public final class AppConfig {
             logger.warn(
                     "⚠️ PERFORMANCE WARNING: dns.thread.num = {} может быть слишком высоким. "
                             + "Рекомендуется 50-150",
-                    dnsThreads
-            );
+                    dnsThreads);
         }
 
         int maxConnections = getInt("proxy.max-connections");
@@ -289,24 +230,16 @@ public final class AppConfig {
                             + "слишком высок относительно max-connections ({}). "
                             + "Рекомендуется <= 10% от max-connections",
                     maxPerClient,
-                    maxConnections
-            );
+                    maxConnections);
         }
     }
 
     private void validateIntRange(
-            String key,
-            int min,
-            int max,
-            int defaultValue,
-            String errorKey
-    ) {
+            String key, int min, int max, int defaultValue, String errorKey) {
         try {
             int value = getInt(key);
             if (value < min || value > max) {
-                logger.warn(
-                        LocaleUtil.getString(errorKey, key, value, min, max)
-                );
+                logger.warn(LocaleUtil.getString(errorKey, key, value, min, max));
                 props.setProperty(key, String.valueOf(defaultValue));
                 clearCaches();
             }
@@ -318,56 +251,30 @@ public final class AppConfig {
     }
 
     private void validateDependentIntRange(
-            String key,
-            int min,
-            int maxFromOtherKey,
-            int defaultValue,
-            String errorKey,
-            String dependencyKey
-    ) {
+            String key, int min, int maxFromOtherKey, int defaultValue,
+            String errorKey, String dependencyKey) {
         try {
             int value = getInt(key);
             if (value < min || value > maxFromOtherKey) {
                 logger.warn(
-                        LocaleUtil.getString(
-                                errorKey,
-                                key,
-                                value,
-                                min,
-                                maxFromOtherKey
-                        )
-                );
+                        LocaleUtil.getString(errorKey, key, value, min, maxFromOtherKey));
                 props.setProperty(key, String.valueOf(defaultValue));
                 clearCaches();
             }
         } catch (Exception e) {
             logger.warn(
-                    LocaleUtil.getString(
-                            errorKey,
-                            key,
-                            "N/A",
-                            min,
-                            maxFromOtherKey
-                    )
-            );
+                    LocaleUtil.getString(errorKey, key, "N/A", min, maxFromOtherKey));
             props.setProperty(key, String.valueOf(defaultValue));
             clearCaches();
         }
     }
 
     private void validateLongRange(
-            String key,
-            long min,
-            long max,
-            long defaultValue,
-            String errorKey
-    ) {
+            String key, long min, long max, long defaultValue, String errorKey) {
         try {
             long value = getLong(key);
             if (value < min || value > max) {
-                logger.warn(
-                        LocaleUtil.getString(errorKey, key, value, min, max)
-                );
+                logger.warn(LocaleUtil.getString(errorKey, key, value, min, max));
                 props.setProperty(key, String.valueOf(defaultValue));
                 clearCaches();
             }
@@ -379,12 +286,7 @@ public final class AppConfig {
     }
 
     private void validateDoubleRange(
-            String key,
-            double min,
-            double max,
-            double defaultValue,
-            String errorKey
-    ) {
+            String key, double min, double max, double defaultValue, String errorKey) {
         try {
             String valueStr = getOptional(key);
             if (valueStr == null) {
@@ -395,9 +297,7 @@ public final class AppConfig {
 
             double value = Double.parseDouble(valueStr);
             if (value < min || value > max) {
-                logger.warn(
-                        LocaleUtil.getString(errorKey, key, value, min, max)
-                );
+                logger.warn(LocaleUtil.getString(errorKey, key, value, min, max));
                 props.setProperty(key, String.valueOf(defaultValue));
                 clearCaches();
             }
@@ -412,11 +312,7 @@ public final class AppConfig {
         return resolveValue(value, raw, new HashSet<>());
     }
 
-    private String resolveValue(
-            String value,
-            Properties raw,
-            Set<String> resolvingKeys
-    ) {
+    private String resolveValue(String value, Properties raw, Set<String> resolvingKeys) {
         if (value == null || raw == null) {
             return value;
         }
@@ -429,31 +325,24 @@ public final class AppConfig {
         int end = value.indexOf('}', start);
         if (end < 0) {
             throw new IllegalArgumentException(
-                    LocaleUtil.getString("unpaired_placeholder", value)
-            );
+                    LocaleUtil.getString("unpaired_placeholder", value));
         }
 
         String keyInside = value.substring(start + 2, end).trim();
 
         if (!resolvingKeys.add(keyInside)) {
             throw new IllegalStateException(
-                    "Cyclic config reference: " + resolvingKeys + " -> " + keyInside
-            );
+                    "Cyclic config reference: " + resolvingKeys + " -> " + keyInside);
         }
 
         try {
             String replacement = raw.getProperty(keyInside);
             if (replacement == null) {
                 throw new IllegalStateException(
-                        LocaleUtil.getString("value_not_found_for_key", keyInside)
-                );
+                        LocaleUtil.getString("value_not_found_for_key", keyInside));
             }
 
-            String resolvedReplacement = resolveValue(
-                    replacement,
-                    raw,
-                    resolvingKeys
-            );
+            String resolvedReplacement = resolveValue(replacement, raw, resolvingKeys);
 
             String result = value.substring(0, start)
                     + resolvedReplacement
@@ -512,12 +401,11 @@ public final class AppConfig {
             }
         }
         List<String> result = List.copyOf(seen);
-        listCache.put(key, result);
-        return result;
-    }
 
-    public Set<String> getSet(String key) {
-        return new HashSet<>(getList(key));
+        if (listCache.size() < LIST_CACHE_MAX) {
+            listCache.put(key, result);
+        }
+        return result;
     }
 
     public int getInt(String key) {
@@ -527,7 +415,9 @@ public final class AppConfig {
         }
 
         int value = Integer.parseInt(get(key));
-        intCache.put(key, value);
+        if (intCache.size() < INT_CACHE_MAX) {
+            intCache.put(key, value);
+        }
         return value;
     }
 
@@ -538,7 +428,9 @@ public final class AppConfig {
         }
 
         long value = Long.parseLong(get(key));
-        longCache.put(key, value);
+        if (longCache.size() < LONG_CACHE_MAX) {
+            longCache.put(key, value);
+        }
         return value;
     }
 
@@ -549,7 +441,9 @@ public final class AppConfig {
         }
 
         boolean value = Boolean.parseBoolean(get(key));
-        booleanCache.put(key, value);
+        if (booleanCache.size() < BOOLEAN_CACHE_MAX) {
+            booleanCache.put(key, value);
+        }
         return value;
     }
 
@@ -560,7 +454,9 @@ public final class AppConfig {
         }
 
         short value = Short.parseShort(get(key));
-        shortCache.put(key, value);
+        if (shortCache.size() < SHORT_CACHE_MAX) {
+            shortCache.put(key, value);
+        }
         return value;
     }
 }

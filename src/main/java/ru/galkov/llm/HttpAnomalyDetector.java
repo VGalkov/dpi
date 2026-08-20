@@ -23,6 +23,9 @@ public final class HttpAnomalyDetector
     private final int bodyPreviewLength;
     private final long minLlmIntervalMillis;
 
+    // ✅ Шаблон промпта кэшируется в конструкторе (как в DnsAnomalyDetector)
+    private final String promptTemplate;
+
     private final BlockingQueue<HttpQueryRecord> queue;
 
     private volatile long lastLlmRequestTime;
@@ -59,6 +62,11 @@ public final class HttpAnomalyDetector
         );
 
         this.queue = new LinkedBlockingQueue<>(maxQueueSize);
+
+        // ✅ Кэшируем шаблон один раз при старте
+        this.promptTemplate = llmClient.loadPromptTemplate(
+                "prompts/http_anomaly_prompt.txt"
+        );
 
         logger.info(
                 LocaleUtil.getString(
@@ -208,15 +216,12 @@ public final class HttpAnomalyDetector
             }
         }
 
-        String template = llmClient.loadPromptTemplate(
-                "prompts/http_anomaly_prompt.txt"
-        );
-
-        if (template == null || template.isBlank()) {
+        // ✅ Используем закешированный шаблон, а не грузим файл заново
+        if (promptTemplate == null || promptTemplate.isBlank()) {
             return "";
         }
 
-        return template
+        return promptTemplate
                 .replace(
                         "{clientIp}",
                         promptValue(record.getClientIp(), 128)

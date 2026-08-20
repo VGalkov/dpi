@@ -12,7 +12,6 @@ import ru.galkov.util.DnsServerHelper;
 import ru.galkov.util.LocaleUtil;
 
 import java.io.*;
-import java.lang.ref.WeakReference;
 import java.net.*;
 import java.time.Duration;
 import java.util.*;
@@ -24,71 +23,35 @@ import static ru.galkov.Main.getConfig;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- *
- * ✅ П.12: Periodic cleanup кэшей для предотвращения memory leak
- * ✅ П.23: TTL для dnsCache для защиты от DNS rebinding
- * ✅ П.27: Eviction policy для dnsCache
- * ✅ П.35: Очистка dnsCache в cleanupCaches()
- * ✅ П.38: Eviction policy для qnameCache
- * ✅ П.39: Лимит размера queriesByClient
- * ✅ П.40: Лимит размера activeUdpSockets
- * ✅ П.46: Eviction policy для dnsCache по размеру
- * ✅ П.47: Eviction policy для qnameCache по размеру
- * ✅ П.48: Жёсткий лимит queriesByClient
- * ✅ П.49: Жёсткий лимит activeUdpSockets
  */
 public class DnsServer {
     private static final Logger logger = LoggerFactory.getLogger(DnsServer.class);
 
-    // ✅ П.23: Кэш resolved DNS upstream с TTL
-    // ✅ П.27: Eviction policy для dnsCache
-    // ✅ П.46: Eviction policy для dnsCache по размеру
-    private static final Map<String, CachedInetAddress> dnsCache = new ConcurrentHashMap<>();
-    // ✅ П.23: TTL для dnsCache (5 минут) - перенесено из static в instance
+    // ✅ П.9: dnsCache — инстансный (убран static, нет гонки между инстансами)
+    private final Map<String, CachedInetAddress> dnsCache = new ConcurrentHashMap<>();
     private final long dnsCacheTtlMillis;
-    // ✅ П.4: Ограничение размера dnsCache - перенесено из static в instance
     private final int maxDnsCacheSize;
 
-    // ✅ П.21: Кэш для getQuestionName() с TTL - перенесено из static в instance
-    // ✅ П.38: Eviction policy для qnameCache
-    // ✅ П.47: Eviction policy для qnameCache по размеру
-    private final boolean qnameCacheEnabled;
-    private final int qnameCacheMaxSize;
-    private final long qnameCacheTtlMillis;
-    private final Map<Integer, CachedQname> qnameCache;
-
-    // ✅ П.4: Ограничение размера packet pool - перенесено из static в instance
     private final int maxPacketPoolSize;
-
-    // ✅ П.21: ThreadLocal buffer для queryData (избегаем аллокаций) - перенесено из static в instance
     private final boolean queryDataBufferEnabled;
     private final int queryDataBufferSize;
     private final ThreadLocal<byte[]> queryDataBuffer;
 
-    // ✅ П.8: ThreadLocal для DataInputStream в TCP (переиспользование) - перенесено из static в instance
-    private final boolean tcpDataInputStreamPoolEnabled;
-    private final ThreadLocal<DataInputStream> tcpDataInputStreamPool;
-
-    // ✅ П.11: TCP socket timeout - перенесено из static в instance
     private final int tcpSocketTimeoutMillis;
     private final boolean tcpKeepAlive;
     private final boolean tcpNoDelay;
-
-    // ✅ П.17: Логирование проблемных клиентов - перенесено из static в instance
     private final boolean rateLimitLoggingEnabled;
-
-    // ✅ П.19: Защита от гонок - перенесено из static в instance
     private final int maxConcurrentRetries;
-
-    // ✅ П.12: Интервал очистки кэшей - перенесено из static в instance
     private final int cacheCleanupIntervalSeconds;
-
-    // ✅ П.2: Ограничение размера queriesByClient - перенесено из static в instance
-    // ✅ П.39 + П.48: Лимит размера queriesByClient
     private final int maxQueriesByClient;
 
-    // ✅ П.3: Ограничение размера activeUdpSockets - перенесено из static в instance
-    // ✅ П.40 + П.49: Лимит размера activeUdpSockets
+    // ✅ П.19: лимит TCP-соединений на IP из конфига
+    private final int maxTcpConnectionsPerClient;
+
+    // ✅ П.1-фикс: глобальный лимит активных TCP-сессий (защита от TCP-slowloris)
+    private final int maxTcpSessions;
+    private final AtomicInteger activeTcpSessions = new AtomicInteger();
+
     private final int maxActiveUdpSocketsMultiplier;
 
     private final DnsAnomalyDetector dnsAnomalyDetector;
@@ -102,47 +65,32 @@ public class DnsServer {
     private final int maxQueriesPerClient;
     private final int maxActiveSockets;
     private final int maxResponseSize;
-    // ✅ П.18: Счётчик запросов на клиента
-    // ✅ П.39 + П.48: Лимит размера queriesByClient
     private final Map<String, AtomicInteger> queriesByClient = new ConcurrentHashMap<>();
-
-    // ✅ П.14: Активные UDP-сокеты
-    // ✅ П.40 + П.49: Лимит размера activeUdpSockets
     private final Map<String, AtomicInteger> activeUdpSockets = new ConcurrentHashMap<>();
 
-    // ✅ П.7: AtomicBoolean вместо volatile
-    private final AtomicBoolean running = new AtomicBoolean();
+    // ✅ П.19: счётчик TCP-соединений на клиента
+    private final Map<String, AtomicInteger> tcpConnectionsByClient = new ConcurrentHashMap<>();
 
-    // ✅ П.21: Packet pool
+    private final AtomicBoolean running = new AtomicBoolean();
     private final ArrayBlockingQueue<DatagramPacket> packetPool;
 
     private volatile DatagramSocket udpSocket;
     private volatile ServerSocket tcpListener;
     private volatile Thread tcpThread;
-
-    // ✅ П.12: Scheduled executor для periodic cleanup
     private volatile ScheduledExecutorService cleanupExecutor;
 
     public DnsServer(BlacklistLoader blacklist, DnsAnomalyDetector dnsAnomalyDetector) {
         this.blacklist = Objects.requireNonNull(blacklist);
-        this.resolvers = createResolvers();
         this.dnsAnomalyDetector = dnsAnomalyDetector;
         this.rateLimiter = createRateLimiter();
         this.workerPool = WorkerPool.get();
 
-        // ✅ П.5 + П.21: Константы из application.properties (перенесено из static в instance)
         this.dnsCacheTtlMillis = getConfig().getInt("dns.dns-cache-ttl-minutes") * 60 * 1000L;
-        this.maxDnsCacheSize = getConfig().getInt("dns.max-dns-cache-size");
-        this.qnameCacheEnabled = getConfig().getBoolean("dns.qname-cache.enabled");
-        this.qnameCacheMaxSize = getConfig().getInt("dns.qname-cache.max-size");
-        this.qnameCacheTtlMillis = getConfig().getInt("dns.qname-cache.ttl-seconds") * 1000L;
-        this.qnameCache = qnameCacheEnabled ? new ConcurrentHashMap<>(qnameCacheMaxSize) : null;
+        this.maxDnsCacheSize = Math.max(1, getConfig().getInt("dns.max-dns-cache-size"));
         this.maxPacketPoolSize = getConfig().getInt("dns.packet-pool.size");
         this.queryDataBufferEnabled = getConfig().getBoolean("dns.query-data-buffer.enabled");
         this.queryDataBufferSize = getConfig().getInt("dns.query-data-buffer.size");
         this.queryDataBuffer = queryDataBufferEnabled ? ThreadLocal.withInitial(() -> new byte[queryDataBufferSize]) : null;
-        this.tcpDataInputStreamPoolEnabled = getConfig().getBoolean("dns.tcp-datainputstream-pool.enabled");
-        this.tcpDataInputStreamPool = tcpDataInputStreamPoolEnabled ? ThreadLocal.withInitial(() -> null) : null;
         this.tcpSocketTimeoutMillis = getConfig().getInt("dns.tcp.socket-timeout-millis");
         this.tcpKeepAlive = getConfig().getBoolean("dns.tcp.keep-alive");
         this.tcpNoDelay = getConfig().getBoolean("dns.tcp.no-delay");
@@ -151,6 +99,13 @@ public class DnsServer {
         this.cacheCleanupIntervalSeconds = getConfig().getInt("dns.cache-cleanup-interval-seconds");
         this.maxQueriesByClient = getConfig().getInt("dns.max-queries-by-client");
         this.maxActiveUdpSocketsMultiplier = getConfig().getInt("dns.max-active-udp-sockets-multiplier");
+
+        int tcpLimit = getConfig().getInt("dns.max-tcp-connections-per-client");
+        this.maxTcpConnectionsPerClient = tcpLimit > 0 ? tcpLimit : 20;
+
+        // ✅ П.1-фикс: глобальный лимит активных TCP-сессий (защита от slowloris)
+        int tcpSessions = getConfig().getInt("dns.max-active-tcp-sessions");
+        this.maxTcpSessions = tcpSessions > 0 ? tcpSessions : 100;
 
         this.maxPacketSize = getConfig().getInt("dns.max-packet-size");
         this.packetPool = new ArrayBlockingQueue<>(maxPacketPoolSize);
@@ -167,8 +122,11 @@ public class DnsServer {
         this.maxQueriesPerClient = rps;
         this.maxActiveSockets = this.maxClients * maxActiveSocketsMultiplier;
         this.maxResponseSize = getConfig().getInt("dns.max-response-size");
-        logger.info("DNS server config: maxPacketSize={}, poolSize={}, maxClients={}, maxQueriesPerClient={}, maxActiveSockets={}, TCP_TIMEOUT={}ms",
-                maxPacketSize, maxPacketPoolSize, maxClients, maxQueriesPerClient, maxActiveSockets, tcpSocketTimeoutMillis);
+
+        this.resolvers = createResolvers();
+
+        logger.info("DNS server config: maxPacketSize={}, poolSize={}, maxClients={}, maxQueriesPerClient={}, maxActiveSockets={}, maxTcpSessions={}, TCP_TIMEOUT={}ms",
+                maxPacketSize, maxPacketPoolSize, maxClients, maxQueriesPerClient, maxActiveSockets, maxTcpSessions, tcpSocketTimeoutMillis);
     }
 
     public void run() {
@@ -177,7 +135,6 @@ public class DnsServer {
             return;
         }
 
-        // ✅ П.12: Запуск periodic cleanup
         startCacheCleanup();
 
         int port = getConfig().getInt("dns.local.port");
@@ -211,18 +168,12 @@ public class DnsServer {
                 InetAddress addr = request.getAddress();
                 String clientIp = addr != null ? addr.getHostAddress() : "unknown";
 
+                // ✅ П.3: убрана дублирующая проверка cleanupOldSockets() на каждом запросе.
+                //    Оставляем только жёсткий лимит selat с очисткой.
                 int maxActiveSocketsLimit = maxActiveSockets * maxActiveUdpSocketsMultiplier;
                 if (activeUdpSockets.size() >= maxActiveSocketsLimit) {
                     logger.warn(LocaleUtil.getString("dns_server_active_udp_sockets_overflow"),
                             activeUdpSockets.size(), maxActiveSocketsLimit);
-                    cleanupOldSockets();
-                    packetPool.offer(request);
-                    continue;
-                }
-
-                if (activeUdpSockets.size() >= maxActiveSockets) {
-                    logger.warn(LocaleUtil.getString("dns_server_max_active_sockets"),
-                            activeUdpSockets.size(), maxActiveSockets);
                     cleanupOldSockets();
                     packetPool.offer(request);
                     continue;
@@ -267,10 +218,7 @@ public class DnsServer {
             running.set(false);
             udpSocket = null;
             tcpListener = null;
-
-            // ✅ П.12: Остановка cleanup executor
             stopCacheCleanup();
-
             logger.info("DNS server завершил работу");
         }
     }
@@ -300,9 +248,35 @@ public class DnsServer {
                 if (!running.get()) { DnsServerHelper.closeQuietly(socket); break; }
                 InetAddress addr = socket.getInetAddress();
                 String clientIp = addr != null ? addr.getHostAddress() : "unknown";
-                try { workerPool.execute(() -> handleSingleTcpSession(socket, clientIp)); }
+
+                // ✅ П.20-фикс: глобальный лимит TCP-сессий — защита от slowloris,
+                //    чтобы "молчащие" TCP-соединения не забивали общий пул.
+                int active = activeTcpSessions.incrementAndGet();
+                if (active > maxTcpSessions) {
+                    activeTcpSessions.decrementAndGet();
+                    logger.warn("DNS global TCP session limit exceeded: active={}, max={}",
+                            activeTcpSessions.get(), maxTcpSessions);
+                    DnsServerHelper.closeQuietly(socket);
+                    continue;
+                }
+
+                // ✅ П.19: лимит TCP-соединений на IP
+                AtomicInteger tcpCount = getOrComputeAtomicInteger(tcpConnectionsByClient, clientIp);
+                if (tcpCount.incrementAndGet() > maxTcpConnectionsPerClient) {
+                    tcpCount.decrementAndGet();
+                    if (tcpCount.get() <= 0) tcpConnectionsByClient.remove(clientIp, tcpCount);
+                    activeTcpSessions.decrementAndGet();
+                    logger.warn("DNS TCP limit exceeded for client={} (max={})", clientIp, maxTcpConnectionsPerClient);
+                    DnsServerHelper.closeQuietly(socket);
+                    continue;
+                }
+
+                try { workerPool.execute(() -> handleSingleTcpSession(socket, clientIp, tcpCount)); }
                 catch (RuntimeException e) {
                     logger.warn("DNS worker pool отклонил TCP-соединение от {}: {}", clientIp, e.getMessage());
+                    int rem = tcpCount.decrementAndGet();
+                    if (rem <= 0) tcpConnectionsByClient.remove(clientIp, tcpCount);
+                    activeTcpSessions.decrementAndGet();
                     DnsServerHelper.closeQuietly(socket);
                 }
             } catch (SocketException e) {
@@ -329,9 +303,6 @@ public class DnsServer {
         return new DnsServerHelper.DnsRateLimiter(rps, burst, TimeUnit.SECONDS.toNanos(idle));
     }
 
-    /**
-     * ✅ П.23: Кэш resolved DNS upstream с TTL
-     */
     private class CachedInetAddress {
         final InetAddress address;
         final long timestamp;
@@ -350,34 +321,7 @@ public class DnsServer {
         }
     }
 
-    /**
-     * ✅ П.5: WeakReference для защиты от OOM
-     */
-    private class CachedQname {
-        final WeakReference<String> qnameRef;
-        final long timestamp;
-
-        CachedQname(String qname) {
-            this.qnameRef = new WeakReference<>(qname);
-            this.timestamp = System.currentTimeMillis();
-        }
-
-        String getQname() {
-            return qnameRef.get();
-        }
-
-        boolean isExpired() {
-            return (System.currentTimeMillis() - timestamp) > qnameCacheTtlMillis;
-        }
-    }
-
-    /**
-     * ✅ П.23: Кэш с TTL для защиты от DNS rebinding
-     * ✅ П.27: Eviction policy для dnsCache
-     * ✅ П.46: Eviction policy для dnsCache по размеру
-     */
     private Map<String, SimpleResolver> createResolvers() {
-        // ✅ П.27 + П.46: Eviction вместо clear()
         if (dnsCache.size() >= maxDnsCacheSize) {
             cleanupDnsCacheBySize();
         }
@@ -399,7 +343,6 @@ public class DnsServer {
 
                     addr = InetAddress.getByName(dns);
 
-                    // ✅ П.27 + П.46: Eviction перед добавлением
                     if (dnsCache.size() >= maxDnsCacheSize) {
                         cleanupDnsCacheBySize();
                     }
@@ -422,37 +365,21 @@ public class DnsServer {
         return Collections.unmodifiableMap(result);
     }
 
-    /**
-     * ✅ П.27: Очистка dnsCache от expired записей
-     * ✅ П.46: Очистка dnsCache по размеру
-     */
     private void cleanupDnsCacheBySize() {
         int removed = 0;
-        Iterator<Map.Entry<String, CachedInetAddress>> iterator = dnsCache.entrySet().iterator();
-
-        // Сначала удаляем expired
-        while (iterator.hasNext() && dnsCache.size() >= maxDnsCacheSize) {
-            CachedInetAddress cached = iterator.next().getValue();
-            if (cached.isExpired()) {
-                iterator.remove();
-                removed++;
-            }
+        Iterator<Map.Entry<String, CachedInetAddress>> it = dnsCache.entrySet().iterator();
+        while (it.hasNext()) {
+            if (it.next().getValue().isExpired()) { it.remove(); removed++; }
         }
-
-        // ❗️ ПЕРЕИНИЦИАЛИЗИРУЕМ iterator для удаления oldest
-        if (dnsCache.size() >= maxDnsCacheSize) {
-            iterator = dnsCache.entrySet().iterator();  // ← НОВЫЙ ИТЕРАТОР
-            while (iterator.hasNext() && dnsCache.size() >= maxDnsCacheSize) {
-                iterator.next();
-                iterator.remove();
-                removed++;
-            }
+        while (dnsCache.size() > maxDnsCacheSize && !dnsCache.isEmpty()) {
+            dnsCache.remove(dnsCache.keySet().iterator().next());
+            removed++;
         }
-
         if (removed > 0) {
             logger.info(LocaleUtil.getString("dns_cache_size_eviction"), removed, dnsCache.size(), maxDnsCacheSize);
         }
     }
+
     private Message processQuery(Message query, String clientIp, String qname) {
         BlacklistSnapshot snapshot = blacklist.snapshot();
 
@@ -514,8 +441,10 @@ public class DnsServer {
                 return;
             }
 
+            // ✅ П.33: сериализация ОДИН раз
+            byte[] wire = response.toWire();
             try {
-                socket.send(DnsServerHelper.getFormattedReply(response, packet));
+                socket.send(new DatagramPacket(wire, wire.length, packet.getAddress(), packet.getPort()));
             } catch (IOException e) {
                 if (running.get()) logger.error("UDP [{}]: не удалось отправить ответ для домена {}", clientIp, qname, e);
             }
@@ -525,19 +454,8 @@ public class DnsServer {
             int remaining = clientQueries.decrementAndGet();
             if (remaining <= 0) queriesByClient.remove(clientIp, clientQueries);
 
-            // ✅ П.39 + П.48: Жёсткий лимит queriesByClient
-            if (queriesByClient.size() >= maxQueriesByClient) {
-                logger.warn(LocaleUtil.getString("dns_server_queries_by_client_overflow"),
-                        queriesByClient.size(), maxQueriesByClient);
-                cleanupQueriesByClient();
-            }
-
-            // ✅ П.40 + П.49: Жёсткий лимит activeUdpSockets
-            if (activeUdpSockets.size() >= maxActiveSockets) {
-                logger.warn(LocaleUtil.getString("dns_server_active_udp_sockets_overflow"),
-                        activeUdpSockets.size(), maxActiveSockets);
-                cleanupOldSockets();
-            }
+            // ✅ П.3: убраны дублирующие per-request очистки queriesByClient/activeUdpSockets —
+            //    их выполняет планировщик cleanupCaches() раз в cacheCleanupIntervalSeconds.
 
             activeUdpSockets.computeIfPresent(clientIp, (k, v) -> {
                 int newVal = v.decrementAndGet();
@@ -547,7 +465,7 @@ public class DnsServer {
         }
     }
 
-    private void handleSingleTcpSession(Socket socket, String clientIp) {
+    private void handleSingleTcpSession(Socket socket, String clientIp, AtomicInteger tcpCount) {
         try {
             socket.setSoTimeout(tcpSocketTimeoutMillis);
             socket.setKeepAlive(tcpKeepAlive);
@@ -569,18 +487,7 @@ public class DnsServer {
                  InputStream input = currentSocket.getInputStream();
                  OutputStream output = currentSocket.getOutputStream()) {
 
-                DataInputStream dataInput = tcpDataInputStreamPoolEnabled && tcpDataInputStreamPool != null
-                        ? tcpDataInputStreamPool.get()
-                        : null;
-
-                if (dataInput == null) {
-                    dataInput = new DataInputStream(input);
-                    if (tcpDataInputStreamPoolEnabled && tcpDataInputStreamPool != null) {
-                        tcpDataInputStreamPool.set(dataInput);
-                    }
-                } else {
-                    logger.debug(LocaleUtil.getString("dns_server_tcp_datainputstream_reused"), clientIp);
-                }
+                DataInputStream dataInput = new DataInputStream(input);
 
                 while (running.get() && !currentSocket.isClosed()) {
                     int length;
@@ -619,18 +526,24 @@ public class DnsServer {
             logger.warn("TCP [{}]: ошибка настройки сокета", clientIp, e);
         } catch (Throwable t) {
             logger.error("Unexpected error in handleSingleTcpSession", t);
+        } finally {
+            // ✅ П.19: освобождаем TCP-слот на клиента
+            if (tcpCount != null) {
+                int rem = tcpCount.decrementAndGet();
+                if (rem <= 0) tcpConnectionsByClient.remove(clientIp, tcpCount);
+            }
+            // ✅ П.1-фикс: освобождаем глобальный TCP-слот
+            activeTcpSessions.decrementAndGet();
         }
     }
 
     private Message forwardToResolver(Message query) {
         if (query == null || query.getQuestion() == null) return null;
         for (Map.Entry<String, SimpleResolver> entry : resolvers.entrySet()) {
-            String dns = entry.getKey();
             SimpleResolver resolver = entry.getValue();
             try {
                 Message response = resolver.send(query);
                 if (response != null) {
-                    // ✅ П.9 + П.7: Проверка размера ответа (один вызов toWire())
                     byte[] responseBytes = response.toWire();
                     if (responseBytes.length > maxResponseSize) {
                         response.getHeader().setFlag(Flags.TC);
@@ -644,7 +557,7 @@ public class DnsServer {
                     return response;
                 }
             } catch (Exception e) {
-                logger.debug("Ошибка upstream {}: {}", dns, e.getMessage());
+                logger.debug("Ошибка upstream: {}", e.getMessage());
             }
         }
         return null;
@@ -663,76 +576,34 @@ public class DnsServer {
     }
 
     private AtomicInteger getOrComputeAtomicInteger(Map<String, AtomicInteger> map, String key) {
-        AtomicInteger value = map.get(key);
-        if (value == null) {
-            value = map.computeIfAbsent(key, k -> new AtomicInteger());
-        }
-        return value;
+        return map.computeIfAbsent(key, k -> new AtomicInteger());
     }
 
-    /**
-     * ✅ П.40 + П.49: Очистка activeUdpSockets с eviction policy по размеру
-     */
+    // ✅ Очистка старых/использованных счётчиков — вызывается планировщиком и при переполнении
     private void cleanupOldSockets() {
+        activeUdpSockets.entrySet().removeIf(e -> e.getValue().get() <= 0);
         int removed = 0;
-        Iterator<Map.Entry<String, AtomicInteger>> iterator = activeUdpSockets.entrySet().iterator();
-
-        while (iterator.hasNext() && activeUdpSockets.size() >= maxActiveSockets) {
-            Map.Entry<String, AtomicInteger> entry = iterator.next();
-            if (entry.getValue().get() <= 0) {
-                iterator.remove();
-                removed++;
-            }
+        while (activeUdpSockets.size() > maxActiveSockets && !activeUdpSockets.isEmpty()) {
+            activeUdpSockets.remove(activeUdpSockets.keySet().iterator().next());
+            removed++;
         }
-
-        // ❗️ ПЕРЕИНИЦИАЛИЗИРУЕМ iterator
-        if (activeUdpSockets.size() >= maxActiveSockets) {
-            iterator = activeUdpSockets.entrySet().iterator();
-            while (iterator.hasNext() && activeUdpSockets.size() >= maxActiveSockets) {
-                iterator.next();
-                iterator.remove();
-                removed++;
-            }
-        }
-
         if (removed > 0) {
             logger.info(LocaleUtil.getString("dns_active_sockets_size_eviction"), removed, activeUdpSockets.size(), maxActiveSockets);
         }
     }
 
-    /**
-     * ✅ П.39 + П.48: Очистка queriesByClient с eviction policy по размеру
-     */
     private void cleanupQueriesByClient() {
+        queriesByClient.entrySet().removeIf(e -> e.getValue().get() <= 0);
         int removed = 0;
-        Iterator<Map.Entry<String, AtomicInteger>> iterator = queriesByClient.entrySet().iterator();
-
-        while (iterator.hasNext() && queriesByClient.size() >= maxQueriesByClient) {
-            Map.Entry<String, AtomicInteger> entry = iterator.next();
-            if (entry.getValue().get() <= 0) {
-                iterator.remove();
-                removed++;
-            }
+        while (queriesByClient.size() > maxQueriesByClient && !queriesByClient.isEmpty()) {
+            queriesByClient.remove(queriesByClient.keySet().iterator().next());
+            removed++;
         }
-
-        // ❗️ ПЕРЕИНИЦИАЛИЗИРУЕМ iterator
-        if (queriesByClient.size() >= maxQueriesByClient) {
-            iterator = queriesByClient.entrySet().iterator();
-            while (iterator.hasNext() && queriesByClient.size() >= maxQueriesByClient) {
-                iterator.next();
-                iterator.remove();
-                removed++;
-            }
-        }
-
         if (removed > 0) {
             logger.info(LocaleUtil.getString("dns_queries_by_client_size_eviction"), removed, queriesByClient.size(), maxQueriesByClient);
         }
     }
 
-    /**
-     * ✅ П.12: Periodic cleanup кэшей для предотвращения memory leak
-     */
     private void startCacheCleanup() {
         cleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "DnsServer-Cache-Cleanup-Thread");
@@ -751,9 +622,6 @@ public class DnsServer {
         logger.info(LocaleUtil.getString("dns_cache_cleanup_scheduled"), cacheCleanupIntervalSeconds);
     }
 
-    /**
-     * ✅ П.12: Остановка cleanup executor
-     */
     private void stopCacheCleanup() {
         if (cleanupExecutor != null) {
             cleanupExecutor.shutdown();
@@ -768,108 +636,34 @@ public class DnsServer {
         }
     }
 
-    /**
-     * ✅ П.12: Очистка кэшей
-     * ✅ П.35: Очистка dnsCache
-     * ✅ П.38: Очистка qnameCache
-     * ✅ П.39: Очистка queriesByClient
-     * ✅ П.40: Очистка activeUdpSockets
-     * ✅ П.46: Очистка dnsCache по размеру
-     * ✅ П.47: Очистка qnameCache по размеру
-     * ✅ П.48: Очистка queriesByClient по размеру
-     * ✅ П.49: Очистка activeUdpSockets по размеру
-     */
     private void cleanupCaches() {
-        int removedDns = 0, removedQname = 0, removedQueries = 0, removedSockets = 0;
+        int removedDns = 0, removedQueries = 0, removedSockets = 0;
 
-        // ✅ П.35 + П.46: Очистка dnsCache
-        Iterator<Map.Entry<String, CachedInetAddress>> dnsIterator = dnsCache.entrySet().iterator();
-        while (dnsIterator.hasNext()) {
-            CachedInetAddress cached = dnsIterator.next().getValue();
-            if (cached.isExpired()) {
-                dnsIterator.remove();
-                removedDns++;
-            }
+        Iterator<Map.Entry<String, CachedInetAddress>> dnsIt = dnsCache.entrySet().iterator();
+        while (dnsIt.hasNext()) {
+            if (dnsIt.next().getValue().isExpired()) { dnsIt.remove(); removedDns++; }
         }
-
-        // ✅ П.46: Очистка dnsCache по размеру
-        while (dnsCache.size() >= maxDnsCacheSize) {
-            if (!dnsIterator.hasNext()) {
-                dnsIterator = dnsCache.entrySet().iterator();  // ← ПЕРЕИНИЦИАЛИЗАЦИЯ
-                if (!dnsIterator.hasNext()) break;
-            }
-            dnsIterator.next();
-            dnsIterator.remove();
+        while (dnsCache.size() > maxDnsCacheSize && !dnsCache.isEmpty()) {
+            dnsCache.remove(dnsCache.keySet().iterator().next());
             removedDns++;
         }
 
-        // ✅ П.38 + П.47: Очистка qnameCache
-        if (qnameCache != null) {
-            Iterator<Map.Entry<Integer, CachedQname>> qnameIterator = qnameCache.entrySet().iterator();
-            while (qnameIterator.hasNext()) {
-                Map.Entry<Integer, CachedQname> entry = qnameIterator.next();
-                if (entry.getValue().isExpired()) {
-                    qnameIterator.remove();
-                    removedQname++;
-                }
-            }
-
-            // ✅ П.47: Очистка qnameCache по размеру
-            while (qnameCache.size() >= qnameCacheMaxSize) {
-                if (!qnameIterator.hasNext()) {
-                    qnameIterator = qnameCache.entrySet().iterator();  // ← ПЕРЕИНИЦИАЛИЗАЦИЯ
-                    if (!qnameIterator.hasNext()) break;
-                }
-                qnameIterator.next();
-                qnameIterator.remove();
-                removedQname++;
-            }
-        }
-
-        // ✅ П.39 + П.48: Очистка queriesByClient
-        Iterator<Map.Entry<String, AtomicInteger>> queriesIterator = queriesByClient.entrySet().iterator();
-        while (queriesIterator.hasNext()) {
-            Map.Entry<String, AtomicInteger> entry = queriesIterator.next();
-            if (entry.getValue().get() <= 0) {
-                queriesIterator.remove();
-                removedQueries++;
-            }
-        }
-
-        // ✅ П.48: Очистка queriesByClient по размеру
-        while (queriesByClient.size() >= maxQueriesByClient) {
-            if (!queriesIterator.hasNext()) {
-                queriesIterator = queriesByClient.entrySet().iterator();  // ← ПЕРЕИНИЦИАЛИЗАЦИЯ
-                if (!queriesIterator.hasNext()) break;
-            }
-            queriesIterator.next();
-            queriesIterator.remove();
+        queriesByClient.entrySet().removeIf(e -> e.getValue().get() <= 0);
+        while (queriesByClient.size() > maxQueriesByClient && !queriesByClient.isEmpty()) {
+            queriesByClient.remove(queriesByClient.keySet().iterator().next());
             removedQueries++;
         }
 
-        // ✅ П.40 + П.49: Очистка activeUdpSockets
-        Iterator<Map.Entry<String, AtomicInteger>> socketsIterator = activeUdpSockets.entrySet().iterator();
-        while (socketsIterator.hasNext()) {
-            Map.Entry<String, AtomicInteger> entry = socketsIterator.next();
-            if (entry.getValue().get() <= 0) {
-                socketsIterator.remove();
-                removedSockets++;
-            }
-        }
-
-        // ✅ П.49: Очистка activeUdpSockets по размеру
-        while (activeUdpSockets.size() >= maxActiveSockets) {
-            if (!socketsIterator.hasNext()) {
-                socketsIterator = activeUdpSockets.entrySet().iterator();  // ← ПЕРЕИНИЦИАЛИЗАЦИЯ
-                if (!socketsIterator.hasNext()) break;
-            }
-            socketsIterator.next();
-            socketsIterator.remove();
+        activeUdpSockets.entrySet().removeIf(e -> e.getValue().get() <= 0);
+        while (activeUdpSockets.size() > maxActiveSockets && !activeUdpSockets.isEmpty()) {
+            activeUdpSockets.remove(activeUdpSockets.keySet().iterator().next());
             removedSockets++;
         }
 
-        if (removedDns > 0 || removedQname > 0 || removedQueries > 0 || removedSockets > 0) {
-            logger.info(LocaleUtil.getString("dns_cache_cleanup_executed"), removedDns + removedQname + removedQueries + removedSockets);
+        tcpConnectionsByClient.entrySet().removeIf(e -> e.getValue().get() <= 0);
+
+        if (removedDns > 0 || removedQueries > 0 || removedSockets > 0) {
+            logger.info(LocaleUtil.getString("dns_cache_cleanup_executed"), removedDns + removedQueries + removedSockets);
         }
     }
 }

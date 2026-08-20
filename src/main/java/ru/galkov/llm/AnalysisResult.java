@@ -2,7 +2,6 @@ package ru.galkov.llm;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
@@ -19,11 +18,13 @@ public record AnalysisResult(boolean suspicious, double confidence, String reaso
     }
 
     /**
-     * ✅ П.8: toString() для логирования
+     * ✅ П.44: toString через конкатенацию вместо String.format
      */
     @Override
     public String toString() {
-        return String.format(Locale.ROOT, "AnalysisResult{suspicious=%b, confidence=%.2f, reason='%s', actions=%d}",
-                suspicious, confidence, reason, recommendedActions.size());
+        return "AnalysisResult{suspicious=" + suspicious
+                + ", confidence=" + confidence
+                + ", reason='" + reason + '\''
+                + ", actions=" + recommendedActions.size() + '}';
     }
 }

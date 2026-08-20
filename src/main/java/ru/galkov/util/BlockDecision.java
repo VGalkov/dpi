@@ -4,15 +4,11 @@ package ru.galkov.util;
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class BlockDecision {
-    public enum BlockReason { NONE, IP_EXACT, IP_CIDR, DOMAIN_EXACT, DOMAIN_WILDCARD, DOMAIN_SUBTREE }
+    public enum BlockReason { NONE, IP_EXACT, DOMAIN_EXACT, DOMAIN_WILDCARD, DOMAIN_SUBTREE }
     public enum BlockAction { ALLOW, BLOCK_HTTP_403, BLOCK_DROP, BLOCK_SINKHOLE, LOG_ONLY }
 
-    // Кэш для ALLOW
     private static final BlockDecision ALLOW_DECISION = new BlockDecision(false, BlockReason.NONE, null, null, BlockAction.ALLOW);
-
-    // Кэш для заблокированных (без matchedRule)
     private static final BlockDecision BLOCK_IP_EXACT = new BlockDecision(true, BlockReason.IP_EXACT, null, "blacklist", BlockAction.BLOCK_HTTP_403);
-    private static final BlockDecision BLOCK_IP_CIDR = new BlockDecision(true, BlockReason.IP_CIDR, null, "blacklist", BlockAction.BLOCK_HTTP_403);
     private static final BlockDecision BLOCK_DOMAIN_EXACT = new BlockDecision(true, BlockReason.DOMAIN_EXACT, null, "blacklist", BlockAction.BLOCK_HTTP_403);
     private static final BlockDecision BLOCK_DOMAIN_WILDCARD = new BlockDecision(true, BlockReason.DOMAIN_WILDCARD, null, "blacklist", BlockAction.BLOCK_HTTP_403);
     private static final BlockDecision BLOCK_DOMAIN_SUBTREE = new BlockDecision(true, BlockReason.DOMAIN_SUBTREE, null, "blacklist", BlockAction.BLOCK_HTTP_403);
@@ -39,9 +35,7 @@ public final class BlockDecision {
         return rule != null ? new BlockDecision(true, BlockReason.IP_EXACT, rule, source, BlockAction.BLOCK_HTTP_403) : BLOCK_IP_EXACT;
     }
 
-    public static BlockDecision blockIpCidr(String rule, String source) {
-        return rule != null ? new BlockDecision(true, BlockReason.IP_CIDR, rule, source, BlockAction.BLOCK_HTTP_403) : BLOCK_IP_CIDR;
-    }
+    // ✅ П.43: blockIpCidr() и кэш BLOCK_IP_CIDR удалены (не используются)
 
     public static BlockDecision blockDomain(DomainTrie.MatchType type, String rule, String source) {
         BlockReason reason = switch (type) {
@@ -56,18 +50,15 @@ public final class BlockDecision {
     public boolean isBlocked() { return blocked; }
     public String getMatchedRule() { return matchedRule; }
     public BlockReason getReason() { return reason; }
-    public String getSource() { return source; }
-    public BlockAction getAction() { return action; }
 
-    /**
-     * ✅ П.19: toString() для логирования
-     */
     @Override
     public String toString() {
         if (!blocked) {
             return "BlockDecision{ALLOW}";
         }
-        return String.format("BlockDecision{blocked=true, reason=%s, rule='%s', source='%s', action=%s}",
-                reason, matchedRule, source, action);
+        return "BlockDecision{blocked=true, reason=" + reason
+                + ", rule='" + matchedRule + '\''
+                + ", source='" + source + '\''
+                + ", action=" + action + '}';
     }
 }

@@ -6,16 +6,13 @@ import ru.galkov.util.LocaleUtil;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URL;
+import java.net.*;
 import java.util.List;
 import java.util.Locale;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private static final int MAX_REDIRECTS = 3;
     private static final int MAX_LINE_LENGTH = 16_384;
@@ -374,36 +371,55 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         return parts[1].trim();
     }
 
+    // ✅ П.15: ручная проверка вместо DNS-резолва (InetAddress.getByName)
     private static boolean isIpLiteral(String value) {
         if (value == null || value.isBlank()) {
             return false;
         }
 
-        try {
-            if (value.indexOf(':') >= 0) {
-                return InetAddress.getByName(value) instanceof Inet6Address;
-            }
+        if (value.indexOf(':') >= 0) {
+            return isIpv6Literal(value);
+        }
 
-            String[] parts = value.split("\\.", -1);
-            if (parts.length != 4) {
+        String[] parts = value.split("\\.", -1);
+        if (parts.length != 4) {
+            return false;
+        }
+
+        for (String part : parts) {
+            if (part.isEmpty() || part.length() > 3) {
                 return false;
             }
 
-            for (String part : parts) {
-                if (part.isEmpty() || part.length() > 3) {
-                    return false;
-                }
-
+            try {
                 int number = Integer.parseInt(part);
                 if (number < 0 || number > 255) {
                     return false;
                 }
+            } catch (NumberFormatException e) {
+                return false;
             }
+        }
 
-            return true;
-        } catch (Exception e) {
+        return true;
+    }
+
+    private static boolean isIpv6Literal(String value) {
+        if (value.isEmpty()) {
             return false;
         }
+
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (!(c == ':'
+                    || (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F'))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static boolean isValidDomainCandidate(String value) {
@@ -473,6 +489,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             return value;
         }
 
+        // ✅ Исправлено: не читаем сверх оставшегося лимита за один вызов
         @Override
         public int read(byte[] buffer, int offset, int length)
                 throws IOException {
@@ -480,9 +497,13 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
                 return 0;
             }
 
-            ensureCapacity(Math.min(length, maxBytes - totalBytes));
+            long remaining = maxBytes - totalBytes;
+            if (remaining <= 0) {
+                throw new IOException("AdGuard response exceeds maximum size");
+            }
 
-            int read = super.read(buffer, offset, length);
+            int toRead = (int) Math.min(length, remaining);
+            int read = super.read(buffer, offset, toRead);
             if (read > 0) {
                 totalBytes += read;
             }

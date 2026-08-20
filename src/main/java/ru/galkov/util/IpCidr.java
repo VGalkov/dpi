@@ -2,17 +2,32 @@ package ru.galkov.util;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class IpCidr {
     private final InetAddress network;
     private final int prefixLength;
     private final byte[] networkBytes;
     private final byte[] maskBytes;
 
-    private static final Map<String, InetAddress> addressCache = new ConcurrentHashMap<>(256);
     private static final int MAX_CACHE_SIZE = 512;
+
+    // ✅ П.17: LRU-кэш вместо full Clear при переполнении
+    private static final Map<String, InetAddress> addressCache =
+            Collections.synchronizedMap(
+                    new LinkedHashMap<String, InetAddress>(256, 0.75f, true) {
+                        @Override
+                        protected boolean removeEldestEntry(
+                                Map.Entry<String, InetAddress> eldest) {
+                            return size() > MAX_CACHE_SIZE;
+                        }
+                    }
+            );
 
     public IpCidr(String cidr) throws UnknownHostException {
         if (cidr == null || cidr.isEmpty()) {
@@ -49,11 +64,18 @@ public final class IpCidr {
         this.maskBytes = createMask(this.networkBytes.length, prefixLength);
     }
 
+    // ✅ П.38: упрощённая генерация маски без Math.max/min
     private static byte[] createMask(int length, int prefixLength) {
         byte[] mask = new byte[length];
         for (int i = 0; i < length; i++) {
-            int bits = Math.max(0, Math.min(8, prefixLength - i * 8));
-            mask[i] = (byte) (0xFF << (8 - bits));
+            int bits = prefixLength - i * 8;
+            if (bits >= 8) {
+                mask[i] = (byte) 0xFF;
+            } else if (bits <= 0) {
+                mask[i] = 0;
+            } else {
+                mask[i] = (byte) (0xFF << (8 - bits));
+            }
         }
         return mask;
     }
@@ -66,11 +88,11 @@ public final class IpCidr {
 
         InetAddress address = InetAddress.getByName(ip);
 
+        // ✅ П.17: LRU-кэш сам вытесняет старые записи
         synchronized (addressCache) {
-            if (addressCache.size() >= MAX_CACHE_SIZE) {
-                addressCache.clear();
+            if (!addressCache.containsKey(ip)) {
+                addressCache.put(ip, address);
             }
-            addressCache.put(ip, address);
         }
 
         return address;
@@ -107,18 +129,9 @@ public final class IpCidr {
         return true;
     }
 
+    // ✅ П.44: toString() без String.format — прямая конкатенация
     @Override
     public String toString() {
-        return String.format(
-                "%s/%d",
-                network.getHostAddress(),
-                prefixLength
-        );
-    }
-
-    public static void clearCache() {
-        synchronized (addressCache) {
-            addressCache.clear();
-        }
+        return network.getHostAddress() + "/" + prefixLength;
     }
 }

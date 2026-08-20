@@ -7,6 +7,7 @@ import ru.galkov.util.LogFields;
 import java.io.*;
 import java.net.URL;
 import java.util.List;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
@@ -32,15 +33,20 @@ public final class FileBlacklistSource extends AbstractBlacklistSource {
                     LogFields.kv("file", file.getAbsolutePath()));
             return new FileInputStream(file);
         }
+
+        // ✅ Fallback на classpath-ресурс
         String resourceName = file.getPath().replace('\\', '/').replaceFirst("^/", "");
         URL resource = FileBlacklistSource.class.getClassLoader().getResource(resourceName);
         if (resource != null) {
             logger.info(LocaleUtil.getString("blacklist_in_classpath"), resource.toExternalForm());
             return resource.openStream();
         }
+
         throw new FileNotFoundException(LocaleUtil.getString("blacklist_not_found") + file.getAbsolutePath());
     }
 
     @Override
-    public String toString() { return "FileBlacklistSource{file=" + file.getAbsolutePath() + '}'; }
+    public String toString() {
+        return "FileBlacklistSource{file=" + file.getAbsolutePath() + '}';
+    }
 }
