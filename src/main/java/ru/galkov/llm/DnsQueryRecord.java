@@ -82,15 +82,15 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
     public int getRcode() { return rcode; }
     public int getDomainLength() { return domainLength; }
 
-    // ✅ Ленивые getter'ы
+    // ✅ Ленивые getter'ы с double-checked locking
     public double getEntropy() {
         Double e = entropy;
         if (e == null) {
             synchronized (this) {
-                if (entropy == null) {
-                    entropy = calculateEntropy(domain);
-                }
                 e = entropy;
+                if (e == null) {
+                    entropy = e = calculateEntropy(domain);
+                }
             }
         }
         return e;
@@ -100,10 +100,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Integer c = subdomainCount;
         if (c == null) {
             synchronized (this) {
-                if (subdomainCount == null) {
-                    subdomainCount = countDots(domain);
-                }
                 c = subdomainCount;
+                if (c == null) {
+                    subdomainCount = c = countDots(domain);
+                }
             }
         }
         return c;
@@ -113,10 +113,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         String p = parentDomain;
         if (p == null) {
             synchronized (this) {
-                if (parentDomain == null) {
-                    parentDomain = calculateParentDomain(domain);
-                }
                 p = parentDomain;
+                if (p == null) {
+                    parentDomain = p = calculateParentDomain(domain);
+                }
             }
         }
         return p;
@@ -126,10 +126,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         String l = leftmostLabel;
         if (l == null) {
             synchronized (this) {
-                if (leftmostLabel == null) {
-                    leftmostLabel = calculateLeftmostLabel(domain);
-                }
                 l = leftmostLabel;
+                if (l == null) {
+                    leftmostLabel = l = calculateLeftmostLabel(domain);
+                }
             }
         }
         return l;
@@ -139,10 +139,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Integer l = leftmostLabelLength;
         if (l == null) {
             synchronized (this) {
-                if (leftmostLabelLength == null) {
-                    leftmostLabelLength = getLeftmostLabel().length();
-                }
                 l = leftmostLabelLength;
+                if (l == null) {
+                    leftmostLabelLength = l = getLeftmostLabel().length();
+                }
             }
         }
         return l;
@@ -152,10 +152,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Integer m = maxLabelLength;
         if (m == null) {
             synchronized (this) {
-                if (maxLabelLength == null) {
-                    maxLabelLength = calculateMaxLabelLength(domain);
-                }
                 m = maxLabelLength;
+                if (m == null) {
+                    maxLabelLength = m = calculateMaxLabelLength(domain);
+                }
             }
         }
         return m;
@@ -165,10 +165,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Double d = digitRatio;
         if (d == null) {
             synchronized (this) {
-                if (digitRatio == null) {
-                    digitRatio = calculateDigitRatio(getLeftmostLabel());
-                }
                 d = digitRatio;
+                if (d == null) {
+                    digitRatio = d = calculateDigitRatio(getLeftmostLabel());
+                }
             }
         }
         return d;
@@ -178,10 +178,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Double h = hyphenRatio;
         if (h == null) {
             synchronized (this) {
-                if (hyphenRatio == null) {
-                    hyphenRatio = calculateHyphenRatio(getLeftmostLabel());
-                }
                 h = hyphenRatio;
+                if (h == null) {
+                    hyphenRatio = h = calculateHyphenRatio(getLeftmostLabel());
+                }
             }
         }
         return h;
@@ -191,10 +191,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Double u = uniqueCharacterRatio;
         if (u == null) {
             synchronized (this) {
-                if (uniqueCharacterRatio == null) {
-                    uniqueCharacterRatio = calculateUniqueCharacterRatio(getLeftmostLabel());
-                }
                 u = uniqueCharacterRatio;
+                if (u == null) {
+                    uniqueCharacterRatio = u = calculateUniqueCharacterRatio(getLeftmostLabel());
+                }
             }
         }
         return u;
@@ -204,10 +204,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Boolean b = base32Like;
         if (b == null) {
             synchronized (this) {
-                if (base32Like == null) {
-                    base32Like = isBase32Like(getLeftmostLabel());
-                }
                 b = base32Like;
+                if (b == null) {
+                    base32Like = b = isBase32Like(getLeftmostLabel());
+                }
             }
         }
         return b;
@@ -217,10 +217,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Boolean b = base64Like;
         if (b == null) {
             synchronized (this) {
-                if (base64Like == null) {
-                    base64Like = isBase64Like(getLeftmostLabel());
-                }
                 b = base64Like;
+                if (b == null) {
+                    base64Like = b = isBase64Like(getLeftmostLabel());
+                }
             }
         }
         return b;
@@ -230,10 +230,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Boolean p = punycode;
         if (p == null) {
             synchronized (this) {
-                if (punycode == null) {
-                    punycode = containsPunycode(domain);
-                }
                 p = punycode;
+                if (p == null) {
+                    punycode = p = containsPunycode(domain);
+                }
             }
         }
         return p;
@@ -243,10 +243,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Boolean i = ipLikeLabel;
         if (i == null) {
             synchronized (this) {
-                if (ipLikeLabel == null) {
-                    ipLikeLabel = containsIpLikeLabel(domain);
-                }
                 i = ipLikeLabel;
+                if (i == null) {
+                    ipLikeLabel = i = containsIpLikeLabel(domain);
+                }
             }
         }
         return i;
@@ -256,10 +256,10 @@ public final class DnsQueryRecord extends AbstractQueryRecord {
         Boolean s = suspiciousKeyword;
         if (s == null) {
             synchronized (this) {
-                if (suspiciousKeyword == null) {
-                    suspiciousKeyword = containsSuspiciousKeyword(domain);
-                }
                 s = suspiciousKeyword;
+                if (s == null) {
+                    suspiciousKeyword = s = containsSuspiciousKeyword(domain);
+                }
             }
         }
         return s;

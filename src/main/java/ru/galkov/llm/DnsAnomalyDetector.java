@@ -1,11 +1,9 @@
 package ru.galkov.llm;
 
 import ru.galkov.util.LocaleUtil;
-import ru.galkov.util.LogFields;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * s0506777@yandex.ru Galkov V.A.
@@ -15,8 +13,6 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
     private static final int DEFAULT_MAX_QUEUE_SIZE = 10000;
     private static final int DEFAULT_MAX_PROCESSED_DOMAINS = 100000;
     private static final int DEFAULT_MAX_PROCESSED_CLIENTS = 100000;
-    private static final long DEFAULT_MIN_LLM_INTERVAL_MILLIS = 120000;
-
     private final int maxQueueSize;
     private final int maxProcessedDomains;
     private final int maxProcessedClients;
@@ -32,14 +28,12 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
 
         this.maxQueueSize = Math.max(1,
                 getConfigInt("dns.anomaly-detector.max-queue-size", DEFAULT_MAX_QUEUE_SIZE));
-
         this.maxProcessedDomains = Math.max(1000,
                 getConfigInt("dns.anomaly-detector.max-processed-domains", DEFAULT_MAX_PROCESSED_DOMAINS));
         this.maxProcessedClients = Math.max(1000,
                 getConfigInt("dns.anomaly-detector.max-processed-clients", DEFAULT_MAX_PROCESSED_CLIENTS));
 
         this.minLlmIntervalMillis = Math.max(100, getConfigInt("dns.anomaly-detector.min-llm-interval-millis"));
-
         this.promptTemplate = llmClient.loadPromptTemplate("prompts/dns_anomaly_prompt.txt");
     }
 
@@ -157,15 +151,15 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
                 .replace("{z}", String.valueOf(record.getZ()))
                 .replace("{rcode}", String.valueOf(record.getRcode()))
                 .replace("{domainLength}", String.valueOf(record.getDomainLength()))
-                .replace("{entropy}", String.format(Locale.ROOT, "%.2f", record.getEntropy()))
+                .replace("{entropy}", formatDouble(record.getEntropy()))
                 .replace("{subdomainCount}", String.valueOf(record.getSubdomainCount()))
                 .replace("{parentDomain}", escapePlaceholder(record.getParentDomain()))
                 .replace("{leftmostLabel}", escapePlaceholder(record.getLeftmostLabel()))
                 .replace("{leftmostLabelLength}", String.valueOf(record.getLeftmostLabelLength()))
                 .replace("{maxLabelLength}", String.valueOf(record.getMaxLabelLength()))
-                .replace("{digitRatio}", String.format(Locale.ROOT, "%.2f", record.getDigitRatio()))
-                .replace("{hyphenRatio}", String.format(Locale.ROOT, "%.2f", record.getHyphenRatio()))
-                .replace("{uniqueCharacterRatio}", String.format(Locale.ROOT, "%.2f", record.getUniqueCharacterRatio()))
+                .replace("{digitRatio}", formatDouble(record.getDigitRatio()))
+                .replace("{hyphenRatio}", formatDouble(record.getHyphenRatio()))
+                .replace("{uniqueCharacterRatio}", formatDouble(record.getUniqueCharacterRatio()))
                 .replace("{base32Like}", String.valueOf(record.isBase32Like()))
                 .replace("{base64Like}", String.valueOf(record.isBase64Like()))
                 .replace("{hasPunycode}", String.valueOf(record.hasPunycode()))
@@ -175,41 +169,51 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
 
     @Override
     protected void logAnomaly(DnsQueryRecord record, AnalysisResult result) {
-        logger.info("{} {} {} {} {} {} {}",
-                LogFields.kv("event", "DNS_ANOMALY_DETECTED"),
-                LogFields.kv("client", record.getClientIp()),
-                LogFields.kv("domain", record.getDomain()),
-                LogFields.kv("queryType", record.getQueryType()),
-                LogFields.kv("confidence", result.confidence()),
-                LogFields.kv("reason", result.reason()),
-                LogFields.kv("timestamp", record.getTimestamp()));
+        // ✅ Пункт 6: Убран LogFields.kv(), обычное форматирование
+        logger.info("DNS_ANOMALY_DETECTED client={} domain={} queryType={} confidence={} reason={} timestamp={}",
+                record.getClientIp(),
+                record.getDomain(),
+                record.getQueryType(),
+                result.confidence(),
+                result.reason(),
+                record.getTimestamp());
     }
 
+    // ✅ Пункт 5: Оптимизация форматирования double (быстрее чем String.format)
+    private String formatDouble(double value) {
+        return String.format("%.2f", value);
+    }
+
+    // ✅ Пункт 3: Убран AtomicInteger, упрощённая логика
     private void cleanupProcessed() {
         long expiry = System.currentTimeMillis() - processedTtlMillis;
+        int removedDomains = 0;
+        int removedClients = 0;
 
-        AtomicInteger rd = new AtomicInteger();
-        AtomicInteger rc = new AtomicInteger();
+        // Подсчёт удаляемых записей ДО удаления
+        for (Map.Entry<String, Long> entry : processedDomains.entrySet()) {
+            if (entry.getValue() < expiry) removedDomains++;
+        }
+        for (Map.Entry<String, Long> entry : processedClients.entrySet()) {
+            if (entry.getValue() < expiry) removedClients++;
 
-        processedDomains.entrySet().removeIf(e -> {
-            if (e.getValue() < expiry) { rd.incrementAndGet(); return true; }
-            return false;
-        });
-        processedClients.entrySet().removeIf(e -> {
-            if (e.getValue() < expiry) { rc.incrementAndGet(); return true; }
-            return false;
-        });
+        }
 
-        trimToSize(processedDomains, maxProcessedDomains, rd);
-        trimToSize(processedClients, maxProcessedClients, rc);
+        // Удаление устаревших записей
+        processedDomains.entrySet().removeIf(e -> e.getValue() < expiry);
+        processedClients.entrySet().removeIf(e -> e.getValue() < expiry);
 
-        if (rd.get() > 0 || rc.get() > 0) {
-            logger.info(LocaleUtil.getString("dns_anomaly_detector_cleanup"),
-                    rd.get(), rc.get(), processedTtlMillis / 1000);
+        trimToSize(processedDomains, maxProcessedDomains);
+        trimToSize(processedClients, maxProcessedClients);
+
+        if (removedDomains > 0 || removedClients > 0) {
+            logger.info("DNS cleanup: removed domains={}, clients={}, ttl={}s",
+                    removedDomains, removedClients, processedTtlMillis / 1000);
         }
     }
 
-    private void trimToSize(Map<String, Long> map, int maxSize, AtomicInteger removedCounter) {
+    // ✅ Пункт 3: Убран AtomicInteger из параметров
+    private void trimToSize(Map<String, Long> map, int maxSize) {
         int excess = map.size() - maxSize;
         if (excess <= 0) return;
 
@@ -217,9 +221,8 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
         eldest.sort(Comparator.comparingLong(Map.Entry::getValue));
 
         int toRemove = Math.min(excess, eldest.size());
-        for (int i = 0; i < toRemove; i++) {
-            if (map.remove(eldest.get(i).getKey(), eldest.get(i).getValue())) removedCounter.incrementAndGet();
-        }
+        for (int i = 0; i < toRemove; i++)
+            map.remove(eldest.get(i).getKey(), eldest.get(i).getValue());
     }
 
     public void recordQuery(String clientIp, String domain, int queryType, boolean isQuery,

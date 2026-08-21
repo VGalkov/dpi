@@ -2,6 +2,7 @@ package ru.galkov.llm;
 
 import ru.galkov.util.BlacklistSnapshot;
 
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -77,6 +78,7 @@ public abstract class AbstractQueryRecord {
         return "clientIp='" + clientIp + "', timestamp=" + timestamp;
     }
 
+    // ✅ Пункт 1: Универсальный метод нормализации
     public static String normalize(String value) {
         return value == null ? "" : value.trim();
     }
@@ -88,18 +90,24 @@ public abstract class AbstractQueryRecord {
     }
 
     public static String normalizeDomain(String value) {
-        if (value == null) return null;
-        String result = value.trim().toLowerCase(Locale.ROOT);
-        while (result.endsWith(".")) {
-            result = result.substring(0, result.length() - 1);
-        }
-        return result.isEmpty() ? null : result;
+        return normalize(value, true, true);
     }
 
     public static String normalizeHost(String value) {
-        String host = normalize(value).toLowerCase(Locale.ROOT);
-        while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
-        return host;
+        return normalize(value, true, true);
+    }
+
+    // ✅ Универсальный метод нормализации (вместо 4 дублирующихся)
+    public static String normalize(String value, boolean toLowerCase, boolean removeTrailingDots) {
+        if (value == null) return null;
+        String result = value.trim();
+        if (toLowerCase) result = result.toLowerCase(Locale.ROOT);
+        if (removeTrailingDots) {
+            while (result.endsWith(".")) {
+                result = result.substring(0, result.length() - 1);
+            }
+        }
+        return result.isEmpty() ? null : result;
     }
 
     // ✅ Проверка IP
@@ -141,7 +149,7 @@ public abstract class AbstractQueryRecord {
         return true;
     }
 
-    // ✅ Метрики
+    // ✅ Пункт 2: Универсальный метод для расчёта ratio символов
     public static double calculateDigitRatio(String value) {
         if (value == null || value.isEmpty()) return 0.0;
         int count = 0;
@@ -152,10 +160,15 @@ public abstract class AbstractQueryRecord {
     }
 
     public static double calculateHyphenRatio(String value) {
+        return calculateCharRatio(value, '-');
+    }
+
+    // ✅ Универсальный метод для расчёта ratio (вместо дублирования)
+    public static double calculateCharRatio(String value, char target) {
         if (value == null || value.isEmpty()) return 0.0;
         int count = 0;
         for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == '-') count++;
+            if (value.charAt(i) == target) count++;
         }
         return (double) count / value.length();
     }
@@ -243,27 +256,28 @@ public abstract class AbstractQueryRecord {
         return (double) unique / value.length();
     }
 
-    // ✅ Base32-like (только для DNS)
+    // ✅ Пункт 3: Универсальный метод для Base32/Base64-like проверки
     public static boolean isBase32Like(String value) {
-        if (value == null || value.length() < 12) return false;
-        int valid = 0;
-        for (int i = 0; i < value.length(); i++) {
-            char c = Character.toUpperCase(value.charAt(i));
-            if ((c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7')) valid++;
-        }
-        return (double) valid / value.length() >= 0.95;
+        return isLikeEncoding(value, c -> {
+            char upper = Character.toUpperCase(c);
+            return (upper >= 'A' && upper <= 'Z') || (upper >= '2' && upper <= '7');
+        }, 12);
     }
 
-    // ✅ Base64-like (только для DNS)
     public static boolean isBase64Like(String value) {
-        if (value == null || value.length() < 16) return false;
+        return isLikeEncoding(value, c ->
+                        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                                (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=',
+                16
+        );
+    }
+
+    // ✅ Универсальный метод для Base32/Base64-like (вместо дублирования)
+    public static boolean isLikeEncoding(String value, java.util.function.Predicate<Character> validator, int minLength) {
+        if (value == null || value.length() < minLength) return false;
         int valid = 0;
         for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                    (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
-                valid++;
-            }
+            if (validator.test(value.charAt(i))) valid++;
         }
         return (double) valid / value.length() >= 0.95;
     }
@@ -317,18 +331,16 @@ public abstract class AbstractQueryRecord {
                 lower.contains("2e2e5c");
     }
 
-    // ✅ Injection markers (только для HTTP)
+    // ✅ Пункт 4: Оптимизация через список маркеров (вместо 20+ проверок)
+    private static final List<String> INJECTION_MARKERS = List.of(
+            "select ", " union ", " drop ", " insert ", " update ", " delete ",
+            " or 1=1", "<script", "javascript:", "onerror=", "onload=",
+            "$(", ";%00", "%0a", "%0d", "../", "..\\"
+    );
+
     public static boolean hasInjectionMarkers(String value) {
         String lower = value.toLowerCase(Locale.ROOT);
-        return lower.contains("select ") || lower.contains(" union ") ||
-                lower.contains(" drop ") || lower.contains(" insert ") ||
-                lower.contains(" update ") || lower.contains(" delete ") ||
-                lower.contains(" or 1=1") || lower.contains("<script") ||
-                lower.contains("javascript:") || lower.contains("onerror=") ||
-                lower.contains("onload=") || lower.contains("$(") ||
-                lower.contains(";%00") || lower.contains("%0a") ||
-                lower.contains("%0d") || lower.contains("../") ||
-                lower.contains("..\\");
+        return INJECTION_MARKERS.stream().anyMatch(lower::contains);
     }
 
     // ✅ Suspicious User-Agent (только для HTTP)
