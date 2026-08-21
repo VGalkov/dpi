@@ -127,20 +127,33 @@ public final class IpCidr {
     }
 
     public static boolean isBlockedAddressUncheckedIpv4(byte[] bytes) {
+        if (bytes.length != 4) return false;
+
         int a = bytes[0] & 0xff;
         int b = bytes[1] & 0xff;
-        int c = bytes[2] & 0xff;
-        int d = bytes[3] & 0xff;
 
-        return a == 0
-                || a == 10
-                || (a == 127)
-                || (a == 169 && b == 254)
-                || (a == 172 && b >= 16 && b <= 31)
-                || (a == 192 && b == 168)
-                || (a == 100 && b >= 64 && b <= 127)
-                || (a == 169 && b == 254 && c == 169 && d == 254)
-                || (a == 100 && b == 100 && c == 100 && d == 200);
+        // Быстрые проверки по первому октету
+        if (a == 0 || a == 10 || a == 127) return true;
+
+        // Проверки по первым двум октетам
+        if (a == 169 && b == 254) return true;  // Link-local
+        if (a == 172 && b >= 16 && b <= 31) return true;  // Private
+        if (a == 192 && b == 168) return true;  // Private
+        if (a == 100 && b >= 64 && b <= 127) return true;  // CGNAT
+
+        // Редкие случаи (APIPA, CGNAT fallback)
+        if (a == 169 && b == 254) {
+            int c = bytes[2] & 0xff;
+            int d = bytes[3] & 0xff;
+            if (c == 169 && d == 254) return true;  // APIPA
+        }
+        if (a == 100 && b == 100) {
+            int c = bytes[2] & 0xff;
+            int d = bytes[3] & 0xff;
+            if (c == 100 && d == 200) return true;  // CGNAT fallback
+        }
+
+        return false;
     }
 
     @Override

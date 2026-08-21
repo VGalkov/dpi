@@ -18,11 +18,28 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class RknBlacklistSource implements BlacklistSource {
     private static final Logger logger = LoggerFactory.getLogger(RknBlacklistSource.class);
     private final Path xmlFile;
+
+    private static final SAXParserFactory FACTORY = createFactory();
+
+    private static SAXParserFactory createFactory() {
+        SAXParserFactory factory = SAXParserFactory.newInstance();
+        factory.setNamespaceAware(true);
+        try {
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setFeature("http://javax.xml.XMLConstants/feature/secure-processing", true);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to configure SAXParserFactory", e);
+        }
+        return factory;
+    }
 
     public RknBlacklistSource(Path xmlFile) {
         if (xmlFile == null || !Files.isRegularFile(xmlFile))
@@ -40,19 +57,13 @@ public final class RknBlacklistSource implements BlacklistSource {
     }
 
     private List<BlacklistRule> parseRegisterXml(InputStream inputStream) throws IOException {
-        List<BlacklistRule> rules = new ArrayList<>();
+        // ✅ Начальная ёмкость 1000 (вместо дефолтной 10)
+        List<BlacklistRule> rules = new ArrayList<>(1000);
         RknHandler handler = new RknHandler(rules);
 
         try {
-            SAXParserFactory factory = SAXParserFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-            factory.setFeature("http://javax.xml.XMLConstants/feature/secure-processing", true);
-
-            SAXParser parser = factory.newSAXParser();
+            // ✅ Используем кэшированную фабрику
+            SAXParser parser = FACTORY.newSAXParser();
             parser.parse(inputStream, handler);
         } catch (Exception e) {
             throw new IOException(LocaleUtil.getString("rkn_xml_parse_error"), e);

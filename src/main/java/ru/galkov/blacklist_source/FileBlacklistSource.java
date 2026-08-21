@@ -2,14 +2,13 @@ package ru.galkov.blacklist_source;
 
 import ru.galkov.util.BlacklistRule;
 import ru.galkov.util.LocaleUtil;
-import ru.galkov.util.LogFields;
 
 import java.io.*;
 import java.net.URL;
 import java.util.List;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class FileBlacklistSource extends AbstractBlacklistSource {
     private final File file;
@@ -29,8 +28,7 @@ public final class FileBlacklistSource extends AbstractBlacklistSource {
 
     private InputStream openInputStream() throws IOException {
         if (file.isFile()) {
-            logger.info("{} {}", LogFields.kv("event", LocaleUtil.getString("file_source_found")),
-                    LogFields.kv("file", file.getAbsolutePath()));
+            logger.info("File source found: file={}", file.getAbsolutePath());
             return new FileInputStream(file);
         }
 

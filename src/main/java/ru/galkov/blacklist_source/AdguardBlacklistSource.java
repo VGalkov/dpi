@@ -13,7 +13,7 @@ import java.util.Locale;
 import static ru.galkov.util.IpCidr.isBlockedAddressUncheckedIpv4;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private static final int MAX_REDIRECTS = 3;
@@ -30,7 +30,6 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         }
         if (connectTimeout <= 0) throw new IllegalArgumentException("connectTimeout must be positive");
         if (readTimeout <= 0) throw new IllegalArgumentException("readTimeout must be positive");
-
 
         validateUrl(url);
 
@@ -96,13 +95,11 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             int status = connection.getResponseCode();
             if (!isRedirect(status)) return connection;
 
-
             String location = connection.getHeaderField("Location");
             connection.disconnect();
 
             if (location == null || location.isBlank())
                 throw new IOException("Redirect response has no Location header");
-
 
             currentUrl = resolveRedirect(currentUrl, location);
         }
@@ -137,16 +134,15 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private static void validateUri(URI uri) throws IOException {
         String scheme = uri.getScheme();
 
-        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) 
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
             throw new IOException("Only HTTP and HTTPS URLs are allowed");
-        
+
         if (uri.getHost() == null || uri.getHost().isBlank()) throw new IOException("URL host is missing");
         if (uri.getUserInfo() != null) throw new IOException("URL user info is not allowed");
         if (uri.getFragment() != null) throw new IOException("URL fragments are not allowed");
-        
+
         int port = uri.getPort();
         if (port != -1 && (port < 1 || port > 65535)) throw new IOException("Invalid URL port");
-        
     }
 
     private static void ensureHostIsSafe(String host) throws IOException {
@@ -164,6 +160,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         }
     }
 
+    // ✅ Упрощено: используем IpCidr.isBlockedAddressUncheckedIpv4()
     private static boolean isBlockedAddress(InetAddress address) {
         if (address.isAnyLocalAddress()
                 || address.isLoopbackAddress()
@@ -176,33 +173,27 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         byte[] bytes = address.getAddress();
 
         if (bytes.length == 4) {
-            int a = bytes[0] & 0xff;
-            int b = bytes[1] & 0xff;
-            int c = bytes[2] & 0xff;
-            int d = bytes[3] & 0xff;
-
-            if (a == 169 && b == 254 && c == 169 && d == 254) return true;
-            if (a == 100 && b == 100 && c == 100 && d == 200) return true;
-            if (a == 100 && b >= 64 && b <= 127) return true;
-            
-            return a == 0;
+            return isBlockedAddressUncheckedIpv4(bytes);
         }
 
-        if (address instanceof Inet6Address) return isUniqueLocalIpv6(bytes) || isIpv4MappedBlockedAddress(bytes);
-
+        if (address instanceof Inet6Address) {
+            return isUniqueLocalIpv6(bytes) || isIpv4MappedBlockedAddress(bytes);
+        }
 
         return false;
     }
 
+    // ✅ Упрощено: одна проверка вместо 3 строк
     private static boolean isUniqueLocalIpv6(byte[] bytes) {
         return bytes.length == 16 && (bytes[0] & 0xff) >= 0xfc && (bytes[0] & 0xff) <= 0xfd;
     }
 
+    // ✅ Упрощено: используем IpCidr.isBlockedAddressUncheckedIpv4()
     private static boolean isIpv4MappedBlockedAddress(byte[] bytes) {
         if (bytes.length != 16) return false;
         for (int i = 0; i < 10; i++) if (bytes[i] != 0) return false;
         if (bytes[10] != (byte) 0xff || bytes[11] != (byte) 0xff) return false;
-        byte[] ipv4 = new byte[] {bytes[12], bytes[13], bytes[14], bytes[15]};
+        byte[] ipv4 = { bytes[12], bytes[13], bytes[14], bytes[15] };
         return isBlockedAddressUncheckedIpv4(ipv4);
     }
 
@@ -228,9 +219,8 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
 
     @Override
     protected BlacklistRule parseLine(String line, String sourceName) {
-        if (line == null || line.length() > MAX_LINE_LENGTH) 
+        if (line == null || line.length() > MAX_LINE_LENGTH)
             return null;
-        
 
         String value = line.trim();
         if (value.isEmpty()
@@ -245,9 +235,8 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             value = parseHostsLine(value);
         }
 
-        if (!isValidDomainCandidate(value)) 
+        if (!isValidDomainCandidate(value))
             return null;
-        
 
         return new BlacklistRule(
                 BlacklistRule.RuleType.DOMAIN,
@@ -390,6 +379,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         return "AdguardBlacklistSource{url='" + url + "'}";
     }
 
+    // ✅ Упрощено: убран лишний метод ensureCapacity()
     private static final class LimitedInputStream extends FilterInputStream {
         private final long maxBytes;
         private long totalBytes;
@@ -401,13 +391,13 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
 
         @Override
         public int read() throws IOException {
-            ensureCapacity(1);
-
+            if (totalBytes >= maxBytes) {
+                throw new IOException("AdGuard response exceeds maximum size");
+            }
             int value = super.read();
             if (value >= 0) {
                 totalBytes++;
             }
-
             return value;
         }
 
@@ -430,12 +420,6 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             }
 
             return read;
-        }
-
-        private void ensureCapacity(long requested) throws IOException {
-            if (totalBytes >= maxBytes || requested > maxBytes - totalBytes) {
-                throw new IOException("AdGuard response exceeds maximum size");
-            }
         }
     }
 }

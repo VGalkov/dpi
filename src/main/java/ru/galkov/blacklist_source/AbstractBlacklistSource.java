@@ -13,13 +13,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public abstract class AbstractBlacklistSource implements BlacklistSource {
     protected final Logger logger = LoggerFactory.getLogger(getClass());
 
     protected List<BlacklistRule> loadFromStream(InputStream input, String sourceName) throws IOException {
-        List<BlacklistRule> rules = new ArrayList<>();
+        List<BlacklistRule> rules = new ArrayList<>(1000);
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
