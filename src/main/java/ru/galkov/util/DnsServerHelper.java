@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static ru.galkov.Main.getConfig;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class DnsServerHelper {
 
@@ -31,6 +31,7 @@ public final class DnsServerHelper {
         private final long clientIdleNanos;
         private final ConcurrentHashMap<String, TokenBucket> buckets;
         private final AtomicLong requestCounter = new AtomicLong();
+        private final AtomicLong rejectedRequestCounter = new AtomicLong();
         private final Object cleanupLock = new Object();
 
         private volatile long nextCleanupNanos;
@@ -90,13 +91,7 @@ public final class DnsServerHelper {
             TokenBucket bucket = buckets.computeIfAbsent(clientIp, ignored -> new TokenBucket(burst, now));
             boolean acquired = bucket.tryAcquire(now, requestsPerSecond, burst);
             if (!acquired) {
-                if (RATE_LIMIT_LOGGING_ENABLED) {
-                    logger.debug(
-                            "Rate limit exceeded for client: {} (active={})",
-                            clientIp,
-                            buckets.size()
-                    );
-                }
+                if (RATE_LIMIT_LOGGING_ENABLED) rejectedRequestCounter.incrementAndGet();
                 return false;
             }
 
@@ -141,7 +136,11 @@ public final class DnsServerHelper {
                 }
 
                 if (removed > 0)
-                    logger.info("DNS RateLimiter: fast cleanup removed {} clients", removed);
+                    logger.info(
+                            "DNS RateLimiter: fast cleanup removed {} clients, rejectedRequestsSinceLastCleanup={}",
+                            removed,
+                            rejectedRequestCounter.getAndSet(0)
+                    );
             }
         }
 

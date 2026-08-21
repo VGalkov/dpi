@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAdder;
 
 import static ru.galkov.Main.getConfig;
 
@@ -47,6 +48,15 @@ public class HttpProxyServer {
     private volatile boolean running;
     private volatile ServerSocket serverSocket;
     private volatile Thread serverThread;
+
+    private final LongAdder maxSocketsRejectedCount = new LongAdder();
+    private final LongAdder maxConnectionsRejectedCount = new LongAdder();
+    private final LongAdder maxClientConnectionsRejectedCount = new LongAdder();
+    private final LongAdder acceptSocketErrorsCount = new LongAdder();
+    private final LongAdder acceptIoErrorsCount = new LongAdder();
+    private final LongAdder workerPoolRejectedCount = new LongAdder();
+    private final LongAdder duplicateSocketCount = new LongAdder();
+    private final LongAdder cleanedSocketsCount = new LongAdder();
 
     public HttpProxyServer(int port, BlacklistLoader blacklist, HttpAnomalyDetector httpAnomalyDetector) {
         this.port = port;
@@ -96,6 +106,7 @@ public class HttpProxyServer {
             socketActivity.clear();
         }
         joinServerThread();
+        logAggregatedStatistics();
         logger.info("Остановка HTTP proxy завершена: port={}", port);
     }
 
@@ -110,11 +121,11 @@ public class HttpProxyServer {
                     clientSocket = serverSocket.accept();
                 } catch (SocketException e) {
                     if (!running) break;
-                    logger.warn("Ошибка accept: {}", e.getMessage());
+                    acceptSocketErrorsCount.increment();
                     continue;
                 } catch (IOException e) {
                     if (!running) break;
-                    logger.error("Ошибка accept на порту {}", port, e);
+                    acceptIoErrorsCount.increment();
                     continue;
                 }
 
@@ -130,6 +141,7 @@ public class HttpProxyServer {
         } finally {
             this.serverSocket = null;
             running = false;
+            logAggregatedStatistics();
             logger.info("HTTP Proxy server thread завершён");
         }
     }
@@ -139,7 +151,7 @@ public class HttpProxyServer {
 
         // ✅ П.55: атомарная проверка и добавление
         if (!activeClientSockets.add(clientSocket)) {
-            logger.warn(LocaleUtil.getString("http_proxy_max_sockets_reached"), activeClientSockets.size(), maxActiveSockets);
+            duplicateSocketCount.increment();
             closeQuietly(clientSocket);
             cleanupOldSockets();
             return;
@@ -150,7 +162,7 @@ public class HttpProxyServer {
         if (activeClientSockets.size() > maxActiveSockets) {
             activeClientSockets.remove(clientSocket);
             socketActivity.remove(clientSocket);
-            logger.warn(LocaleUtil.getString("http_proxy_max_sockets_reached"), activeClientSockets.size(), maxActiveSockets);
+            maxSocketsRejectedCount.increment();
             closeQuietly(clientSocket);
             cleanupOldSockets();
             return;
@@ -159,7 +171,7 @@ public class HttpProxyServer {
         if (!connectionSlots.tryAcquire()) {
             activeClientSockets.remove(clientSocket);
             socketActivity.remove(clientSocket);
-            logger.warn("PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS", clientIp);
+            maxConnectionsRejectedCount.increment();
             closeQuietly(clientSocket);
             return;
         }
@@ -180,12 +192,10 @@ public class HttpProxyServer {
             activeClientSockets.remove(clientSocket);
             socketActivity.remove(clientSocket);
             releaseConnectionSlot(clientIp, clientConnections);
-            logger.warn("PROXY_CONNECTION_REJECT client={} reason=MAX_CONNECTIONS_PER_CLIENT", clientIp);
+            maxClientConnectionsRejectedCount.increment();
             closeQuietly(clientSocket);
             return;
         }
-
-        logger.debug("PROXY_CONNECTION_ACCEPT client={} activeForClient={}", clientIp, activeForClient);
 
         try {
             workerPool.execute(() -> {
@@ -202,6 +212,7 @@ public class HttpProxyServer {
             socketActivity.remove(clientSocket);
             releaseConnectionSlot(clientIp, clientConnections);
             closeQuietly(clientSocket);
+            workerPoolRejectedCount.increment();
             logger.error("Не удалось передать соединение в worker pool: client={}", clientIp, e);
         }
     }
@@ -237,6 +248,7 @@ public class HttpProxyServer {
         }
 
         if (removed > 0) {
+            cleanedSocketsCount.add(removed);
             int removedPercent = (removed * 100) / currentSize;
             logger.info(LocaleUtil.getString("http_proxy_socket_cleanup_triggered"),
                     removed, removedPercent, currentSize);
@@ -247,7 +259,6 @@ public class HttpProxyServer {
         int remaining = clientConnections.decrementAndGet();
         if (remaining <= 0) connectionsByClient.remove(clientIp, clientConnections);
         connectionSlots.release();
-        logger.debug("PROXY_CONNECTION_CLOSE client={} activeForClient={}", clientIp, Math.max(remaining, 0));
     }
 
     private void joinServerThread() {
@@ -275,5 +286,47 @@ public class HttpProxyServer {
             try { Thread.sleep(50L); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
         logger.warn("HTTP Proxy не открыл порт {} за 5 секунд", port);
+    }
+
+    private void logAggregatedStatistics() {
+        long duplicateSockets = duplicateSocketCount.sum();
+        long maxSocketsRejected = maxSocketsRejectedCount.sum();
+        long maxConnectionsRejected = maxConnectionsRejectedCount.sum();
+        long maxClientConnectionsRejected = maxClientConnectionsRejectedCount.sum();
+        long acceptSocketErrors = acceptSocketErrorsCount.sum();
+        long acceptIoErrors = acceptIoErrorsCount.sum();
+        long workerPoolRejected = workerPoolRejectedCount.sum();
+        long cleanedSockets = cleanedSocketsCount.sum();
+
+        if (duplicateSockets == 0
+                && maxSocketsRejected == 0
+                && maxConnectionsRejected == 0
+                && maxClientConnectionsRejected == 0
+                && acceptSocketErrors == 0
+                && acceptIoErrors == 0
+                && workerPoolRejected == 0
+                && cleanedSockets == 0) {
+            return;
+        }
+
+        logger.info(
+                "HTTP Proxy aggregated statistics: " +
+                        "duplicateSockets={}, " +
+                        "maxSocketsRejected={}, " +
+                        "maxConnectionsRejected={}, " +
+                        "maxClientConnectionsRejected={}, " +
+                        "acceptSocketErrors={}, " +
+                        "acceptIoErrors={}, " +
+                        "workerPoolRejected={}, " +
+                        "cleanedSockets={}",
+                duplicateSockets,
+                maxSocketsRejected,
+                maxConnectionsRejected,
+                maxClientConnectionsRejected,
+                acceptSocketErrors,
+                acceptIoErrors,
+                workerPoolRejected,
+                cleanedSockets
+        );
     }
 }

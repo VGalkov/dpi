@@ -1,5 +1,8 @@
 package ru.galkov.util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -10,12 +13,17 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class ProxyHandlerHelper {
 
+    private static final Logger logger = LoggerFactory.getLogger(ProxyHandlerHelper.class);
+
     private static final int MAX_TLS_RECORD = 18432;
     private static final int MAX_TLS_HELLO = 65536;
+
+    private ProxyHandlerHelper() {
+    }
 
     public static byte[] readInitialTlsHandshake(InputStream in, Socket socket, int clientReadTimeout) throws IOException {
         int origTimeout = socket.getSoTimeout();
@@ -60,6 +68,9 @@ public final class ProxyHandlerHelper {
             }
             return res.toByteArray();
         } catch (SocketTimeoutException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Timeout while reading initial TLS handshake");
+            }
             return null;
         } finally {
             socket.setSoTimeout(origTimeout);
@@ -116,6 +127,9 @@ public final class ProxyHandlerHelper {
             }
             return null;
         } catch (RuntimeException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Invalid TLS handshake structure", e);
+            }
             return null;
         }
     }
@@ -167,6 +181,9 @@ public final class ProxyHandlerHelper {
             }
             return null;
         } catch (Exception e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Unable to resolve HTTP target", e);
+            }
             return null;
         }
     }
@@ -209,6 +226,9 @@ public final class ProxyHandlerHelper {
             if (url.getQuery() != null) path += "?" + url.getQuery();
             return path;
         } catch (Exception e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Unable to extract HTTP path", e);
+            }
             return "/";
         }
     }
@@ -233,6 +253,9 @@ public final class ProxyHandlerHelper {
             Thread.currentThread().interrupt();
             t1.interrupt();
             t2.interrupt();
+            if (logger.isDebugEnabled()) {
+                logger.debug("Proxy tunnel interrupted", e);
+            }
         } finally {
             IoUtil.closeQuietly(client);
             IoUtil.closeQuietly(remote);
@@ -255,7 +278,10 @@ public final class ProxyHandlerHelper {
                 dst.shutdownOutput();
             } catch (IOException ignored) {
             }
-        } catch (IOException _) {
+        } catch (IOException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Proxy tunnel pipe closed: {}", e.getMessage());
+            }
         } finally {
             if (in != null) {
                 try { IoUtil.closeQuietly(src); } catch (Exception ignored) {}
