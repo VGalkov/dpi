@@ -1,7 +1,5 @@
 package ru.galkov.llm;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
 
 import java.util.concurrent.BlockingQueue;
@@ -10,49 +8,32 @@ import java.util.concurrent.TimeUnit;
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
-public final class HttpAnomalyDetector
-        extends AbstractAnomalyDetector<HttpQueryRecord> {
+public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord> {
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(HttpAnomalyDetector.class);
 
     private static final int DEFAULT_MAX_QUEUE_SIZE = 10_000;
     private static final int DEFAULT_BODY_PREVIEW_LENGTH = 500;
     private static final long DEFAULT_MIN_LLM_INTERVAL_MILLIS = 5_000L;
-
     private final boolean inspectBody;
     private final int maxQueueSize;
     private final int bodyPreviewLength;
     private final long minLlmIntervalMillis;
-
-    // ✅ Шаблон промпта кэшируется в конструкторе (как в DnsAnomalyDetector)
     private final String promptTemplate;
-
     private final BlockingQueue<HttpQueryRecord> queue;
-
     private volatile long lastLlmRequestTime;
 
     public HttpAnomalyDetector() {
         super("http.anomaly-detector");
 
-        this.inspectBody = getConfigBoolean(
-                "http.anomaly-detector.inspect-body"
-        );
+        this.inspectBody = getConfigBoolean("http.anomaly-detector.inspect-body");
 
         this.maxQueueSize = Math.max(
-                1,
-                getConfigInt(
-                        "http.anomaly-detector.max-queue-size",
-                        DEFAULT_MAX_QUEUE_SIZE
-                )
+                1, getConfigInt("http.anomaly-detector.max-queue-size", DEFAULT_MAX_QUEUE_SIZE)
         );
 
         this.bodyPreviewLength = Math.max(
                 0,
-                getConfigInt(
-                        "http.anomaly-detector.body-preview-length",
-                        DEFAULT_BODY_PREVIEW_LENGTH
-                )
+                getConfigInt("http.anomaly-detector.body-preview-length", DEFAULT_BODY_PREVIEW_LENGTH)
         );
 
         this.minLlmIntervalMillis = Math.max(
@@ -64,23 +45,12 @@ public final class HttpAnomalyDetector
         );
 
         this.queue = new LinkedBlockingQueue<>(maxQueueSize);
-
-        // ✅ Кэшируем шаблон один раз при старте
-        this.promptTemplate = llmClient.loadPromptTemplate(
-                "prompts/http_anomaly_prompt.txt"
-        );
-
+        this.promptTemplate = llmClient.loadPromptTemplate("prompts/http_anomaly_prompt.txt");
         logger.info(
-                LocaleUtil.getString(
-                        "http_anomaly_detector_initialized"
-                ),
+                LocaleUtil.getString("http_anomaly_detector_initialized"),
                 enabled,
-                getConfigString(
-                        "http.anomaly-detector.llm-studio.model"
-                ),
-                getConfigString(
-                        "http.anomaly-detector.llm-studio.url"
-                ),
+                getConfigString("http.anomaly-detector.llm-studio.model"),
+                getConfigString("http.anomaly-detector.llm-studio.url"),
                 processedTtlMillis / 1000,
                 inspectBody
         );
@@ -99,8 +69,7 @@ public final class HttpAnomalyDetector
 
         if (!queue.offer(record)) {
             logger.warn(
-                    "HTTP anomaly queue is full, dropping request: "
-                            + "client={}, host={}, path={}",
+                    "HTTP anomaly queue is full, dropping request: client={}, host={}, path={}",
                     record.getClientIp(),
                     record.getHost(),
                     record.getPath()
@@ -109,9 +78,7 @@ public final class HttpAnomalyDetector
         }
 
         logger.debug(
-                LocaleUtil.getString(
-                        "http_anomaly_detector_record_added"
-                ),
+                LocaleUtil.getString("http_anomaly_detector_record_added"),
                 record.getClientIp(),
                 record.getHost(),
                 record.getMethod()
@@ -122,15 +89,8 @@ public final class HttpAnomalyDetector
     protected void processQueue() {
         while (running) {
             try {
-                HttpQueryRecord record = queue.poll(
-                        1,
-                        TimeUnit.SECONDS
-                );
-
-                if (record == null) {
-                    continue;
-                }
-
+                HttpQueryRecord record = queue.poll(1, TimeUnit.SECONDS);
+                if (record == null) continue;
                 waitForLlmInterval();
                 analyzeRecord(record);
 
@@ -139,39 +99,26 @@ public final class HttpAnomalyDetector
                 break;
             } catch (Exception e) {
                 logger.error(
-                        LocaleUtil.getString(
-                                "http_anomaly_detector_analysis_error"
-                        ),
+                        LocaleUtil.getString("http_anomaly_detector_analysis_error"),
                         e.getMessage(),
                         e
                 );
             }
         }
 
-        logger.info(
-                LocaleUtil.getString(
-                        "http_anomaly_detector_queue_completed"
-                )
-        );
+        logger.info(LocaleUtil.getString("http_anomaly_detector_queue_completed"));
     }
 
-    private void waitForLlmInterval()
-            throws InterruptedException {
+    private void waitForLlmInterval() throws InterruptedException {
         while (running) {
-            long elapsed = System.currentTimeMillis()
-                    - lastLlmRequestTime;
-
+            long elapsed = System.currentTimeMillis() - lastLlmRequestTime;
             long remaining = minLlmIntervalMillis - elapsed;
-
-            if (remaining <= 0) {
-                return;
-            }
-
+            if (remaining <= 0) return;
             Thread.sleep(Math.min(remaining, 100L));
         }
     }
 
-    private void analyzeRecord(HttpQueryRecord record) {
+    protected void analyzeRecord(HttpQueryRecord record) {
         String prompt = buildPrompt(record);
 
         if (prompt.isBlank()) {
@@ -180,14 +127,13 @@ public final class HttpAnomalyDetector
         }
 
         lastLlmRequestTime = System.currentTimeMillis();
-
-        AnalysisResult result = analyzeWithLlm(prompt);
+        String host = record.getHost() != null ? record.getHost() : "unknown";
+        AnalysisResult result = analyzeRecord(prompt, host);
 
         if (result == null) return;
         if (result.suspicious() && result.confidence() >= trustThreshold) {
             logger.info(
-                    "HTTP anomaly detected: client={}, method={}, "
-                            + "host={}, path={}, confidence={}, "
+                    "HTTP anomaly detected: client={}, method={}, host={}, path={}, confidence={}, "
                             + "reason={}, actions={}",
                     record.getClientIp(),
                     record.getMethod(),
@@ -205,13 +151,11 @@ public final class HttpAnomalyDetector
 
         if (inspectBody && !record.getBody().isEmpty()) {
             bodyPreview = record.getBody();
-            if (bodyPreview.length() > bodyPreviewLength) {
+            if (bodyPreview.length() > bodyPreviewLength)
                 bodyPreview = bodyPreview.substring(0, bodyPreviewLength);
-            }
         }
 
-        if (promptTemplate == null || promptTemplate.isBlank())
-            return "";
+        if (promptTemplate == null || promptTemplate.isBlank()) return "";
 
         return promptTemplate
                 .replace("{clientIp}", promptValue(record.getClientIp(), 128))

@@ -1,7 +1,5 @@
 package ru.galkov.llm;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
 import ru.galkov.util.LogFields;
 
@@ -12,8 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
-public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> {
-    private static final Logger logger = LoggerFactory.getLogger(DnsAnomalyDetector.class);
+public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> {
 
     private static final int DEFAULT_MAX_QUEUE_SIZE = 10000;
     private static final int DEFAULT_MAX_PROCESSED_DOMAINS = 100000;
@@ -179,10 +176,13 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
         }
     }
 
+
     private AnalysisResult analyzeRecord(DnsQueryRecord record) {
+        String domain = record.getDomain();
+
         String prompt = promptTemplate
                 .replace("{clientIp}", escapePlaceholder(record.getClientIp()))
-                .replace("{domain}", escapePlaceholder(record.getDomain()))
+                .replace("{domain}", escapePlaceholder(domain))
                 .replace("{queryType}", String.valueOf(record.getQueryType()))
                 .replace("{timestamp}", String.valueOf(record.getTimestamp()))
                 .replace("{qr}", record.isQuery() ? "QUERY" : "RESPONSE")
@@ -207,7 +207,7 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
                 .replace("{hasIpLikeLabel}", String.valueOf(record.hasIpLikeLabel()))
                 .replace("{hasSuspiciousKeyword}", String.valueOf(record.hasSuspiciousKeyword()));
 
-        return analyzeWithLlm(prompt);
+        return analyzeRecord(prompt, domain);
     }
 
     private String escapePlaceholder(String value) {

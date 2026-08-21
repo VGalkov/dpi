@@ -11,5 +11,7 @@
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/ProxyHandlerHelper.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/RuleNormalizer.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/resources/prompts/dns_anomaly_prompt.txt" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/resources/prompts/http_anomaly_prompt.txt" charset="UTF-8" />
   </component>
 </project>

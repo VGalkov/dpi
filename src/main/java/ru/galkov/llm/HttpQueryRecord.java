@@ -91,11 +91,7 @@ public final class HttpQueryRecord {
 
     private static String normalizeHost(String value) {
         String host = normalize(value).toLowerCase(Locale.ROOT);
-
-        while (host.endsWith(".")) {
-            host = host.substring(0, host.length() - 1);
-        }
-
+        while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
         return host;
     }
 
@@ -199,7 +195,6 @@ public final class HttpQueryRecord {
                 || lower.contains("user-agent: nmap");
     }
 
-    // ✅ П.44: toString через конкатенацию вместо String.format
     @Override
     public String toString() {
         return "HttpQueryRecord{clientIp='" + clientIp

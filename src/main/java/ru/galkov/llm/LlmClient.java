@@ -18,27 +18,26 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
-import java.util.regex.Matcher;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class LlmClient {
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
 
     private static final int MAX_RESPONSE_BYTES = 1_048_576;
     private static final int MAX_REASON_LENGTH = 500;
-    private static final int MAX_OUTPUT_TOKENS = 1000;
+    private static final int MAX_OUTPUT_TOKENS = 1024;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final Pattern JSON_PATTERN = Pattern.compile(
             "```(?:json)?\\s*(\\{.*?})\\s*```",
-            Pattern.DOTALL
-    );
+            Pattern.DOTALL);
 
     private final String llmUrl;
     private final String model;
@@ -144,133 +143,165 @@ public final class LlmClient {
         }
     }
 
-    public AnalysisResult parseResponse(String responseBody) {
+
+    public AnalysisResult parseResponse(String responseBody, String domain) {
         if (responseBody == null || responseBody.isBlank()) {
-            logger.warn("Empty LLM response body");
-            return null;
+            logger.warn("Empty LLM response body for domain={}", domain);
+            return new AnalysisResult(false, 0.0, "Empty response from LLM", List.of("NONE"));
         }
 
         try {
-            String cleanedJson = extractJsonFromMarkdown(responseBody);
-            JsonNode rootNode = objectMapper.readTree(cleanedJson);
+            JsonNode rootNode = objectMapper.readTree(responseBody);
 
             JsonNode choicesNode = rootNode.get("choices");
             if (choicesNode == null || !choicesNode.isArray() || choicesNode.isEmpty()) {
-                logger.warn("LLM response does not contain choices");
-                return null;
+                logger.warn("No choices in LLM response for domain={}", domain);
+                return new AnalysisResult(false, 0.0, "Invalid LLM response structure (no choices)", List.of("NONE"));
             }
 
-            JsonNode firstChoice = choicesNode.get(0);
-            JsonNode messageNode = firstChoice.get("message");
-            if (messageNode == null || !messageNode.isObject()) {
-                logger.warn("LLM response does not contain message");
-                return null;
+            JsonNode messageNode = choicesNode.get(0).get("message");
+            if (messageNode == null) {
+                logger.warn("Message missing in LLM response for domain={}", domain);
+                return new AnalysisResult(false, 0.0, "Invalid LLM response (no message)", List.of("NONE"));
             }
 
-            JsonNode finishReason = firstChoice.get("finish_reason");
-            if (finishReason != null && "length".equals(finishReason.asText())) {
-                logger.warn("LLM output was truncated by max_tokens");
-                return null;
+            String rawContent = messageNode.get("content").asText();
+
+            logger.trace("Raw LLM content (before cleaning) for domain={}: {}", domain, truncate(rawContent, 500));
+
+            if (rawContent.isBlank()) {
+                logger.warn("Content is empty for domain={}", domain);
+                return new AnalysisResult(false, 0.0, "LLM returned empty content", List.of("NONE"));
             }
 
-            JsonNode contentNode = messageNode.get("content");
-            if (contentNode == null || !contentNode.isTextual() || contentNode.asText().isBlank()) {
-                JsonNode reasoningNode = messageNode.get("reasoning_content");
-                logger.warn("LLM message.content is empty; reasoningContent={}",
-                        reasoningNode == null ? "none" : truncate(reasoningNode.asText(), 500));
-                return null;
+            String cleanJson = extractPureJson(rawContent);
+
+            if (cleanJson != null) {
+                logger.trace("Cleaned JSON extracted for domain={}: {}", domain, truncate(cleanJson, 500));
+            } else {
+                logger.error("Failed to extract valid JSON from raw content for domain={}. Raw: {}", domain, truncate(rawContent, 200));
+                return new AnalysisResult(false, 0.0, "Failed to extract JSON from response", List.of("NONE"));
             }
 
-            String content = contentNode.asText().trim();
-            String cleanedContent = extractJsonFromMarkdown(content);
-            JsonNode resultNode = objectMapper.readTree(cleanedContent);
-
+            JsonNode resultNode = objectMapper.readTree(cleanJson);
             if (!resultNode.isObject()) {
-                logger.warn("LLM content is not a JSON object");
-                return null;
+                logger.error("Extracted content is not a JSON object for domain={}", domain);
+                return new AnalysisResult(false, 0.0, "Extracted content is not JSON object", List.of("NONE"));
             }
 
             JsonNode suspiciousNode = resultNode.get("isSuspicious");
             JsonNode confidenceNode = resultNode.get("confidence");
+
+            if (suspiciousNode == null && resultNode.has("is_suspicious")) suspiciousNode = resultNode.get("is_suspicious");
+            if (confidenceNode == null && resultNode.has("conf")) confidenceNode = resultNode.get("conf");
+
+            if (suspiciousNode == null || confidenceNode == null) {
+                logger.warn("Missing mandatory fields in JSON for domain={}. Required: isSuspicious, confidence.", domain);
+
+                List<String> availableKeys = new ArrayList<>();
+                for (Iterator<String> it = resultNode.fieldNames(); it.hasNext(); ) {
+                    String key = it.next();
+                    availableKeys.add(key);
+                }
+                logger.warn("Available keys in response for domain={}: {}", domain, availableKeys);
+
+                return new AnalysisResult(false, 0.0, "Missing critical fields in LLM output", List.of("NONE"));
+            }
+
+            boolean isSuspicious = suspiciousNode.asBoolean();
+            double confidence = confidenceNode.asDouble();
+
+            if (!Double.isFinite(confidence)) {
+                confidence = 0.0;
+            } else if (confidence < 0.0) confidence = 0.0;
+            else if (confidence > 1.0) confidence = 1.0;
+
+            String reason = "";
             JsonNode reasonNode = resultNode.get("reason");
+            if (reasonNode != null && reasonNode.isTextual()) {
+                reason = reasonNode.asText().trim();
+            }
+            if (reason.length() > MAX_REASON_LENGTH) {
+                reason = reason.substring(0, MAX_REASON_LENGTH);
+            }
+
+            List<String> actions = new ArrayList<>();
             JsonNode actionsNode = resultNode.get("recommendedActions");
 
-            if (suspiciousNode == null || confidenceNode == null || reasonNode == null || actionsNode == null) {
-                logger.warn("LLM JSON misses required fields");
-                return null;
-            }
-            if (!suspiciousNode.isBoolean() || !confidenceNode.isNumber()
-                    || !reasonNode.isTextual() || !actionsNode.isArray()) {
-                logger.warn("LLM JSON contains invalid field types");
-                return null;
-            }
-
-            double confidence = confidenceNode.asDouble();
-            if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
-                logger.warn("Invalid confidence: {}", confidence);
-                return null;
+            if (actionsNode != null) {
+                if (actionsNode.isArray()) {
+                    for (JsonNode item : actionsNode) {
+                        if (item.isTextual()) actions.add(item.asText());
+                    }
+                } else if (actionsNode.isTextual()) {
+                    String singleAction = actionsNode.asText();
+                    logger.info("Model returned string in 'recommendedActions' instead of array for domain={}. Value: '{}'. Converting to list.", domain, singleAction);
+                    actions.add(singleAction);
+                }
             }
 
-            List<String> actions = parseActions(actionsNode);
-            if (actions.size() != 1) {
-                logger.warn("LLM must return exactly one action");
-                return null;
+            if (actions.isEmpty()) {
+                JsonNode singleActionNode = resultNode.get("action");
+                if (singleActionNode != null && singleActionNode.isTextual()) {
+                    actions.add(singleActionNode.asText());
+                }
             }
 
-            String reason = reasonNode.asText("").trim();
-            if (reason.length() > MAX_REASON_LENGTH) reason = reason.substring(0, MAX_REASON_LENGTH);
+            if (actions.isEmpty()) {
+                actions.add("NONE");
+                logger.debug("No action field found in LLM response for domain={}, defaulting to NONE", domain);
+            }
 
+            // ✅ ИСПРАВЛЕННЫЙ ЛОГ С ДОМЕНОМ И ФОРМАТИРОВАНИЕМ
+            logger.info("Successfully parsed LLM result: domain={}, suspicious={}, confidence={}, actions={}",
+                    domain, isSuspicious, String.format(Locale.ROOT, "%.2f", confidence), actions);
 
-            return new AnalysisResult(suspiciousNode.asBoolean(), confidence, reason, actions);
+            return new AnalysisResult(isSuspicious, confidence, reason, actions);
 
         } catch (IOException e) {
-            logger.error(LocaleUtil.getString("llm_client_json_parse_error"), e.getMessage());
-            return null;
-        } catch (RuntimeException e) {
-            logger.error(LocaleUtil.getString("llm_client_parse_error"), e.getMessage());
-            return null;
+            logger.error("Critical JSON parsing error for domain={}: {}", domain, e.getMessage(), e);
+            return new AnalysisResult(false, 0.0, "Parsing failed: " + e.getMessage(), List.of("NONE"));
+        } catch (Exception e) {
+            logger.error("Unexpected error during LLM parsing for domain={}: {}", domain, e.getMessage(), e);
+            return new AnalysisResult(false, 0.0, "Unexpected error", List.of("NONE"));
         }
     }
 
-    private static String extractJsonFromMarkdown(String content) {
-        if (content == null || content.isBlank()) {
-            return content;
-        }
+    private String extractPureJson(String input) {
+        if (input == null) return null;
+        String trimmed = input.trim();
 
-        String trimmed = content.trim();
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
 
-        if (trimmed.startsWith("```")) {
-            Matcher matcher = JSON_PATTERN.matcher(trimmed);
-            if (matcher.find()) {
-                return matcher.group(1);
-            }
-
-            int startIndex = trimmed.indexOf('{');
-            int endIndex = trimmed.lastIndexOf('}');
-            if (startIndex >= 0 && endIndex > startIndex) {
-                return trimmed.substring(startIndex, endIndex + 1);
+        if (start != -1 && end != -1 && end > start) {
+            String candidate = trimmed.substring(start, end + 1);
+            try {
+                objectMapper.readTree(candidate);
+                return candidate;
+            } catch (IOException ignored) {
+                return findValidJsonBlock(trimmed);
             }
         }
-
-        return trimmed;
+        return null;
     }
 
-    private List<String> parseActions(JsonNode actionsNode) {
-        List<String> result = new ArrayList<>();
-
-        for (JsonNode actionNode : actionsNode) {
-            if (!actionNode.isTextual()) {
-                continue;
-            }
-
-            String action = actionNode.asText("").trim();
-            if ("BLOCK_DOMAIN".equals(action) || "BLOCK_REQUEST".equals(action)
-                    || "LOG_ONLY".equals(action) || "NONE".equals(action)) {
-                result.add(action);
+    private String findValidJsonBlock(String str) {
+        int len = str.length();
+        for (int i = 0; i < len; i++) {
+            if (str.charAt(i) == '{') {
+                for (int j = len - 1; j > i; j--) {
+                    if (str.charAt(j) == '}') {
+                        String candidate = str.substring(i, j + 1);
+                        try {
+                            objectMapper.readTree(candidate);
+                            return candidate;
+                        } catch (IOException ignore) {}
+                    }
+                }
             }
         }
-
-        return result.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(result);
+        return null;
     }
 
     public String loadPromptTemplate(String resourceName) {

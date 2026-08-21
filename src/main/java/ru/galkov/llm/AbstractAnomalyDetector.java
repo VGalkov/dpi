@@ -355,7 +355,7 @@ public abstract class AbstractAnomalyDetector<T> {
         return new AnalysisResult(suspicious, confidence, reason, validActions);
     }
 
-    protected AnalysisResult analyzeWithLlm(String prompt) {
+    protected AnalysisResult analyzeRecord(String prompt, String domain) {
         String safePrompt = sanitizePrompt(prompt);
         if (safePrompt == null) return null;
         if (!tryAcquireRateLimit()) {
@@ -377,12 +377,7 @@ public abstract class AbstractAnomalyDetector<T> {
                 return null;
             }
 
-            AnalysisResult result = llmClient.parseResponse(response);
-
-            if (result == null) {
-                recordCircuitBreakerFailure();
-                return null;
-            }
+            AnalysisResult result = llmClient.parseResponse(response, domain);
 
             AnalysisResult validated = validateAnalysisResult(result);
             recordCircuitBreakerSuccess();
@@ -394,6 +389,13 @@ public abstract class AbstractAnomalyDetector<T> {
             return null;
         }
     }
+
+
+    @Deprecated
+    protected AnalysisResult analyzeRecord(String prompt) {
+        return analyzeRecord(prompt, "unknown");
+    }
+
 
     private boolean tryAcquireRateLimit() {
         long now = System.currentTimeMillis();
@@ -559,4 +561,5 @@ public abstract class AbstractAnomalyDetector<T> {
             return defaultValue;
         }
     }
+
 }
