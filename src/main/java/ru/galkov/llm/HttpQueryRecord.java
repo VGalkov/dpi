@@ -5,17 +5,15 @@ import java.util.Locale;
 /**
  * s0506777@yandex.ru Galkov V.A.
  */
-public final class HttpQueryRecord implements QueryRecord {
+public final class HttpQueryRecord extends AbstractQueryRecord {
     private static final int MAX_STRING_LENGTH = 16_384;
 
-    private final String clientIp;
     private final String method;
     private final String host;
     private final int port;
     private final String path;
     private final String headers;
     private final String body;
-    private final long timestamp;
 
     private final int pathLength;
     private final int headerLength;
@@ -38,38 +36,31 @@ public final class HttpQueryRecord implements QueryRecord {
             String body,
             long timestamp
     ) {
-        this.clientIp = QueryRecordUtils.normalize(clientIp);
+        super(clientIp, timestamp);
+
         this.method = normalizeMethod(method);
-        this.host = QueryRecordUtils.normalizeHost(host);
+        this.host = normalizeHost(host);
         this.port = port;
-        this.path = QueryRecordUtils.limit(QueryRecordUtils.normalize(path), MAX_STRING_LENGTH);
-        this.headers = QueryRecordUtils.limit(QueryRecordUtils.normalize(headers), MAX_STRING_LENGTH);
-        this.body = QueryRecordUtils.limit(QueryRecordUtils.normalize(body), MAX_STRING_LENGTH);
-        this.timestamp = timestamp;
+        this.path = limit(normalize(path), MAX_STRING_LENGTH);
+        this.headers = limit(normalize(headers), MAX_STRING_LENGTH);
+        this.body = limit(normalize(body), MAX_STRING_LENGTH);
 
         this.pathLength = this.path.length();
         this.headerLength = this.headers.length();
         this.bodyLength = this.body.length();
         this.https = port == 443;
-        this.hostIsIp = QueryRecordUtils.isIpLiteral(this.host);
-        this.suspiciousTld = QueryRecordUtils.hasSuspiciousTld(this.host);
-        this.pathHasTraversal = QueryRecordUtils.hasPathTraversal(this.path);
-        this.pathHasInjectionMarkers = QueryRecordUtils.hasInjectionMarkers(this.path);
-        this.bodyHasInjectionMarkers = QueryRecordUtils.hasInjectionMarkers(this.body);
-        this.suspiciousUserAgent = QueryRecordUtils.hasSuspiciousUserAgent(this.headers);
+        this.hostIsIp = isIpLiteral(this.host);
+        this.suspiciousTld = hasSuspiciousTld(this.host);
+        this.pathHasTraversal = hasPathTraversal(this.path);
+        this.pathHasInjectionMarkers = hasInjectionMarkers(this.path);
+        this.bodyHasInjectionMarkers = hasInjectionMarkers(this.body);
+        this.suspiciousUserAgent = hasSuspiciousUserAgent(this.headers);
     }
 
     private static String normalizeMethod(String value) {
-        String method = QueryRecordUtils.normalize(value).toUpperCase(Locale.ROOT);
+        String method = normalize(value).toUpperCase(Locale.ROOT);
         return method.isEmpty() ? "UNKNOWN" : method;
     }
-
-    // ✅ Реализация интерфейса QueryRecord
-    @Override
-    public String getClientIp() { return clientIp; }
-
-    @Override
-    public long getTimestamp() { return timestamp; }
 
     @Override
     public String getTarget() { return host; }
@@ -108,8 +99,7 @@ public final class HttpQueryRecord implements QueryRecord {
 
     @Override
     public String toString() {
-        return "HttpQueryRecord{clientIp='" + clientIp + "', method='" + method +
-                "', host='" + host + "', port=" + port + ", path='" + path +
-                "', timestamp=" + timestamp + '}';
+        return "HttpQueryRecord{" + buildBaseToString() +
+                ", method='" + method + "', host='" + host + "', port=" + port + '}';
     }
 }

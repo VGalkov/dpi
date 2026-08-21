@@ -1,6 +1,7 @@
 package ru.galkov.llm;
 
-import ru.galkov.util.*;
+import ru.galkov.util.LocaleUtil;
+import ru.galkov.util.LogFields;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,9 +27,6 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
     private final Map<String, Long> processedDomains = new ConcurrentHashMap<>();
     private final Map<String, Long> processedClients = new ConcurrentHashMap<>();
 
-    // ✅ Статическая ссылка на snapshot (быстрый доступ, минимум памяти)
-    private static volatile BlacklistSnapshot blacklistSnapshot;
-
     public DnsAnomalyDetector() {
         super("dns.anomaly-detector");
 
@@ -45,13 +43,6 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
         this.promptTemplate = llmClient.loadPromptTemplate("prompts/dns_anomaly_prompt.txt");
     }
 
-    // ✅ Метод инициализации (вызывается один раз при старте)
-    public static void init(BlacklistLoader loader) {
-        if (loader != null) {
-            blacklistSnapshot = loader.snapshot();
-        }
-    }
-
     @Override
     protected String getConfigPrefix() {
         return "dns.anomaly-detector";
@@ -63,7 +54,6 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
             return;
         }
 
-        // ✅ Проверка blacklist перед добавлением в очередь
         if (isBlockedByBlacklist(record.getDomain(), record.getClientIp())) {
             logger.debug("Skipping blacklisted domain={} or clientIp={}", record.getDomain(), record.getClientIp());
             return;
@@ -84,17 +74,6 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
             logger.debug(LocaleUtil.getString("dns_anomaly_detector_record_added"),
                     record.getClientIp(), record.getDomain(), record.getQueryType());
         }
-    }
-
-    // ✅ Проверка blacklist (домен + IP клиента)
-    private boolean isBlockedByBlacklist(String domain, String clientIp) {
-        if (blacklistSnapshot == null) return false;
-
-        BlockDecision domainDecision = blacklistSnapshot.checkDomain(domain);
-        if (domainDecision.isBlocked()) return true;
-
-        BlockDecision ipDecision = blacklistSnapshot.checkIp(clientIp);
-        return ipDecision.isBlocked();
     }
 
     @Override
@@ -132,21 +111,11 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
                         long t = System.currentTimeMillis();
                         processedDomains.put(domain, t);
                         processedClients.put(record.getClientIp(), t);
-                        AnalysisResult result = analyzeRecord(record);
 
-                        if (result != null) {
-                            lastLlm = System.currentTimeMillis();
-                            if (result.suspicious() && result.confidence() >= trustThreshold) {
-                                logger.info("{} {} {} {} {} {} {}",
-                                        LogFields.kv("event", "DNS_ANOMALY_DETECTED"),
-                                        LogFields.kv("client", record.getClientIp()),
-                                        LogFields.kv("domain", domain),
-                                        LogFields.kv("queryType", record.getQueryType()),
-                                        LogFields.kv("confidence", result.confidence()),
-                                        LogFields.kv("reason", result.reason()),
-                                        LogFields.kv("timestamp", record.getTimestamp()));
-                            }
-                        }
+                        // ✅ Используем общий метод из AbstractAnomalyDetector
+                        analyzeRecord(record);
+
+                        lastLlm = System.currentTimeMillis();
                     } catch (Exception e) {
                         logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"), e.getMessage());
                     } finally {
@@ -165,6 +134,55 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
             }
         }
         logger.info(LocaleUtil.getString("dns_anomaly_detector_queue_completed"));
+    }
+
+    @Override
+    protected String buildPrompt(DnsQueryRecord record) {
+        if (record.getQueryType() == 12) {
+            logger.debug("Skipping PTR query for domain={}", record.getDomain());
+            return "";
+        }
+
+        String domain = record.getDomain();
+
+        return promptTemplate
+                .replace("{clientIp}", escapePlaceholder(record.getClientIp()))
+                .replace("{domain}", escapePlaceholder(domain))
+                .replace("{queryType}", String.valueOf(record.getQueryType()))
+                .replace("{timestamp}", String.valueOf(record.getTimestamp()))
+                .replace("{qr}", record.isQuery() ? "QUERY" : "RESPONSE")
+                .replace("{opcode}", String.valueOf(record.getOpcode()))
+                .replace("{tc}", record.isTruncated() ? "true" : "false")
+                .replace("{rd}", record.isRecursionDesired() ? "true" : "false")
+                .replace("{z}", String.valueOf(record.getZ()))
+                .replace("{rcode}", String.valueOf(record.getRcode()))
+                .replace("{domainLength}", String.valueOf(record.getDomainLength()))
+                .replace("{entropy}", String.format(Locale.ROOT, "%.2f", record.getEntropy()))
+                .replace("{subdomainCount}", String.valueOf(record.getSubdomainCount()))
+                .replace("{parentDomain}", escapePlaceholder(record.getParentDomain()))
+                .replace("{leftmostLabel}", escapePlaceholder(record.getLeftmostLabel()))
+                .replace("{leftmostLabelLength}", String.valueOf(record.getLeftmostLabelLength()))
+                .replace("{maxLabelLength}", String.valueOf(record.getMaxLabelLength()))
+                .replace("{digitRatio}", String.format(Locale.ROOT, "%.2f", record.getDigitRatio()))
+                .replace("{hyphenRatio}", String.format(Locale.ROOT, "%.2f", record.getHyphenRatio()))
+                .replace("{uniqueCharacterRatio}", String.format(Locale.ROOT, "%.2f", record.getUniqueCharacterRatio()))
+                .replace("{base32Like}", String.valueOf(record.isBase32Like()))
+                .replace("{base64Like}", String.valueOf(record.isBase64Like()))
+                .replace("{hasPunycode}", String.valueOf(record.hasPunycode()))
+                .replace("{hasIpLikeLabel}", String.valueOf(record.hasIpLikeLabel()))
+                .replace("{hasSuspiciousKeyword}", String.valueOf(record.hasSuspiciousKeyword()));
+    }
+
+    @Override
+    protected void logAnomaly(DnsQueryRecord record, AnalysisResult result) {
+        logger.info("{} {} {} {} {} {} {}",
+                LogFields.kv("event", "DNS_ANOMALY_DETECTED"),
+                LogFields.kv("client", record.getClientIp()),
+                LogFields.kv("domain", record.getDomain()),
+                LogFields.kv("queryType", record.getQueryType()),
+                LogFields.kv("confidence", result.confidence()),
+                LogFields.kv("reason", result.reason()),
+                LogFields.kv("timestamp", record.getTimestamp()));
     }
 
     private void cleanupProcessed() {
@@ -204,53 +222,15 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
         }
     }
 
-
-    private AnalysisResult analyzeRecord(DnsQueryRecord record) {
-        if (record.getQueryType() == 12) {
-            logger.debug("Skipping PTR query for domain={}", record.getDomain());
-            return null;
-        }
-
-        String domain = record.getDomain();
-
-        String prompt = promptTemplate
-                .replace("{clientIp}", escapePlaceholder(record.getClientIp()))
-                .replace("{domain}", escapePlaceholder(domain))
-                .replace("{queryType}", String.valueOf(record.getQueryType()))
-                .replace("{timestamp}", String.valueOf(record.getTimestamp()))
-                .replace("{qr}", record.isQuery() ? "QUERY" : "RESPONSE")
-                .replace("{opcode}", String.valueOf(record.getOpcode()))
-                .replace("{tc}", record.isTruncated() ? "true" : "false")
-                .replace("{rd}", record.isRecursionDesired() ? "true" : "false")
-                .replace("{z}", String.valueOf(record.getZ()))
-                .replace("{rcode}", String.valueOf(record.getRcode()))
-                .replace("{domainLength}", String.valueOf(record.getDomainLength()))
-                .replace("{entropy}", String.format(Locale.ROOT, "%.2f", record.getEntropy()))
-                .replace("{subdomainCount}", String.valueOf(record.getSubdomainCount()))
-                .replace("{parentDomain}", escapePlaceholder(record.getParentDomain()))
-                .replace("{leftmostLabel}", escapePlaceholder(record.getLeftmostLabel()))
-                .replace("{leftmostLabelLength}", String.valueOf(record.getLeftmostLabelLength()))
-                .replace("{maxLabelLength}", String.valueOf(record.getMaxLabelLength()))
-                .replace("{digitRatio}", String.format(Locale.ROOT, "%.2f", record.getDigitRatio()))
-                .replace("{hyphenRatio}", String.format(Locale.ROOT, "%.2f", record.getHyphenRatio()))
-                .replace("{uniqueCharacterRatio}", String.format(Locale.ROOT, "%.2f", record.getUniqueCharacterRatio()))
-                .replace("{base32Like}", String.valueOf(record.isBase32Like()))
-                .replace("{base64Like}", String.valueOf(record.isBase64Like()))
-                .replace("{hasPunycode}", String.valueOf(record.hasPunycode()))
-                .replace("{hasIpLikeLabel}", String.valueOf(record.hasIpLikeLabel()))
-                .replace("{hasSuspiciousKeyword}", String.valueOf(record.hasSuspiciousKeyword()));
-
-        return analyzeRecord(prompt, domain);
-    }
-
-    private String escapePlaceholder(String value) {
-        if (value == null) return "";
-        return value.replace("{", "{{").replace("}", "}}");
-    }
-
     public void recordQuery(String clientIp, String domain, int queryType, boolean isQuery,
                             int opcode, boolean isTruncated, boolean recursionDesired,
                             int z, int rcode) {
+        // ✅ Проверка blacklist ДО создания Record
+        if (isBlockedByBlacklist(domain, clientIp)) {
+            logger.debug("Skipping blacklisted domain={} or clientIp={}", domain, clientIp);
+            return;
+        }
+
         record(new DnsQueryRecord(clientIp, domain, queryType, System.currentTimeMillis(),
                 isQuery, opcode, isTruncated, recursionDesired, z, rcode));
     }

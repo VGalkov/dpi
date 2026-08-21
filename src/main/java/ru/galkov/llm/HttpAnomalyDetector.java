@@ -1,8 +1,5 @@
 package ru.galkov.llm;
 
-import ru.galkov.util.BlacklistLoader;
-import ru.galkov.util.BlacklistSnapshot;
-import ru.galkov.util.BlockDecision;
 import ru.galkov.util.LocaleUtil;
 
 import java.util.concurrent.BlockingQueue;
@@ -14,7 +11,6 @@ import java.util.concurrent.TimeUnit;
  */
 public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord> {
 
-
     private static final int DEFAULT_MAX_QUEUE_SIZE = 10_000;
     private static final int DEFAULT_BODY_PREVIEW_LENGTH = 500;
     private static final long DEFAULT_MIN_LLM_INTERVAL_MILLIS = 5_000L;
@@ -25,8 +21,6 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
     private final String promptTemplate;
     private final BlockingQueue<HttpQueryRecord> queue;
     private volatile long lastLlmRequestTime;
-
-    private static volatile BlacklistSnapshot blacklistSnapshot;
 
     public HttpAnomalyDetector() {
         super("http.anomaly-detector");
@@ -60,12 +54,6 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
                 processedTtlMillis / 1000,
                 inspectBody
         );
-    }
-
-    public static void init(BlacklistLoader loader) {
-        if (loader != null) {
-            blacklistSnapshot = loader.snapshot();
-        }
     }
 
     @Override
@@ -102,16 +90,6 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
         );
     }
 
-    private boolean isBlockedByBlacklist(String host, String clientIp) {
-        if (blacklistSnapshot == null) return false;
-
-        BlockDecision hostDecision = blacklistSnapshot.checkDomain(host);
-        if (hostDecision.isBlocked()) return true;
-
-        BlockDecision ipDecision = blacklistSnapshot.checkIp(clientIp);
-        return ipDecision.isBlocked();
-    }
-
     @Override
     protected void processQueue() {
         while (running) {
@@ -119,6 +97,8 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
                 HttpQueryRecord record = queue.poll(1, TimeUnit.SECONDS);
                 if (record == null) continue;
                 waitForLlmInterval();
+
+                // ✅ Используем общий метод из AbstractAnomalyDetector
                 analyzeRecord(record);
 
             } catch (InterruptedException e) {
@@ -136,44 +116,8 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
         logger.info(LocaleUtil.getString("http_anomaly_detector_queue_completed"));
     }
 
-    private void waitForLlmInterval() throws InterruptedException {
-        while (running) {
-            long elapsed = System.currentTimeMillis() - lastLlmRequestTime;
-            long remaining = minLlmIntervalMillis - elapsed;
-            if (remaining <= 0) return;
-            Thread.sleep(Math.min(remaining, 100L));
-        }
-    }
-
-    protected void analyzeRecord(HttpQueryRecord record) {
-        String prompt = buildPrompt(record);
-
-        if (prompt.isBlank()) {
-            logger.warn("HTTP anomaly prompt is empty");
-            return;
-        }
-
-        lastLlmRequestTime = System.currentTimeMillis();
-        String host = record.getHost() != null ? record.getHost() : "unknown";
-        AnalysisResult result = analyzeRecord(prompt, host);
-
-        if (result == null) return;
-        if (result.suspicious() && result.confidence() >= trustThreshold) {
-            logger.info(
-                    "HTTP anomaly detected: client={}, method={}, host={}, path={}, confidence={}, "
-                            + "reason={}, actions={}",
-                    record.getClientIp(),
-                    record.getMethod(),
-                    record.getHost(),
-                    record.getPath(),
-                    result.confidence(),
-                    result.reason(),
-                    result.recommendedActions()
-            );
-        }
-    }
-
-    private String buildPrompt(HttpQueryRecord record) {
+    @Override
+    protected String buildPrompt(HttpQueryRecord record) {
         String bodyPreview = "";
 
         if (inspectBody && !record.getBody().isEmpty()) {
@@ -205,10 +149,28 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
                 .replace("{suspiciousUserAgent}", String.valueOf(record.hasSuspiciousUserAgent()));
     }
 
-    private String promptValue(String value, int maxLength) {
-        String sanitized = sanitizeForPrompt(value, maxLength);
-        if (sanitized.isEmpty()) return "unknown";
-        return sanitized;
+    @Override
+    protected void logAnomaly(HttpQueryRecord record, AnalysisResult result) {
+        logger.info(
+                "HTTP anomaly detected: client={}, method={}, host={}, path={}, confidence={}, "
+                        + "reason={}, actions={}",
+                record.getClientIp(),
+                record.getMethod(),
+                record.getHost(),
+                record.getPath(),
+                result.confidence(),
+                result.reason(),
+                result.recommendedActions()
+        );
+    }
+
+    private void waitForLlmInterval() throws InterruptedException {
+        while (running) {
+            long elapsed = System.currentTimeMillis() - lastLlmRequestTime;
+            long remaining = minLlmIntervalMillis - elapsed;
+            if (remaining <= 0) return;
+            Thread.sleep(Math.min(remaining, 100L));
+        }
     }
 
     public void recordRequest(

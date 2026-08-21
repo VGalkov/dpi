@@ -1,16 +1,82 @@
 package ru.galkov.llm;
 
+import ru.galkov.util.BlacklistSnapshot;
+
 import java.util.Locale;
 
 /**
- * Утилиты для QueryRecord классов.
+ * Абстрактный базовый класс для записей запросов.
  * s0506777@yandex.ru Galkov V.A.
  */
-public final class QueryRecordUtils {
+public abstract class AbstractQueryRecord {
 
-    private QueryRecordUtils() {}
+    protected final String clientIp;
+    protected final long timestamp;
 
-    // ✅ Нормализация
+    protected AbstractQueryRecord(String clientIp, long timestamp) {
+        this.clientIp = normalizeNullable(clientIp);
+        this.timestamp = timestamp;
+    }
+
+    public String getClientIp() {
+        return clientIp;
+    }
+
+    public long getTimestamp() {
+        return timestamp;
+    }
+
+    /**
+     * Проверяет, является ли целевой хост/IP заблокированным.
+     */
+    public boolean isBlocked(BlacklistSnapshot snapshot) {
+        if (snapshot == null) return false;
+
+        if (snapshot.checkIp(clientIp).isBlocked()) return true;
+
+        String target = getTarget();
+        if (target == null || target.isEmpty()) return false;
+
+        return snapshot.checkDomain(target).isBlocked();
+    }
+
+    /**
+     * Целевой домен/хост запроса.
+     */
+    public abstract String getTarget();
+
+    /**
+     * Длина целевого домена/хоста.
+     */
+    public abstract int getTargetLength();
+
+    /**
+     * Является ли хост IP-адресом.
+     */
+    public abstract boolean isTargetIp();
+
+    /**
+     * Подозрительный TLD.
+     */
+    public abstract boolean hasSuspiciousTld();
+
+    /**
+     * Признаки инъекций.
+     */
+    public abstract boolean hasInjectionMarkers();
+
+    /**
+     * Подозрительный индикатор.
+     */
+    public abstract boolean hasSuspiciousIndicator();
+
+    /**
+     * Краткое описание для логирования.
+     */
+    protected String buildBaseToString() {
+        return "clientIp='" + clientIp + "', timestamp=" + timestamp;
+    }
+
     public static String normalize(String value) {
         return value == null ? "" : value.trim();
     }

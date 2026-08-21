@@ -6,6 +6,7 @@ import ru.galkov.blacklist_source.AdguardBlacklistSource;
 import ru.galkov.blacklist_source.BlacklistSource;
 import ru.galkov.blacklist_source.FileBlacklistSource;
 import ru.galkov.blacklist_source.RknBlacklistSource;
+import ru.galkov.llm.AbstractAnomalyDetector;
 import ru.galkov.llm.DnsAnomalyDetector;
 import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.servers.DnsServer;
@@ -54,8 +55,7 @@ public final class Main {
             dnsAnomalyDetector = new DnsAnomalyDetector();
             httpAnomalyDetector = new HttpAnomalyDetector();
 
-            DnsAnomalyDetector.init(blacklist);
-            HttpAnomalyDetector.init(blacklist);
+            AbstractAnomalyDetector.initBlacklist(blacklist);
             registerShutdownHook();
             startDetectors();
             startProxyServer();

@@ -96,11 +96,13 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             int status = connection.getResponseCode();
             if (!isRedirect(status)) return connection;
 
+
             String location = connection.getHeaderField("Location");
             connection.disconnect();
 
-            if (location == null || location.isBlank()) 
+            if (location == null || location.isBlank())
                 throw new IOException("Redirect response has no Location header");
+
 
             currentUrl = resolveRedirect(currentUrl, location);
         }
@@ -149,9 +151,13 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
 
     private static void ensureHostIsSafe(String host) throws IOException {
         if (host == null || host.isBlank()) throw new IOException("Host is missing");
+
         if ("localhost".equalsIgnoreCase(host)) throw new IOException("Localhost URL is not allowed");
+
         InetAddress[] addresses = InetAddress.getAllByName(host);
+
         if (addresses.length == 0) throw new IOException("Host has no resolved addresses");
+
         for (InetAddress address : addresses) {
             if (isBlockedAddress(address))
                 throw new IOException("URL resolves to blocked address: " + address.getHostAddress());

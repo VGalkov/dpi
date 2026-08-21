@@ -8,9 +8,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public class BlacklistSnapshot {
     private static final Logger logger = LoggerFactory.getLogger(BlacklistSnapshot.class);
@@ -141,6 +142,10 @@ public class BlacklistSnapshot {
                 : BlockDecision.allow();
 
         ipCache.put(normalizedIp, new CacheEntry<>(decision));
+
+        // ✅ Очистка кэша при достижении 80% от maxSize
+        cleanupCache(ipCache, maxIpCacheSize, cacheTtlMillis);
+
         return decision;
     }
 
@@ -162,7 +167,30 @@ public class BlacklistSnapshot {
                 : BlockDecision.allow();
 
         domainCache.put(normalized, new CacheEntry<>(decision));
+
+        // ✅ Очистка кэша при достижении 80% от maxSize
+        cleanupCache(domainCache, maxDomainCacheSize, cacheTtlMillis);
+
         return decision;
+    }
+
+    private void cleanupCache(Map<String, CacheEntry<BlockDecision>> cache, int maxSize, long ttlMillis) {
+        if (cache.size() < maxSize * 0.8) return;
+
+        AtomicInteger removedCount = new AtomicInteger();
+
+        cache.entrySet().removeIf(entry -> {
+            if (entry.getValue().isExpired(ttlMillis)) {
+                removedCount.getAndIncrement();
+                return true;
+            }
+            return false;
+        });
+
+        if (removedCount.get() > 0) {
+            logger.trace("BlacklistSnapshot cache cleanup: removed {} expired entries, size now {}",
+                    removedCount, cache.size());
+        }
     }
 
     private boolean matchesCidr(String ip) {

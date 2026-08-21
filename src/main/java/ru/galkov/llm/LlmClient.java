@@ -34,28 +34,28 @@ public final class LlmClient {
     private static final double TOP_P = 0.9;
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .proxy(ProxySelector.of(null))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
+
     private final String llmUrl;
     private final String model;
     private final Duration timeout;
     private final String apiKey;
-    private final HttpClient httpClient;
+    private final HttpClient httpClient = HTTP_CLIENT;
 
     public LlmClient(String llmUrl, String model, int timeoutSeconds, String apiKey) {
         if (llmUrl == null || llmUrl.isBlank()) throw new IllegalArgumentException("LLM URL cannot be null or blank");
         if (model == null || model.isBlank()) throw new IllegalArgumentException("LLM model cannot be null or blank");
         if (timeoutSeconds <= 0) throw new IllegalArgumentException("LLM timeout must be positive");
 
-
         this.llmUrl = llmUrl;
         this.model = model;
         this.timeout = Duration.ofSeconds(timeoutSeconds);
         this.apiKey = apiKey == null ? "" : apiKey;
 
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .proxy(ProxySelector.of(null))
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build();
     }
 
     public String sendRequest(String prompt) {
