@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class IpCidr {
     private final InetAddress network;
@@ -91,9 +91,7 @@ public final class IpCidr {
         return true;
     }
 
-    public boolean isPrivateIp() {
-        return HostNormalizer.isPrivateIp(networkBytes);
-    }
+
 
     public static boolean isBlockedAddressUncheckedIpv4(byte[] bytes) {
         if (bytes == null || bytes.length != 4) return false;
@@ -107,7 +105,7 @@ public final class IpCidr {
         if (a == 100 && b == 100) {
             int c = bytes[2] & 0xff;
             int d = bytes[3] & 0xff;
-            if (c == 100 && d == 200) return true;
+            return c == 100 && d == 200;
         }
         return false;
     }

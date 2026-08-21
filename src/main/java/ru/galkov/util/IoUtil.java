@@ -1,12 +1,13 @@
 package ru.galkov.util;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class IoUtil {
 
@@ -36,4 +37,18 @@ public final class IoUtil {
         } catch (IOException ignored) {
         }
     }
+
+    public static byte[] readExactly(InputStream in, int len) throws IOException {
+        byte[] buf = new byte[len];
+        int total = 0;
+
+        while (total < len) {
+            int r = in.read(buf, total, len - total);
+            if (r == -1) return null;
+            total += r;
+        }
+
+        return buf;
+    }
+
 }

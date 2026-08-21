@@ -3,8 +3,7 @@ package ru.galkov.servers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.llm.HttpAnomalyDetector;
-import ru.galkov.util.BlacklistLoader;
-import ru.galkov.util.LocaleUtil;
+import ru.galkov.util.*;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -15,13 +14,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 
 import static ru.galkov.Main.getConfig;
+import static ru.galkov.util.IoUtil.closeQuietly;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
@@ -38,10 +37,10 @@ public class HttpProxyServer {
 
     private final ExecutorService workerPool;
     private final Semaphore connectionSlots;
-    private final ConcurrentMap<String, AtomicInteger> connectionsByClient = new ConcurrentHashMap<>();
+    private final ClientCounterMap connectionsByClient = new ClientCounterMap();
     private final Set<Socket> activeClientSockets = ConcurrentHashMap.newKeySet();
 
-    private final ConcurrentMap<Socket, Long> socketActivity = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Socket, Long> socketActivity = new ConcurrentHashMap<>();
     private final long idleCleanupThresholdMillis;
 
     private final Object lifecycleLock = new Object();
@@ -73,7 +72,8 @@ public class HttpProxyServer {
 
         if (maxConnections <= 0) throw new IllegalArgumentException("proxy.max-connections > 0");
         if (maxConnectionsPerClient <= 0) throw new IllegalArgumentException("proxy.max-connections-per-client > 0");
-        if (maxConnectionsPerClient > maxConnections) throw new IllegalArgumentException("max-connections-per-client <= max-connections");
+        if (maxConnectionsPerClient > maxConnections)
+            throw new IllegalArgumentException("max-connections-per-client <= max-connections");
 
         this.connectionSlots = new Semaphore(maxConnections, true);
         this.workerPool = WorkerPool.get();
@@ -88,8 +88,10 @@ public class HttpProxyServer {
             running = true;
             logger.info("Инициализация HTTP proxy: port={}, maxConnections={}, maxConnectionsPerClient={}, maxActiveSockets={}",
                     port, maxConnections, maxConnectionsPerClient, maxActiveSockets);
-            serverThread = new Thread(this::runServer, "HttpProxy-Server-Thread-" + port);
-            serverThread.setDaemon(false);
+            serverThread = new NamedThreadFactory(
+                    "HttpProxy-Server-Thread-" + port,
+                    false
+            ).newThread(this::runServer);
             serverThread.start();
         }
         waitForSocketReady();
@@ -101,7 +103,7 @@ public class HttpProxyServer {
             logger.info("Остановка HTTP proxy: port={}", port);
             running = false;
             closeQuietly(serverSocket);
-            activeClientSockets.forEach(this::closeQuietly);
+            activeClientSockets.forEach(IoUtil::closeQuietly);
             activeClientSockets.clear();
             socketActivity.clear();
         }
@@ -111,14 +113,14 @@ public class HttpProxyServer {
     }
 
     private void runServer() {
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
-            this.serverSocket = serverSocket;
+        try (ServerSocket localServerSocket = new ServerSocket(port)) {
+            this.serverSocket = localServerSocket;
             logger.info("HTTP Proxy слушает порт {}", port);
 
             while (running) {
                 Socket clientSocket;
                 try {
-                    clientSocket = serverSocket.accept();
+                    clientSocket = localServerSocket.accept();
                 } catch (SocketException e) {
                     if (!running) break;
                     acceptSocketErrorsCount.increment();
@@ -176,12 +178,14 @@ public class HttpProxyServer {
             return;
         }
 
-        AtomicInteger clientConnections = connectionsByClient.computeIfAbsent(clientIp, k -> new AtomicInteger());
+        AtomicInteger clientConnections =
+                connectionsByClient.getOrCreate(clientIp);
+
         if (clientConnections == null) {
             activeClientSockets.remove(clientSocket);
             socketActivity.remove(clientSocket);
             connectionSlots.release();
-            logger.error("computeIfAbsent вернул null для client={}", clientIp);
+            logger.error("Client counter is null for client={}", clientIp);
             closeQuietly(clientSocket);
             return;
         }
@@ -243,8 +247,10 @@ public class HttpProxyServer {
                 closeQuietly(socket);
             }
             activeClientSockets.remove(socket);
-            socketActivity.remove(socket);
-            removed++;
+            if (socket != null) {
+                socketActivity.remove(socket);
+                removed++;
+            }
         }
 
         if (removed > 0) {
@@ -256,26 +262,20 @@ public class HttpProxyServer {
     }
 
     private void releaseConnectionSlot(String clientIp, AtomicInteger clientConnections) {
-        int remaining = clientConnections.decrementAndGet();
-        if (remaining <= 0) connectionsByClient.remove(clientIp, clientConnections);
+        connectionsByClient.decrementAndRemoveIfZero(
+                clientIp,
+                clientConnections
+        );
         connectionSlots.release();
     }
 
     private void joinServerThread() {
         Thread t = serverThread;
         if (t == null || t == Thread.currentThread()) return;
-        try { t.join(5000L); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-    }
-
-    private void closeQuietly(ServerSocket s) {
-        if (s != null && !s.isClosed()) {
-            try { s.close(); } catch (IOException e) { logger.debug("Ошибка закрытия server socket: {}", e.getMessage()); }
-        }
-    }
-
-    private void closeQuietly(Socket s) {
-        if (s != null && !s.isClosed()) {
-            try { s.close(); } catch (IOException e) { logger.debug("Ошибка закрытия socket: {}", e.getMessage()); }
+        try {
+            t.join(5000L);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -283,7 +283,12 @@ public class HttpProxyServer {
         long timeout = System.currentTimeMillis() + 5000L;
         while (System.currentTimeMillis() < timeout) {
             if (serverSocket != null && serverSocket.isBound() && !serverSocket.isClosed()) return;
-            try { Thread.sleep(50L); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
         logger.warn("HTTP Proxy не открыл порт {} за 5 секунд", port);
     }

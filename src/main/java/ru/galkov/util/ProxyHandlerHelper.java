@@ -12,6 +12,8 @@ import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
+import static ru.galkov.util.IoUtil.readExactly;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
@@ -86,14 +88,14 @@ public final class ProxyHandlerHelper {
                 int ct = data[off] & 0xFF;
                 int len = ((data[off + 3] & 0xFF) << 8) | (data[off + 4] & 0xFF);
                 off += 5;
-                if (len < 0 || off + len > data.length) return null;
+                if (off + len > data.length) return null;
                 if (ct == 22) hs.write(data, off, len);
                 off += len;
             }
             byte[] hello = hs.toByteArray();
             if (hello.length < 4 || (hello[0] & 0xFF) != 1) return null;
             int hsLen = ((hello[1] & 0xFF) << 16) | ((hello[2] & 0xFF) << 8) | (hello[3] & 0xFF);
-            if (hsLen < 0 || hsLen + 4 > hello.length) return null;
+            if (hsLen + 4 > hello.length) return null;
             int pos = 4, end = 4 + hsLen;
             if (pos + 34 > end) return null;
             pos += 2 + 32;
@@ -149,21 +151,6 @@ public final class ProxyHandlerHelper {
             pos += nl;
         }
         return null;
-    }
-
-    private static byte[] readExactly(InputStream in, int len) throws IOException {
-        byte[] buf = new byte[len];
-        int total = 0;
-        while (total < len) {
-            int r = in.read(buf, total, len - total);
-            if (r == -1) return null;
-            total += r;
-        }
-        return buf;
-    }
-
-    public static HostNormalizer.HostAndPort parseConnectTarget(String target) {
-        return HostNormalizer.parseHostPort(target);
     }
 
     public static HostNormalizer.HostAndPort resolveHttpTarget(String hostHeader, String target) {
@@ -366,14 +353,6 @@ public final class ProxyHandlerHelper {
         }
     }
 
-    public static void relayUntilEof(InputStream in, OutputStream out) throws IOException {
-        if (in == null || out == null) {
-            throw new IllegalArgumentException("in and out must not be null");
-        }
-        byte[] buf = new byte[8192];
-        int len;
-        while ((len = in.read(buf)) != -1) out.write(buf, 0, len);
-    }
 
     public static final class RequestTooLargeException extends IOException {
         public RequestTooLargeException(String msg) { super(msg); }

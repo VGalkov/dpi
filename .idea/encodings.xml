@@ -11,8 +11,11 @@
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/QueryRecordUtils.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/README.md" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/servers/WorkerPool.java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/ClientCounterMap.java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/DnsRateLimiter.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/DnsServerHelper.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/IoUtil.java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/NamedThreadFactory.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/ProxyHandlerHelper.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/RuleNormalizer.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />

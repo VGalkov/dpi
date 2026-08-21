@@ -4,7 +4,7 @@ import java.net.InetAddress;
 import java.util.Locale;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class HostNormalizer {
 
@@ -92,23 +92,6 @@ public final class HostNormalizer {
         }
         if (port < 1 || port > 65535) return null;
         return new HostAndPort(host, port);
-    }
-
-    public static boolean isPrivateIp(byte[] bytes) {
-        if (bytes.length != 4) return false;
-        int a = bytes[0] & 0xff;
-        int b = bytes[1] & 0xff;
-        if (a == 0 || a == 10 || a == 127) return true;
-        if (a == 169 && b == 254) return true;
-        if (a == 172 && b >= 16 && b <= 31) return true;
-        if (a == 192 && b == 168) return true;
-        if (a == 100 && b >= 64 && b <= 127) return true;
-        if (a == 100 && b == 100) {
-            int c = bytes[2] & 0xff;
-            int d = bytes[3] & 0xff;
-            if (c == 100 && d == 200) return true;
-        }
-        return false;
     }
 
     public static boolean isIpLiteralFast(String value) {

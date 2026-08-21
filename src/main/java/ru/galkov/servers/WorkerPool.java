@@ -3,9 +3,11 @@ package ru.galkov.servers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
+import ru.galkov.util.NamedThreadFactory;
 
 import java.util.Locale;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.LongAdder;
 
 import static ru.galkov.Main.getConfig;
 
@@ -26,6 +28,7 @@ public final class WorkerPool {
 
     private static final ExecutorService POOL;
     private static final ArrayBlockingQueue<Runnable> taskQueue;
+    private static final LongAdder rejectedTaskCounter = new LongAdder();
 
     static {
         taskQueue = new ArrayBlockingQueue<>(QUEUE_SIZE);
@@ -34,12 +37,7 @@ public final class WorkerPool {
             case "ABORT" -> new ThreadPoolExecutor.AbortPolicy();
             case "DISCARD" -> new ThreadPoolExecutor.DiscardPolicy();
             case "DISCARD_OLDEST" -> new ThreadPoolExecutor.DiscardOldestPolicy();
-            default ->
-                    (r, executor) -> {
-                        logger.warn(LocaleUtil.getString("worker_pool_queue_full"),
-                                taskQueue.size(), QUEUE_SIZE);
-                        logger.warn("Task rejected due to full queue, discarding");
-                    };
+            default -> (r, executor) -> rejectedTaskCounter.increment();
         };
 
         POOL = new ThreadPoolExecutor(
@@ -48,11 +46,7 @@ public final class WorkerPool {
                 0L,
                 TimeUnit.MILLISECONDS,
                 taskQueue,
-                r -> {
-                    Thread t = new Thread(r, "Worker-Pool-Thread");
-                    t.setDaemon(true);
-                    return t;
-                },
+                new NamedThreadFactory("Worker-Pool-Thread", true),
                 rejectionHandler
         );
 
@@ -66,25 +60,6 @@ public final class WorkerPool {
         return POOL;
     }
 
-    public static Future<?> submit(Runnable task) {
-        try {
-            return POOL.submit(task);
-        } catch (RejectedExecutionException e) {
-            logger.warn("Task rejected: queue full ({}), rejection aborted", taskQueue.size());
-            return null;
-        }
-    }
-
-    public static <T> Future<T> submit(Callable<T> task) {
-        try {
-            return POOL.submit(task);
-        } catch (RejectedExecutionException e) {
-            logger.warn("Task rejected: queue full ({}), rejection aborted", taskQueue.size());
-            return null;
-        }
-    }
-
-
     public static void shutdown() {
         logger.info(LocaleUtil.getString("worker_pool_shutdown_initiated"));
         POOL.shutdown();
@@ -95,12 +70,22 @@ public final class WorkerPool {
                 POOL.shutdownNow();
                 taskQueue.clear();
             }
+            logRejectedTasks();
             logger.info(LocaleUtil.getString("worker_pool_shutdown_completed"));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             POOL.shutdownNow();
             taskQueue.clear();
+            logRejectedTasks();
             logger.info(LocaleUtil.getString("worker_pool_shutdown_completed"));
+        }
+    }
+
+    private static void logRejectedTasks() {
+        long rejected = rejectedTaskCounter.sumThenReset();
+        if (rejected > 0) {
+            logger.warn("WorkerPool rejected tasks: total={}, queueSize={}, queueCapacity={}",
+                    rejected, taskQueue.size(), QUEUE_SIZE);
         }
     }
 
