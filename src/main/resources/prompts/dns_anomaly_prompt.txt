@@ -2,7 +2,7 @@
 
 ТВОЯ ЕДИНСТВЕННАЯ ЗАДАЧА: вернуть валидный JSON объект.
 НИКАКИХ ПОЯСНЕНИЙ, НИКАКИХ СЛОВ ДО ИЛИ ПОСЛЕ, НИКАКОГО MARKDOWN.
-Только сырой JSON текст. Никаких "```json", никаких кавычек вокруг всего ответа.
+Только сырой JSON текст. Никаких "```json", никаких "```", никаких кавычек вокруг всего ответа.
 
 СТРУКТУРА ОТВЕТА СТРОГО:
 {
@@ -15,15 +15,17 @@
 ВАЖНЫЕ ПРАВИЛА:
 1. Поле recommendedActions ВСЕГДА должно быть МАССИВОМ из одной строки.
    Правильно: "recommendedActions": ["LOG_ONLY"]
-   НЕПРАВИЛЬНО: "recommendedActions": "LOG_ONLY" (это вызовет ошибку в системе)
-2. Не используй подчеркивания в значениях. Только: NONE, LOG_ONLY, BLOCK_DOMAIN.
-3. Если ситуация неочевидна, ставь confidence 0.5, isSuspicious false, action NONE.
+   НЕПРАВИЛЬНО: "recommendedActions": "LOG_ONLY" (строка вместо массива вызовет ошибку)
+   НЕПРАВИЛЬНО: "recommendedActions": [] (пустой массив недопустим)
+2. Допустимые значения: NONE, LOG_ONLY, BLOCK_DOMAIN. Другие значения запрещены.
+3. Если ситуация неочевидна, ставь confidence 0.5, isSuspicious false, recommendedActions: ["NONE"].
 4. Не выдумывай данные. Используй только переданные признаки.
+5. PTR-запросы (in-addr.arpa, ip6.arpa) — это легитимные обратные DNS-запросы. Сами по себе они НЕ подозрительны.
 
 ЛОГИКА:
-- confidence >= 0.85 -> BLOCK_DOMAIN
-- 0.60 <= confidence < 0.85 -> LOG_ONLY
-- confidence < 0.60 -> NONE
+- confidence >= 0.85 → recommendedActions: ["BLOCK_DOMAIN"]
+- 0.60 <= confidence < 0.85 → recommendedActions: ["LOG_ONLY"]
+- confidence < 0.60 → recommendedActions: ["NONE"]
 - isSuspicious = (confidence >= 0.70)
 
 Входные данные:
@@ -57,5 +59,13 @@ Allowlist match: {isInAllowlist}
   "isSuspicious": false,
   "confidence": 0.55,
   "reason": "Легитимный домен, нет признаков DGA",
+  "recommendedActions": ["NONE"]
+}
+
+ПРИМЕР ДЛЯ PTR-ЗАПРОСА (10.3.0.10.in-addr.arpa):
+{
+  "isSuspicious": false,
+  "confidence": 0.50,
+  "reason": "PTR-запрос обратного DNS, легитимный трафик",
   "recommendedActions": ["NONE"]
 }

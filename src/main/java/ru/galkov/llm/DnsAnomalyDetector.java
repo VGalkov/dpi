@@ -1,14 +1,13 @@
 package ru.galkov.llm;
 
-import ru.galkov.util.LocaleUtil;
-import ru.galkov.util.LogFields;
+import ru.galkov.util.*;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> {
 
@@ -27,6 +26,9 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
     private final Map<String, Long> processedDomains = new ConcurrentHashMap<>();
     private final Map<String, Long> processedClients = new ConcurrentHashMap<>();
 
+    // ✅ Статическая ссылка на snapshot (быстрый доступ, минимум памяти)
+    private static volatile BlacklistSnapshot blacklistSnapshot;
+
     public DnsAnomalyDetector() {
         super("dns.anomaly-detector");
 
@@ -43,6 +45,13 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
         this.promptTemplate = llmClient.loadPromptTemplate("prompts/dns_anomaly_prompt.txt");
     }
 
+    // ✅ Метод инициализации (вызывается один раз при старте)
+    public static void init(BlacklistLoader loader) {
+        if (loader != null) {
+            blacklistSnapshot = loader.snapshot();
+        }
+    }
+
     @Override
     protected String getConfigPrefix() {
         return "dns.anomaly-detector";
@@ -51,6 +60,12 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
     @Override
     public void record(DnsQueryRecord record) {
         if (!enabled || !running || record == null || record.getDomain() == null || record.getClientIp() == null) {
+            return;
+        }
+
+        // ✅ Проверка blacklist перед добавлением в очередь
+        if (isBlockedByBlacklist(record.getDomain(), record.getClientIp())) {
+            logger.debug("Skipping blacklisted domain={} or clientIp={}", record.getDomain(), record.getClientIp());
             return;
         }
 
@@ -69,6 +84,17 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
             logger.debug(LocaleUtil.getString("dns_anomaly_detector_record_added"),
                     record.getClientIp(), record.getDomain(), record.getQueryType());
         }
+    }
+
+    // ✅ Проверка blacklist (домен + IP клиента)
+    private boolean isBlockedByBlacklist(String domain, String clientIp) {
+        if (blacklistSnapshot == null) return false;
+
+        BlockDecision domainDecision = blacklistSnapshot.checkDomain(domain);
+        if (domainDecision.isBlocked()) return true;
+
+        BlockDecision ipDecision = blacklistSnapshot.checkIp(clientIp);
+        return ipDecision.isBlocked();
     }
 
     @Override
@@ -107,17 +133,19 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
                         processedDomains.put(domain, t);
                         processedClients.put(record.getClientIp(), t);
                         AnalysisResult result = analyzeRecord(record);
-                        lastLlm = System.currentTimeMillis();
-                        if (result != null && result.suspicious()
-                                && result.confidence() >= trustThreshold) {
-                            logger.info("{} {} {} {} {} {} {}",
-                                    LogFields.kv("event", "DNS_ANOMALY_DETECTED"),
-                                    LogFields.kv("client", record.getClientIp()),
-                                    LogFields.kv("domain", domain),
-                                    LogFields.kv("queryType", record.getQueryType()),
-                                    LogFields.kv("confidence", result.confidence()),
-                                    LogFields.kv("reason", result.reason()),
-                                    LogFields.kv("timestamp", record.getTimestamp()));
+
+                        if (result != null) {
+                            lastLlm = System.currentTimeMillis();
+                            if (result.suspicious() && result.confidence() >= trustThreshold) {
+                                logger.info("{} {} {} {} {} {} {}",
+                                        LogFields.kv("event", "DNS_ANOMALY_DETECTED"),
+                                        LogFields.kv("client", record.getClientIp()),
+                                        LogFields.kv("domain", domain),
+                                        LogFields.kv("queryType", record.getQueryType()),
+                                        LogFields.kv("confidence", result.confidence()),
+                                        LogFields.kv("reason", result.reason()),
+                                        LogFields.kv("timestamp", record.getTimestamp()));
+                            }
                         }
                     } catch (Exception e) {
                         logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"), e.getMessage());
@@ -178,6 +206,11 @@ public class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRecord> 
 
 
     private AnalysisResult analyzeRecord(DnsQueryRecord record) {
+        if (record.getQueryType() == 12) {
+            logger.debug("Skipping PTR query for domain={}", record.getDomain());
+            return null;
+        }
+
         String domain = record.getDomain();
 
         String prompt = promptTemplate

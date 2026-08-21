@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
 import static ru.galkov.util.IpCidr.isBlockedAddressUncheckedIpv4;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public abstract class AbstractAnomalyDetector<T> {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractAnomalyDetector.class);
@@ -136,7 +136,6 @@ public abstract class AbstractAnomalyDetector<T> {
                 getConfigInt(configPrefix + ".max-reason-length", DEFAULT_MAX_REASON_LENGTH)
         );
 
-        // ✅ П.35: лимит длины промпта — из конфига
         this.maxPromptLength = Math.max(
                 256,
                 getConfigInt(configPrefix + ".max-prompt-length", DEFAULT_MAX_PROMPT_LENGTH)
@@ -390,12 +389,7 @@ public abstract class AbstractAnomalyDetector<T> {
         }
     }
 
-
-    @Deprecated
-    protected AnalysisResult analyzeRecord(String prompt) {
-        return analyzeRecord(prompt, "unknown");
-    }
-
+    // ✅ Удалён @Deprecated метод analyzeRecord(String prompt)
 
     private boolean tryAcquireRateLimit() {
         long now = System.currentTimeMillis();

@@ -54,10 +54,10 @@ public final class Main {
             dnsAnomalyDetector = new DnsAnomalyDetector();
             httpAnomalyDetector = new HttpAnomalyDetector();
 
+            DnsAnomalyDetector.init(blacklist);
+            HttpAnomalyDetector.init(blacklist);
             registerShutdownHook();
-
             startDetectors();
-
             startProxyServer();
             startDnsServer();
 

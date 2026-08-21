@@ -1,12 +1,16 @@
 package ru.galkov.llm;
 
+import ru.galkov.util.BlacklistLoader;
+import ru.galkov.util.BlacklistSnapshot;
+import ru.galkov.util.BlockDecision;
 import ru.galkov.util.LocaleUtil;
 
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord> {
 
@@ -21,6 +25,9 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
     private final String promptTemplate;
     private final BlockingQueue<HttpQueryRecord> queue;
     private volatile long lastLlmRequestTime;
+
+    // ✅ Статическая ссылка на snapshot (быстрый доступ, минимум памяти)
+    private static volatile BlacklistSnapshot blacklistSnapshot;
 
     public HttpAnomalyDetector() {
         super("http.anomaly-detector");
@@ -56,6 +63,13 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
         );
     }
 
+    // ✅ Метод инициализации (вызывается один раз при старте)
+    public static void init(BlacklistLoader loader) {
+        if (loader != null) {
+            blacklistSnapshot = loader.snapshot();
+        }
+    }
+
     @Override
     protected String getConfigPrefix() {
         return "http.anomaly-detector";
@@ -64,6 +78,12 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
     @Override
     public void record(HttpQueryRecord record) {
         if (!enabled || !running || record == null) {
+            return;
+        }
+
+        // ✅ Проверка blacklist перед добавлением в очередь
+        if (isBlockedByBlacklist(record.getHost(), record.getClientIp())) {
+            logger.debug("Skipping blacklisted host={} or clientIp={}", record.getHost(), record.getClientIp());
             return;
         }
 
@@ -83,6 +103,17 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
                 record.getHost(),
                 record.getMethod()
         );
+    }
+
+    // ✅ Проверка blacklist (host + IP клиента)
+    private boolean isBlockedByBlacklist(String host, String clientIp) {
+        if (blacklistSnapshot == null) return false;
+
+        BlockDecision hostDecision = blacklistSnapshot.checkDomain(host);
+        if (hostDecision.isBlocked()) return true;
+
+        BlockDecision ipDecision = blacklistSnapshot.checkIp(clientIp);
+        return ipDecision.isBlocked();
     }
 
     @Override
