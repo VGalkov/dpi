@@ -12,15 +12,15 @@
   "recommendedActions": ["<ACTION>"]
 }
 
-ВАЖНЫЕ ПРАВИЛА:
-1. Поле recommendedActions ВСЕГДА должно быть МАССИВОМ из одной строки.
-   Правильно: "recommendedActions": ["LOG_ONLY"]
-   НЕПРАВИЛЬНО: "recommendedActions": "LOG_ONLY" (строка вместо массива вызовет ошибку)
-   НЕПРАВИЛЬНО: "recommendedActions": [] (пустой массив недопустим)
-2. Допустимые значения: NONE, LOG_ONLY, BLOCK_DOMAIN. Другие значения запрещены.
-3. Если ситуация неочевидна, ставь confidence 0.5, isSuspicious false, recommendedActions: ["NONE"].
-4. Не выдумывай данные. Используй только переданные признаки.
-5. PTR-запросы (in-addr.arpa, ip6.arpa) — это легитимные обратные DNS-запросы. Сами по себе они НЕ подозрительны.
+❗ КРИТИЧЕСКИ ВАЖНО:
+- recommendedActions ВСЕГДА должно быть МАССИВОМ из одной строки.
+  Правильно: "recommendedActions": ["LOG_ONLY"]
+  НЕПРАВИЛЬНО: "recommendedActions": "LOG_ONLY" ← ЭТО ОШИБКА!
+  НЕПРАВИЛЬНО: "recommendedActions": [] ← ПУСТОЙ МАССИВ НЕДОПУСТИМ!
+- Допустимые значения: NONE, LOG_ONLY, BLOCK_DOMAIN. Другие значения запрещены.
+- Если ситуация неочевидна, ставь confidence 0.5, isSuspicious false, recommendedActions: ["NONE"].
+- Не выдумывай данные. Используй только переданные признаки.
+- PTR-запросы (in-addr.arpa, ip6.arpa) — это легитимные обратные DNS-запросы. Сами по себе они НЕ подозрительны.
 
 ЛОГИКА:
 - confidence >= 0.85 → recommendedActions: ["BLOCK_DOMAIN"]

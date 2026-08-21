@@ -30,8 +30,8 @@ public final class LlmClient {
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
 
     private static final int MAX_RESPONSE_BYTES = 1_048_576;
-    private static final int MAX_REASON_LENGTH = 500;
-    private static final int MAX_OUTPUT_TOKENS = 1024;
+    private static final int MAX_REASON_LENGTH = 256;
+    private static final int MAX_OUTPUT_TOKENS = 512;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -189,11 +189,23 @@ public final class LlmClient {
                 return new AnalysisResult(false, 0.0, "Extracted content is not JSON object", List.of("NONE"));
             }
 
+            // ✅ Получаем поля с поддержкой альтернативных имён (с подчёркиваниями и без)
             JsonNode suspiciousNode = resultNode.get("isSuspicious");
             JsonNode confidenceNode = resultNode.get("confidence");
+            JsonNode reasonNode = resultNode.get("reason");
+            JsonNode actionsNode = resultNode.get("recommendedActions");
 
+            // ✅ Fallback: если нет полей без подчёркиваний, пробуем с подчёркиваниями
+            if (suspiciousNode == null && resultNode.has("__isSuspicious__")) suspiciousNode = resultNode.get("__isSuspicious__");
             if (suspiciousNode == null && resultNode.has("is_suspicious")) suspiciousNode = resultNode.get("is_suspicious");
+
+            if (confidenceNode == null && resultNode.has("_confidence_")) confidenceNode = resultNode.get("_confidence_");
             if (confidenceNode == null && resultNode.has("conf")) confidenceNode = resultNode.get("conf");
+
+            if (reasonNode == null && resultNode.has("_reason_")) reasonNode = resultNode.get("_reason_");
+
+            if (actionsNode == null && resultNode.has("_recommendedActions_")) actionsNode = resultNode.get("_recommendedActions_");
+            if (actionsNode == null && resultNode.has("action")) actionsNode = resultNode.get("action");
 
             if (suspiciousNode == null || confidenceNode == null) {
                 logger.warn("Missing mandatory fields in JSON for domain={}. Required: isSuspicious, confidence.", domain);
@@ -217,7 +229,6 @@ public final class LlmClient {
             else if (confidence > 1.0) confidence = 1.0;
 
             String reason = "";
-            JsonNode reasonNode = resultNode.get("reason");
             if (reasonNode != null && reasonNode.isTextual()) {
                 reason = reasonNode.asText().trim();
             }
@@ -226,8 +237,6 @@ public final class LlmClient {
             }
 
             List<String> actions = new ArrayList<>();
-            JsonNode actionsNode = resultNode.get("recommendedActions");
-
             if (actionsNode != null) {
                 if (actionsNode.isArray()) {
                     for (JsonNode item : actionsNode) {
@@ -252,7 +261,6 @@ public final class LlmClient {
                 logger.debug("No action field found in LLM response for domain={}, defaulting to NONE", domain);
             }
 
-            // ✅ ИСПРАВЛЕННЫЙ ЛОГ С ДОМЕНОМ И ФОРМАТИРОВАНИЕМ
             logger.info("Successfully parsed LLM result: domain={}, suspicious={}, confidence={}, actions={}",
                     domain, isSuspicious, String.format(Locale.ROOT, "%.2f", confidence), actions);
 
