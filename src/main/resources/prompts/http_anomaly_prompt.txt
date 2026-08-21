@@ -34,6 +34,13 @@ HTTP-запрос:
 
 DATA_END
 
+❗ КРИТИЧЕСКИ ВАЖНО:
+- recommendedActions ВСЕГДА должно быть МАССИВОМ из одной строки.
+  Правильно: "recommendedActions": ["LOG_ONLY"]
+  НЕПРАВИЛЬНО: "recommendedActions": "LOG_ONLY" ← ЭТО ОШИБКА!
+  НЕПРАВИЛЬНО: "recommendedActions": [] ← ПУСТОЙ МАССИВ НЕДОПУСТИМ!
+- Допустимые значения: NONE, LOG_ONLY, BLOCK_REQUEST. Другие значения запрещены.
+
 Правила анализа:
 
 1. SQL-инъекция

@@ -1,10 +1,11 @@
 package ru.galkov.llm;
 
 import java.util.Locale;
+
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
-public final class HttpQueryRecord {
+public final class HttpQueryRecord implements QueryRecord {
     private static final int MAX_STRING_LENGTH = 16_384;
 
     private final String clientIp;
@@ -37,171 +38,78 @@ public final class HttpQueryRecord {
             String body,
             long timestamp
     ) {
-        this.clientIp = normalize(clientIp);
+        this.clientIp = QueryRecordUtils.normalize(clientIp);
         this.method = normalizeMethod(method);
-        this.host = normalizeHost(host);
+        this.host = QueryRecordUtils.normalizeHost(host);
         this.port = port;
-        this.path = limit(normalize(path));
-        this.headers = limit(normalize(headers));
-        this.body = limit(normalize(body));
+        this.path = QueryRecordUtils.limit(QueryRecordUtils.normalize(path), MAX_STRING_LENGTH);
+        this.headers = QueryRecordUtils.limit(QueryRecordUtils.normalize(headers), MAX_STRING_LENGTH);
+        this.body = QueryRecordUtils.limit(QueryRecordUtils.normalize(body), MAX_STRING_LENGTH);
         this.timestamp = timestamp;
 
         this.pathLength = this.path.length();
         this.headerLength = this.headers.length();
         this.bodyLength = this.body.length();
         this.https = port == 443;
-        this.hostIsIp = isIpLiteral(this.host);
-        this.suspiciousTld = hasSuspiciousTld(this.host);
-        this.pathHasTraversal = hasPathTraversal(this.path);
-        this.pathHasInjectionMarkers =
-                hasInjectionMarkers(this.path);
-        this.bodyHasInjectionMarkers =
-                hasInjectionMarkers(this.body);
-        this.suspiciousUserAgent =
-                hasSuspiciousUserAgent(this.headers);
+        this.hostIsIp = QueryRecordUtils.isIpLiteral(this.host);
+        this.suspiciousTld = QueryRecordUtils.hasSuspiciousTld(this.host);
+        this.pathHasTraversal = QueryRecordUtils.hasPathTraversal(this.path);
+        this.pathHasInjectionMarkers = QueryRecordUtils.hasInjectionMarkers(this.path);
+        this.bodyHasInjectionMarkers = QueryRecordUtils.hasInjectionMarkers(this.body);
+        this.suspiciousUserAgent = QueryRecordUtils.hasSuspiciousUserAgent(this.headers);
     }
 
+    private static String normalizeMethod(String value) {
+        String method = QueryRecordUtils.normalize(value).toUpperCase(Locale.ROOT);
+        return method.isEmpty() ? "UNKNOWN" : method;
+    }
+
+    // ✅ Реализация интерфейса QueryRecord
+    @Override
     public String getClientIp() { return clientIp; }
+
+    @Override
+    public long getTimestamp() { return timestamp; }
+
+    @Override
+    public String getTarget() { return host; }
+
+    @Override
+    public int getTargetLength() { return host.length(); }
+
+    @Override
+    public boolean isTargetIp() { return hostIsIp; }
+
+    @Override
+    public boolean hasSuspiciousTld() { return suspiciousTld; }
+
+    @Override
+    public boolean hasInjectionMarkers() { return pathHasInjectionMarkers || bodyHasInjectionMarkers; }
+
+    @Override
+    public boolean hasSuspiciousIndicator() { return suspiciousUserAgent; }
+
+    // ✅ Специфичные для HTTP методы
     public String getMethod() { return method; }
     public String getHost() { return host; }
     public int getPort() { return port; }
     public String getPath() { return path; }
     public String getHeaders() { return headers; }
     public String getBody() { return body; }
-    public long getTimestamp() { return timestamp; }
     public int getPathLength() { return pathLength; }
     public int getHeaderLength() { return headerLength; }
     public int getBodyLength() { return bodyLength; }
     public boolean isHttps() { return https; }
     public boolean isHostIp() { return hostIsIp; }
-    public boolean hasSuspiciousTld() { return suspiciousTld; }
     public boolean hasPathTraversal() { return pathHasTraversal; }
     public boolean hasPathInjectionMarkers() { return pathHasInjectionMarkers; }
     public boolean hasBodyInjectionMarkers() { return bodyHasInjectionMarkers; }
     public boolean hasSuspiciousUserAgent() { return suspiciousUserAgent; }
 
-    private static String normalize(String value) {
-        return value == null ? "" : value.trim();
-    }
-
-    private static String normalizeMethod(String value) {
-        String method = normalize(value).toUpperCase(Locale.ROOT);
-        return method.isEmpty() ? "UNKNOWN" : method;
-    }
-
-    private static String normalizeHost(String value) {
-        String host = normalize(value).toLowerCase(Locale.ROOT);
-        while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
-        return host;
-    }
-
-    private static String limit(String value) {
-        if (value.length() <= MAX_STRING_LENGTH) return value;
-        return value.substring(0, MAX_STRING_LENGTH);
-    }
-
-    private static boolean isIpLiteral(String value) {
-        if (value.isEmpty()) return false;
-        if (value.indexOf(':') >= 0) return isIpv6Literal(value);
-        return isIpv4Literal(value);
-    }
-
-    private static boolean isIpv4Literal(String value) {
-        int dots = 0;
-        int lastDot = -1;
-
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c == '.') {
-                if (++dots > 3 || i - lastDot - 1 > 3) return false;
-                lastDot = i;
-            } else if (c < '0' || c > '9') {
-                return false;
-            }
-        }
-
-        if (dots != 3) return false;
-
-        String[] parts = value.split("\\.");
-        for (String part : parts) {
-            if (part.isEmpty()) return false;
-            try {
-                int n = Integer.parseInt(part);
-                if (n < 0 || n > 255) return false;
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean isIpv6Literal(String value) {
-        if (value.isEmpty()) return false;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (!(c == ':' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
-        }
-        return true;
-    }
-
-    private static boolean hasSuspiciousTld(String host) {
-        return host.endsWith(".xyz")
-                || host.endsWith(".top")
-                || host.endsWith(".tk")
-                || host.endsWith(".club")
-                || host.endsWith(".work");
-    }
-
-    private static boolean hasPathTraversal(String value) {
-        String lower = value.toLowerCase(Locale.ROOT);
-
-        return lower.contains("../")
-                || lower.contains("..\\\\")
-                || lower.contains("%2e%2e")
-                || lower.contains("2e2e2f")
-                || lower.contains("2e2e5c");
-    }
-
-    private static boolean hasInjectionMarkers(String value) {
-        String lower = value.toLowerCase(Locale.ROOT);
-
-        return lower.contains("select ")
-                || lower.contains(" union ")
-                || lower.contains(" drop ")
-                || lower.contains(" insert ")
-                || lower.contains(" update ")
-                || lower.contains(" delete ")
-                || lower.contains(" or 1=1")
-                || lower.contains("<script")
-                || lower.contains("javascript:")
-                || lower.contains("onerror=")
-                || lower.contains("onload=")
-                || lower.contains("$(")
-                || lower.contains(";%00")
-                || lower.contains("%0a")
-                || lower.contains("%0d")
-                || lower.contains("../")
-                || lower.contains("..\\\\");
-    }
-
-    private static boolean hasSuspiciousUserAgent(String headers) {
-        String lower = headers.toLowerCase(Locale.ROOT);
-
-        return lower.contains("user-agent: curl")
-                || lower.contains("user-agent: wget")
-                || lower.contains("user-agent: python")
-                || lower.contains("user-agent: nikto")
-                || lower.contains("user-agent: sqlmap")
-                || lower.contains("user-agent: nmap");
-    }
-
     @Override
     public String toString() {
-        return "HttpQueryRecord{clientIp='" + clientIp
-                + "', method='" + method
-                + "', host='" + host
-                + "', port=" + port
-                + ", path='" + path
-                + "', timestamp=" + timestamp + '}';
+        return "HttpQueryRecord{clientIp='" + clientIp + "', method='" + method +
+                "', host='" + host + "', port=" + port + ", path='" + path +
+                "', timestamp=" + timestamp + '}';
     }
 }

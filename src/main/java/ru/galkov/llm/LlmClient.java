@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
 
 /**
  * s0506777@yandex.ru Galkov V.A.
@@ -29,15 +28,11 @@ import java.util.regex.Pattern;
 public final class LlmClient {
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
 
+    private static final int MAX_OUTPUT_TOKENS = 2048;
     private static final int MAX_RESPONSE_BYTES = 1_048_576;
-    private static final int MAX_REASON_LENGTH = 256;
-    private static final int MAX_OUTPUT_TOKENS = 512;
-
+    private static final int MAX_REASON_LENGTH = 500;
+    private static final double TOP_P = 0.9;
     private static final ObjectMapper objectMapper = new ObjectMapper();
-
-    private static final Pattern JSON_PATTERN = Pattern.compile(
-            "```(?:json)?\\s*(\\{.*?})\\s*```",
-            Pattern.DOTALL);
 
     private final String llmUrl;
     private final String model;
@@ -76,6 +71,7 @@ public final class LlmClient {
             root.put("max_tokens", MAX_OUTPUT_TOKENS);
             root.put("stream", false);
             root.put("reasoning", false);
+            root.put("top_p", TOP_P);
 
             ObjectNode systemMessage = objectMapper.createObjectNode();
             systemMessage.put("role", "system");
@@ -143,7 +139,6 @@ public final class LlmClient {
         }
     }
 
-
     public AnalysisResult parseResponse(String responseBody, String domain) {
         if (responseBody == null || responseBody.isBlank()) {
             logger.warn("Empty LLM response body for domain={}", domain);
@@ -189,13 +184,11 @@ public final class LlmClient {
                 return new AnalysisResult(false, 0.0, "Extracted content is not JSON object", List.of("NONE"));
             }
 
-            // ✅ Получаем поля с поддержкой альтернативных имён (с подчёркиваниями и без)
             JsonNode suspiciousNode = resultNode.get("isSuspicious");
             JsonNode confidenceNode = resultNode.get("confidence");
             JsonNode reasonNode = resultNode.get("reason");
             JsonNode actionsNode = resultNode.get("recommendedActions");
 
-            // ✅ Fallback: если нет полей без подчёркиваний, пробуем с подчёркиваниями
             if (suspiciousNode == null && resultNode.has("__isSuspicious__")) suspiciousNode = resultNode.get("__isSuspicious__");
             if (suspiciousNode == null && resultNode.has("is_suspicious")) suspiciousNode = resultNode.get("is_suspicious");
 

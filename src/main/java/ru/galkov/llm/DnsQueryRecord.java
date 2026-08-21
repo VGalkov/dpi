@@ -1,12 +1,9 @@
 package ru.galkov.llm;
 
-import java.util.Locale;
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
-public final class DnsQueryRecord {
-    private static final double LOG_2 = Math.log(2.0);
-
+public final class DnsQueryRecord implements QueryRecord {
     private final String clientIp;
     private final String domain;
     private final int queryType;
@@ -46,8 +43,8 @@ public final class DnsQueryRecord {
             int z,
             int rcode
     ) {
-        this.clientIp = normalizeNullable(clientIp);
-        this.domain = normalizeDomain(domain);
+        this.clientIp = QueryRecordUtils.normalizeNullable(clientIp);
+        this.domain = QueryRecordUtils.normalizeDomain(domain);
         this.queryType = queryType;
         this.timestamp = timestamp;
         this.query = query;
@@ -58,34 +55,56 @@ public final class DnsQueryRecord {
         this.rcode = rcode;
 
         this.domainLength = this.domain == null ? 0 : this.domain.length();
-        this.entropy = calculateEntropy(this.domain);
-        this.subdomainCount = countDots(this.domain);
-        this.parentDomain = calculateParentDomain(this.domain);
-        this.leftmostLabel = calculateLeftmostLabel(this.domain);
+        this.entropy = QueryRecordUtils.calculateEntropy(this.domain);
+        this.subdomainCount = QueryRecordUtils.countDots(this.domain);
+        this.parentDomain = QueryRecordUtils.calculateParentDomain(this.domain);
+        this.leftmostLabel = QueryRecordUtils.calculateLeftmostLabel(this.domain);
         this.leftmostLabelLength = this.leftmostLabel.length();
-        this.maxLabelLength = calculateMaxLabelLength(this.domain);
-        this.digitRatio = calculateDigitRatio(this.leftmostLabel);
-        this.hyphenRatio = calculateHyphenRatio(this.leftmostLabel);
-        this.uniqueCharacterRatio =
-                calculateUniqueCharacterRatio(this.leftmostLabel);
-        this.base32Like = isBase32Like(this.leftmostLabel);
-        this.base64Like = isBase64Like(this.leftmostLabel);
-        this.punycode = containsPunycode(this.domain);
-        this.ipLikeLabel = containsIpLikeLabel(this.domain);
-        this.suspiciousKeyword = containsSuspiciousKeyword(this.domain);
+        this.maxLabelLength = QueryRecordUtils.calculateMaxLabelLength(this.domain);
+        this.digitRatio = QueryRecordUtils.calculateDigitRatio(this.leftmostLabel);
+        this.hyphenRatio = QueryRecordUtils.calculateHyphenRatio(this.leftmostLabel);
+        this.uniqueCharacterRatio = QueryRecordUtils.calculateUniqueCharacterRatio(this.leftmostLabel);
+        this.base32Like = QueryRecordUtils.isBase32Like(this.leftmostLabel);
+        this.base64Like = QueryRecordUtils.isBase64Like(this.leftmostLabel);
+        this.punycode = QueryRecordUtils.containsPunycode(this.domain);
+        this.ipLikeLabel = QueryRecordUtils.containsIpLikeLabel(this.domain);
+        this.suspiciousKeyword = QueryRecordUtils.containsSuspiciousKeyword(this.domain);
     }
 
+    // ✅ Реализация интерфейса QueryRecord
+    @Override
     public String getClientIp() { return clientIp; }
+
+    @Override
+    public long getTimestamp() { return timestamp; }
+
+    @Override
+    public String getTarget() { return domain; }
+
+    @Override
+    public int getTargetLength() { return domainLength; }
+
+    @Override
+    public boolean isTargetIp() { return ipLikeLabel; }
+
+    @Override
+    public boolean hasSuspiciousTld() { return false; } // DNS не имеет TLD в том же смысле
+
+    @Override
+    public boolean hasInjectionMarkers() { return suspiciousKeyword; }
+
+    @Override
+    public boolean hasSuspiciousIndicator() { return suspiciousKeyword; }
+
+    // ✅ Специфичные для DNS методы
     public String getDomain() { return domain; }
     public int getQueryType() { return queryType; }
-    public long getTimestamp() { return timestamp; }
     public boolean isQuery() { return query; }
     public int getOpcode() { return opcode; }
     public boolean isTruncated() { return truncated; }
     public boolean isRecursionDesired() { return recursionDesired; }
     public int getZ() { return z; }
     public int getRcode() { return rcode; }
-    public int getDomainLength() { return domainLength; }
     public double getEntropy() { return entropy; }
     public int getSubdomainCount() { return subdomainCount; }
     public String getParentDomain() { return parentDomain; }
@@ -101,209 +120,9 @@ public final class DnsQueryRecord {
     public boolean hasIpLikeLabel() { return ipLikeLabel; }
     public boolean hasSuspiciousKeyword() { return suspiciousKeyword; }
 
-    private static String normalizeNullable(String value) {
-        if (value == null) {
-            return null;
-        }
-        String result = value.trim();
-        return result.isEmpty() ? null : result;
-    }
-
-    private static String normalizeDomain(String value) {
-        if (value == null) {
-            return null;
-        }
-        String result = value.trim().toLowerCase(Locale.ROOT);
-
-        while (result.endsWith(".")) {
-            result = result.substring(0, result.length() - 1);
-        }
-
-        return result.isEmpty() ? null : result;
-    }
-
-    private static double calculateEntropy(String value) {
-        if (value == null || value.isEmpty()) {
-            return 0.0;
-        }
-
-        int[] frequency = new int[Character.MAX_VALUE + 1];
-        int length = 0;
-
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c == '.') {
-                continue;
-            }
-            frequency[c]++;
-            length++;
-        }
-
-        if (length == 0) return 0.0;
-
-        double result = 0.0;
-        for (int count : frequency) {
-            if (count == 0) continue;
-            double probability = (double) count / length;
-            result -= probability * Math.log(probability) / LOG_2;
-        }
-        return result;
-    }
-
-    private static int countDots(String value) {
-        if (value == null || value.isEmpty()) return 0;
-        int count = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == '.') count++;
-        }
-        return count;
-    }
-
-    private static String calculateParentDomain(String value) {
-        if (value == null || value.isEmpty()) return "";
-
-        int index = value.indexOf('.');
-        if (index < 0 || index == value.length() - 1) return value;
-
-        return value.substring(index + 1);
-    }
-
-    private static String calculateLeftmostLabel(String value) {
-        if (value == null || value.isEmpty()) return "";
-        int index = value.indexOf('.');
-        return index < 0 ? value : value.substring(0, index);
-    }
-
-    private static int calculateMaxLabelLength(String value) {
-        if (value == null || value.isEmpty()) return 0;
-
-        int max = 0;
-        int current = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == '.') {
-                if (current > max) max = current;
-                current = 0;
-            } else {
-                current++;
-            }
-        }
-        return Math.max(max, current);
-    }
-
-    private static double calculateDigitRatio(String value) {
-        if (value == null || value.isEmpty())
-            return 0.0;
-
-        int count = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (Character.isDigit(value.charAt(i))) count++;
-        }
-        return (double) count / value.length();
-    }
-
-    private static double calculateHyphenRatio(String value) {
-        if (value == null || value.isEmpty()) return 0.0;
-        int count = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == '-') count++;
-        }
-        return (double) count / value.length();
-    }
-
-    private static double calculateUniqueCharacterRatio(String value) {
-        if (value == null || value.isEmpty()) return 0.0;
-
-        boolean[] seen = new boolean[Character.MAX_VALUE + 1];
-        int unique = 0;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (!seen[c]) {
-                seen[c] = true;
-                unique++;
-            }
-        }
-        return (double) unique / value.length();
-    }
-
-    private static boolean isBase32Like(String value) {
-        if (value == null || value.length() < 12) return false;
-        int valid = 0;
-        for (int i = 0; i < value.length(); i++) {
-            char c = Character.toUpperCase(value.charAt(i));
-            if ((c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7')) valid++;
-        }
-        return (double) valid / value.length() >= 0.95;
-    }
-
-    private static boolean isBase64Like(String value) {
-        if (value == null || value.length() < 16) return false;
-
-        int valid = 0;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if ((c >= 'A' && c <= 'Z')
-                    || (c >= 'a' && c <= 'z')
-                    || (c >= '0' && c <= '9')
-                    || c == '+'
-                    || c == '/'
-                    || c == '=') {
-                valid++;
-            }
-        }
-        return (double) valid / value.length() >= 0.95;
-    }
-
-    private static boolean containsPunycode(String value) {
-        if (value == null || value.isEmpty()) return false;
-
-        String[] labels = value.split("\\.");
-        for (String label : labels) {
-            if (label.startsWith("xn--")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean containsIpLikeLabel(String value) {
-        if (value == null || value.isEmpty()) return false;
-
-        String[] labels = value.split("\\.");
-        for (String label : labels) {
-            int digits = 0;
-            int hyphens = 0;
-            for (int i = 0; i < label.length(); i++) {
-                char c = label.charAt(i);
-                if (Character.isDigit(c)) {
-                    digits++;
-                } else if (c == '-') {
-                    hyphens++;
-                }
-            }
-            if (digits >= 4 && hyphens >= 1) return true;
-
-        }
-        return false;
-    }
-
-    private static boolean containsSuspiciousKeyword(String value) {
-        if (value == null || value.isEmpty()) return false;
-
-        String lower = value.toLowerCase(Locale.ROOT);
-        return lower.contains("malware")
-                || lower.contains("phishing")
-                || lower.contains("exploit")
-                || lower.contains("ransom")
-                || lower.contains("botnet")
-                || lower.contains("keylogger")
-                || lower.contains("stealer");
-    }
-
     @Override
     public String toString() {
-        return "DnsQueryRecord{clientIp='" + clientIp
-                + "', domain='" + domain
-                + "', queryType=" + queryType
-                + ", timestamp=" + timestamp + '}';
+        return "DnsQueryRecord{clientIp='" + clientIp + "', domain='" + domain +
+                "', queryType=" + queryType + ", timestamp=" + timestamp + '}';
     }
 }

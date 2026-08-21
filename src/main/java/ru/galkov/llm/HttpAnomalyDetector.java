@@ -26,7 +26,6 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
     private final BlockingQueue<HttpQueryRecord> queue;
     private volatile long lastLlmRequestTime;
 
-    // ✅ Статическая ссылка на snapshot (быстрый доступ, минимум памяти)
     private static volatile BlacklistSnapshot blacklistSnapshot;
 
     public HttpAnomalyDetector() {
@@ -63,7 +62,6 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
         );
     }
 
-    // ✅ Метод инициализации (вызывается один раз при старте)
     public static void init(BlacklistLoader loader) {
         if (loader != null) {
             blacklistSnapshot = loader.snapshot();
@@ -81,7 +79,6 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
             return;
         }
 
-        // ✅ Проверка blacklist перед добавлением в очередь
         if (isBlockedByBlacklist(record.getHost(), record.getClientIp())) {
             logger.debug("Skipping blacklisted host={} or clientIp={}", record.getHost(), record.getClientIp());
             return;
@@ -105,7 +102,6 @@ public class HttpAnomalyDetector extends AbstractAnomalyDetector<HttpQueryRecord
         );
     }
 
-    // ✅ Проверка blacklist (host + IP клиента)
     private boolean isBlockedByBlacklist(String host, String clientIp) {
         if (blacklistSnapshot == null) return false;
 
