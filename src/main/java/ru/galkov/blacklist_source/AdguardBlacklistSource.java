@@ -10,6 +10,8 @@ import java.net.*;
 import java.util.List;
 import java.util.Locale;
 
+import static ru.galkov.util.IpCidr.isBlockedAddressUncheckedIpv4;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
@@ -26,12 +28,9 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("AdGuard URL cannot be null or blank");
         }
-        if (connectTimeout <= 0) {
-            throw new IllegalArgumentException("connectTimeout must be positive");
-        }
-        if (readTimeout <= 0) {
-            throw new IllegalArgumentException("readTimeout must be positive");
-        }
+        if (connectTimeout <= 0) throw new IllegalArgumentException("connectTimeout must be positive");
+        if (readTimeout <= 0) throw new IllegalArgumentException("readTimeout must be positive");
+
 
         validateUrl(url);
 
@@ -43,7 +42,6 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     @Override
     public List<BlacklistRule> loadRules() throws IOException {
         logger.info(LocaleUtil.getString("adguard_load_started"), url);
-
         HttpURLConnection connection = null;
 
         try {
@@ -53,8 +51,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             logger.info(LocaleUtil.getString("adguard_http_response"), status);
 
             if (status != HttpURLConnection.HTTP_OK) {
-                throw new IOException(
-                        LocaleUtil.getString("adguard_http_error") + status);
+                throw new IOException(LocaleUtil.getString("adguard_http_error") + status);
             }
 
             long contentLength = connection.getContentLengthLong();
@@ -74,9 +71,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
                 return rules;
             }
         } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
+            if (connection != null) connection.disconnect();
         }
     }
 
@@ -99,17 +94,13 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
 
             int status = connection.getResponseCode();
-
-            if (!isRedirect(status)) {
-                return connection;
-            }
+            if (!isRedirect(status)) return connection;
 
             String location = connection.getHeaderField("Location");
             connection.disconnect();
 
-            if (location == null || location.isBlank()) {
+            if (location == null || location.isBlank()) 
                 throw new IOException("Redirect response has no Location header");
-            }
 
             currentUrl = resolveRedirect(currentUrl, location);
         }
@@ -120,12 +111,9 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private static URL parseHttpUrl(String value) throws IOException {
         try {
             URI uri = new URI(value);
-
             validateUri(uri);
-
             String host = uri.getHost();
             ensureHostIsSafe(host);
-
             return uri.toURL();
         } catch (URISyntaxException | IllegalArgumentException e) {
             throw new IOException("Invalid HTTP URL", e);
@@ -147,50 +135,26 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private static void validateUri(URI uri) throws IOException {
         String scheme = uri.getScheme();
 
-        if (!"http".equalsIgnoreCase(scheme)
-                && !"https".equalsIgnoreCase(scheme)) {
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) 
             throw new IOException("Only HTTP and HTTPS URLs are allowed");
-        }
-
-        if (uri.getHost() == null || uri.getHost().isBlank()) {
-            throw new IOException("URL host is missing");
-        }
-
-        if (uri.getUserInfo() != null) {
-            throw new IOException("URL user info is not allowed");
-        }
-
-        if (uri.getFragment() != null) {
-            throw new IOException("URL fragments are not allowed");
-        }
-
+        
+        if (uri.getHost() == null || uri.getHost().isBlank()) throw new IOException("URL host is missing");
+        if (uri.getUserInfo() != null) throw new IOException("URL user info is not allowed");
+        if (uri.getFragment() != null) throw new IOException("URL fragments are not allowed");
+        
         int port = uri.getPort();
-        if (port != -1 && (port < 1 || port > 65535)) {
-            throw new IOException("Invalid URL port");
-        }
+        if (port != -1 && (port < 1 || port > 65535)) throw new IOException("Invalid URL port");
+        
     }
 
     private static void ensureHostIsSafe(String host) throws IOException {
-        if (host == null || host.isBlank()) {
-            throw new IOException("Host is missing");
-        }
-
-        if ("localhost".equalsIgnoreCase(host)) {
-            throw new IOException("Localhost URL is not allowed");
-        }
-
+        if (host == null || host.isBlank()) throw new IOException("Host is missing");
+        if ("localhost".equalsIgnoreCase(host)) throw new IOException("Localhost URL is not allowed");
         InetAddress[] addresses = InetAddress.getAllByName(host);
-
-        if (addresses.length == 0) {
-            throw new IOException("Host has no resolved addresses");
-        }
-
+        if (addresses.length == 0) throw new IOException("Host has no resolved addresses");
         for (InetAddress address : addresses) {
-            if (isBlockedAddress(address)) {
-                throw new IOException(
-                        "URL resolves to blocked address: "
-                                + address.getHostAddress());
-            }
+            if (isBlockedAddress(address))
+                throw new IOException("URL resolves to blocked address: " + address.getHostAddress());
         }
     }
 
@@ -211,83 +175,37 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             int c = bytes[2] & 0xff;
             int d = bytes[3] & 0xff;
 
-            if (a == 169 && b == 254 && c == 169 && d == 254) {
-                return true;
-            }
-
-            if (a == 100 && b == 100 && c == 100 && d == 200) {
-                return true;
-            }
-
-            if (a == 100 && b >= 64 && b <= 127) {
-                return true;
-            }
-
+            if (a == 169 && b == 254 && c == 169 && d == 254) return true;
+            if (a == 100 && b == 100 && c == 100 && d == 200) return true;
+            if (a == 100 && b >= 64 && b <= 127) return true;
+            
             return a == 0;
         }
 
-        if (address instanceof Inet6Address) {
-            return isUniqueLocalIpv6(bytes)
-                    || isIpv4MappedBlockedAddress(bytes);
-        }
+        if (address instanceof Inet6Address) return isUniqueLocalIpv6(bytes) || isIpv4MappedBlockedAddress(bytes);
+
 
         return false;
     }
 
     private static boolean isUniqueLocalIpv6(byte[] bytes) {
-        return bytes.length == 16
-                && (bytes[0] & 0xff) >= 0xfc
-                && (bytes[0] & 0xff) <= 0xfd;
+        return bytes.length == 16 && (bytes[0] & 0xff) >= 0xfc && (bytes[0] & 0xff) <= 0xfd;
     }
 
     private static boolean isIpv4MappedBlockedAddress(byte[] bytes) {
-        if (bytes.length != 16) {
-            return false;
-        }
-
-        for (int i = 0; i < 10; i++) {
-            if (bytes[i] != 0) {
-                return false;
-            }
-        }
-
-        if (bytes[10] != (byte) 0xff || bytes[11] != (byte) 0xff) {
-            return false;
-        }
-
-        byte[] ipv4 = new byte[] {
-                bytes[12], bytes[13], bytes[14], bytes[15]
-        };
-
+        if (bytes.length != 16) return false;
+        for (int i = 0; i < 10; i++) if (bytes[i] != 0) return false;
+        if (bytes[10] != (byte) 0xff || bytes[11] != (byte) 0xff) return false;
+        byte[] ipv4 = new byte[] {bytes[12], bytes[13], bytes[14], bytes[15]};
         return isBlockedAddressUncheckedIpv4(ipv4);
     }
 
-    private static boolean isBlockedAddressUncheckedIpv4(byte[] bytes) {
-        int a = bytes[0] & 0xff;
-        int b = bytes[1] & 0xff;
-        int c = bytes[2] & 0xff;
-        int d = bytes[3] & 0xff;
-
-        return a == 0
-                || a == 10
-                || (a == 127)
-                || (a == 169 && b == 254)
-                || (a == 172 && b >= 16 && b <= 31)
-                || (a == 192 && b == 168)
-                || (a == 100 && b >= 64 && b <= 127)
-                || (a == 169 && b == 254 && c == 169 && d == 254)
-                || (a == 100 && b == 100 && c == 100 && d == 200);
-    }
-
-    private static String resolveRedirect(String currentUrl, String location)
-            throws IOException {
+    private static String resolveRedirect(String currentUrl, String location) throws IOException {
         try {
             URI current = new URI(currentUrl);
             URI resolved = current.resolve(location);
-
             validateUri(resolved);
             ensureHostIsSafe(resolved.getHost());
-
             return resolved.toString();
         } catch (URISyntaxException | IllegalArgumentException e) {
             throw new IOException("Invalid redirect URL", e);
@@ -304,12 +222,11 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
 
     @Override
     protected BlacklistRule parseLine(String line, String sourceName) {
-        if (line == null || line.length() > MAX_LINE_LENGTH) {
+        if (line == null || line.length() > MAX_LINE_LENGTH) 
             return null;
-        }
+        
 
         String value = line.trim();
-
         if (value.isEmpty()
                 || value.startsWith("#")
                 || value.startsWith("!")) {
@@ -322,9 +239,9 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             value = parseHostsLine(value);
         }
 
-        if (value == null || !isValidDomainCandidate(value)) {
+        if (!isValidDomainCandidate(value)) 
             return null;
-        }
+        
 
         return new BlacklistRule(
                 BlacklistRule.RuleType.DOMAIN,
@@ -371,7 +288,6 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         return parts[1].trim();
     }
 
-    // ✅ П.15: ручная проверка вместо DNS-резолва (InetAddress.getByName)
     private static boolean isIpLiteral(String value) {
         if (value == null || value.isBlank()) {
             return false;
@@ -489,7 +405,6 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             return value;
         }
 
-        // ✅ Исправлено: не читаем сверх оставшегося лимита за один вызов
         @Override
         public int read(byte[] buffer, int offset, int length)
                 throws IOException {

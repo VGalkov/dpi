@@ -41,7 +41,6 @@ public final class HostNormalizer {
         if (value == null) return null;
         String result = value;
 
-        // ✅ П.15: было replaceAll("\\.$", ""), стало — цикл while с endsWith()
         while (result.endsWith(".")) {
             result = result.substring(0, result.length() - 1);
         }

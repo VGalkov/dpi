@@ -17,7 +17,6 @@ public final class IpCidr {
 
     private static final int MAX_CACHE_SIZE = 512;
 
-    // ✅ П.17: LRU-кэш вместо full Clear при переполнении
     private static final Map<String, InetAddress> addressCache =
             Collections.synchronizedMap(
                     new LinkedHashMap<String, InetAddress>(256, 0.75f, true) {
@@ -64,7 +63,6 @@ public final class IpCidr {
         this.maskBytes = createMask(this.networkBytes.length, prefixLength);
     }
 
-    // ✅ П.38: упрощённая генерация маски без Math.max/min
     private static byte[] createMask(int length, int prefixLength) {
         byte[] mask = new byte[length];
         for (int i = 0; i < length; i++) {
@@ -88,7 +86,6 @@ public final class IpCidr {
 
         InetAddress address = InetAddress.getByName(ip);
 
-        // ✅ П.17: LRU-кэш сам вытесняет старые записи
         synchronized (addressCache) {
             if (!addressCache.containsKey(ip)) {
                 addressCache.put(ip, address);
@@ -129,7 +126,23 @@ public final class IpCidr {
         return true;
     }
 
-    // ✅ П.44: toString() без String.format — прямая конкатенация
+    public static boolean isBlockedAddressUncheckedIpv4(byte[] bytes) {
+        int a = bytes[0] & 0xff;
+        int b = bytes[1] & 0xff;
+        int c = bytes[2] & 0xff;
+        int d = bytes[3] & 0xff;
+
+        return a == 0
+                || a == 10
+                || (a == 127)
+                || (a == 169 && b == 254)
+                || (a == 172 && b >= 16 && b <= 31)
+                || (a == 192 && b == 168)
+                || (a == 100 && b >= 64 && b <= 127)
+                || (a == 169 && b == 254 && c == 169 && d == 254)
+                || (a == 100 && b == 100 && c == 100 && d == 200);
+    }
+
     @Override
     public String toString() {
         return network.getHostAddress() + "/" + prefixLength;

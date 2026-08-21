@@ -12,11 +12,7 @@ public final class DomainTrie {
 
     private final TrieNode root = new TrieNode();
 
-    public enum MatchType {
-        EXACT,
-        WILDCARD,
-        SUBTREE
-    }
+    public enum MatchType {EXACT, WILDCARD, SUBTREE}
 
     private static final class TrieNode {
         private final Map<String, TrieNode> children = new java.util.HashMap<>();
@@ -29,33 +25,20 @@ public final class DomainTrie {
 
     private static final Map<String, String[]> labelsCache =
             Collections.synchronizedMap(
-                    new LinkedHashMap<String, String[]>(
-                            MAX_LABELS_CACHE_SIZE, 0.75f, true
-                    ) {
+                    new LinkedHashMap<String, String[]>(MAX_LABELS_CACHE_SIZE, 0.75f, true) {
                         @Override
-                        protected boolean removeEldestEntry(
-                                Map.Entry<String, String[]> eldest
-                        ) {
+                        protected boolean removeEldestEntry(Map.Entry<String, String[]> eldest) {
                             return size() > MAX_LABELS_CACHE_SIZE;
                         }
                     }
             );
 
     public synchronized void addDomain(String domain, MatchType matchType) {
-        if (matchType == null) {
-            return;
-        }
-
+        if (matchType == null) return;
         String normalized = normalizeDomain(domain);
-        if (normalized == null) {
-            return;
-        }
-
+        if (normalized == null) return;
         String[] labels = getLabelsCached(normalized);
-        if (labels.length == 0) {
-            return;
-        }
-
+        if (labels.length == 0) return;
         TrieNode node = root;
 
         for (int i = labels.length - 1; i >= 0; i--) {
@@ -78,23 +61,14 @@ public final class DomainTrie {
 
     public synchronized boolean contains(String domain) {
         String normalized = normalizeDomain(domain);
-        if (normalized == null) {
-            return false;
-        }
-
+        if (normalized == null) return false;
         String[] labels = getLabelsCached(normalized);
-        if (labels.length == 0) {
-            return false;
-        }
-
+        if (labels.length == 0) return false;
         TrieNode node = root;
 
         for (int i = labels.length - 1; i >= 0; i--) {
             node = node.children.get(labels[i]);
-
-            if (node == null) {
-                return false;
-            }
+            if (node == null) return false;
         }
 
         return node.exactBlocked || node.wildcardBlocked || node.subtreeBlocked;
@@ -102,35 +76,20 @@ public final class DomainTrie {
 
     public synchronized boolean matches(String domain) {
         String normalized = normalizeDomain(domain);
-        if (normalized == null) {
-            return false;
-        }
+        if (normalized == null) return false;
+
 
         String[] labels = getLabelsCached(normalized);
-        if (labels.length == 0) {
-            return false;
-        }
-
+        if (labels.length == 0) return false;
         TrieNode node = root;
 
         for (int i = labels.length - 1; i >= 0; i--) {
             node = node.children.get(labels[i]);
 
-            if (node == null) {
-                return false;
-            }
-
-            if (node.subtreeBlocked) {
-                return true;
-            }
-
-            if (i == 0 && node.exactBlocked) {
-                return true;
-            }
-
-            if (i > 0 && node.wildcardBlocked) {
-                return true;
-            }
+            if (node == null) return false;
+            if (node.subtreeBlocked) return true;
+            if (i == 0 && node.exactBlocked) return true;
+            if (i > 0 && node.wildcardBlocked) return true;
         }
 
         return false;
@@ -150,12 +109,8 @@ public final class DomainTrie {
     }
 
     private static String normalizeDomain(String domain) {
-        if (domain == null) {
-            return null;
-        }
-
+        if (domain == null) return null;
         String normalized = domain.trim().toLowerCase(Locale.ROOT);
-
         while (normalized.endsWith(".")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
@@ -166,11 +121,7 @@ public final class DomainTrie {
     private static String[] getLabelsCached(String domain) {
         synchronized (labelsCache) {
             String[] labels = labelsCache.get(domain);
-
-            if (labels != null) {
-                return labels;
-            }
-
+            if (labels != null) return labels;
             labels = splitByDot(domain);
             labelsCache.put(domain, labels);
             return labels;
@@ -181,15 +132,10 @@ public final class DomainTrie {
         int dots = 0;
 
         for (int i = 0; i < domain.length(); i++) {
-            if (domain.charAt(i) == '.') {
-                dots++;
-            }
+            if (domain.charAt(i) == '.') dots++;
         }
 
-        if (dots == 0) {
-            return new String[]{domain};
-        }
-
+        if (dots == 0) return new String[]{domain};
         String[] labels = new String[dots + 1];
         int start = 0;
         int index = 0;
@@ -203,5 +149,4 @@ public final class DomainTrie {
 
         return labels;
     }
-    // ✅ П.48: метод clearCache() удалён (мёртвый код)
 }

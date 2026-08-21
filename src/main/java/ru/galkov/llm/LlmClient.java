@@ -24,7 +24,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Искусственный интеллект.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class LlmClient {
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
@@ -47,15 +47,10 @@ public final class LlmClient {
     private final HttpClient httpClient;
 
     public LlmClient(String llmUrl, String model, int timeoutSeconds, String apiKey) {
-        if (llmUrl == null || llmUrl.isBlank()) {
-            throw new IllegalArgumentException("LLM URL cannot be null or blank");
-        }
-        if (model == null || model.isBlank()) {
-            throw new IllegalArgumentException("LLM model cannot be null or blank");
-        }
-        if (timeoutSeconds <= 0) {
-            throw new IllegalArgumentException("LLM timeout must be positive");
-        }
+        if (llmUrl == null || llmUrl.isBlank()) throw new IllegalArgumentException("LLM URL cannot be null or blank");
+        if (model == null || model.isBlank()) throw new IllegalArgumentException("LLM model cannot be null or blank");
+        if (timeoutSeconds <= 0) throw new IllegalArgumentException("LLM timeout must be positive");
+
 
         this.llmUrl = llmUrl;
         this.model = model;
@@ -115,9 +110,6 @@ public final class LlmClient {
                 requestBuilder.header("Authorization", "Bearer " + apiKey);
             }
 
-            // ✅ П.54: лимит применяется ВО ВРЕМЯ чтения, а не после.
-            //        Ответ больше MAX_RESPONSE_BYTES не аллоцируется целиком
-            //        (работает на Java 11+ через BodySubscribers.limiting).
             HttpResponse<String> response = httpClient.send(
                     requestBuilder.build(),
                     responseInfo -> HttpResponse.BodySubscribers.limiting(
@@ -226,9 +218,8 @@ public final class LlmClient {
             }
 
             String reason = reasonNode.asText("").trim();
-            if (reason.length() > MAX_REASON_LENGTH) {
-                reason = reason.substring(0, MAX_REASON_LENGTH);
-            }
+            if (reason.length() > MAX_REASON_LENGTH) reason = reason.substring(0, MAX_REASON_LENGTH);
+
 
             return new AnalysisResult(suspiciousNode.asBoolean(), confidence, reason, actions);
 

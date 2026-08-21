@@ -1,7 +1,9 @@
 package ru.galkov.llm;
 
 import java.util.Locale;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class DnsQueryRecord {
     private static final double LOG_2 = Math.log(2.0);
 
@@ -137,15 +139,11 @@ public final class DnsQueryRecord {
             length++;
         }
 
-        if (length == 0) {
-            return 0.0;
-        }
+        if (length == 0) return 0.0;
 
         double result = 0.0;
         for (int count : frequency) {
-            if (count == 0) {
-                continue;
-            }
+            if (count == 0) continue;
             double probability = (double) count / length;
             result -= probability * Math.log(probability) / LOG_2;
         }
@@ -153,48 +151,37 @@ public final class DnsQueryRecord {
     }
 
     private static int countDots(String value) {
-        if (value == null || value.isEmpty()) {
-            return 0;
-        }
+        if (value == null || value.isEmpty()) return 0;
         int count = 0;
         for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == '.') {
-                count++;
-            }
+            if (value.charAt(i) == '.') count++;
         }
         return count;
     }
 
     private static String calculateParentDomain(String value) {
-        if (value == null || value.isEmpty()) {
-            return "";
-        }
+        if (value == null || value.isEmpty()) return "";
+
         int index = value.indexOf('.');
-        if (index < 0 || index == value.length() - 1) {
-            return value;
-        }
+        if (index < 0 || index == value.length() - 1) return value;
+
         return value.substring(index + 1);
     }
 
     private static String calculateLeftmostLabel(String value) {
-        if (value == null || value.isEmpty()) {
-            return "";
-        }
+        if (value == null || value.isEmpty()) return "";
         int index = value.indexOf('.');
         return index < 0 ? value : value.substring(0, index);
     }
 
     private static int calculateMaxLabelLength(String value) {
-        if (value == null || value.isEmpty()) {
-            return 0;
-        }
+        if (value == null || value.isEmpty()) return 0;
+
         int max = 0;
         int current = 0;
         for (int i = 0; i < value.length(); i++) {
             if (value.charAt(i) == '.') {
-                if (current > max) {
-                    max = current;
-                }
+                if (current > max) max = current;
                 current = 0;
             } else {
                 current++;
@@ -204,35 +191,28 @@ public final class DnsQueryRecord {
     }
 
     private static double calculateDigitRatio(String value) {
-        if (value == null || value.isEmpty()) {
+        if (value == null || value.isEmpty())
             return 0.0;
-        }
+
         int count = 0;
         for (int i = 0; i < value.length(); i++) {
-            if (Character.isDigit(value.charAt(i))) {
-                count++;
-            }
+            if (Character.isDigit(value.charAt(i))) count++;
         }
         return (double) count / value.length();
     }
 
     private static double calculateHyphenRatio(String value) {
-        if (value == null || value.isEmpty()) {
-            return 0.0;
-        }
+        if (value == null || value.isEmpty()) return 0.0;
         int count = 0;
         for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == '-') {
-                count++;
-            }
+            if (value.charAt(i) == '-') count++;
         }
         return (double) count / value.length();
     }
 
     private static double calculateUniqueCharacterRatio(String value) {
-        if (value == null || value.isEmpty()) {
-            return 0.0;
-        }
+        if (value == null || value.isEmpty()) return 0.0;
+
         boolean[] seen = new boolean[Character.MAX_VALUE + 1];
         int unique = 0;
         for (int i = 0; i < value.length(); i++) {
@@ -246,23 +226,18 @@ public final class DnsQueryRecord {
     }
 
     private static boolean isBase32Like(String value) {
-        if (value == null || value.length() < 12) {
-            return false;
-        }
+        if (value == null || value.length() < 12) return false;
         int valid = 0;
         for (int i = 0; i < value.length(); i++) {
             char c = Character.toUpperCase(value.charAt(i));
-            if ((c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7')) {
-                valid++;
-            }
+            if ((c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7')) valid++;
         }
         return (double) valid / value.length() >= 0.95;
     }
 
     private static boolean isBase64Like(String value) {
-        if (value == null || value.length() < 16) {
-            return false;
-        }
+        if (value == null || value.length() < 16) return false;
+
         int valid = 0;
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
@@ -279,9 +254,8 @@ public final class DnsQueryRecord {
     }
 
     private static boolean containsPunycode(String value) {
-        if (value == null || value.isEmpty()) {
-            return false;
-        }
+        if (value == null || value.isEmpty()) return false;
+
         String[] labels = value.split("\\.");
         for (String label : labels) {
             if (label.startsWith("xn--")) {
@@ -292,9 +266,8 @@ public final class DnsQueryRecord {
     }
 
     private static boolean containsIpLikeLabel(String value) {
-        if (value == null || value.isEmpty()) {
-            return false;
-        }
+        if (value == null || value.isEmpty()) return false;
+
         String[] labels = value.split("\\.");
         for (String label : labels) {
             int digits = 0;
@@ -307,17 +280,15 @@ public final class DnsQueryRecord {
                     hyphens++;
                 }
             }
-            if (digits >= 4 && hyphens >= 1) {
-                return true;
-            }
+            if (digits >= 4 && hyphens >= 1) return true;
+
         }
         return false;
     }
 
     private static boolean containsSuspiciousKeyword(String value) {
-        if (value == null || value.isEmpty()) {
-            return false;
-        }
+        if (value == null || value.isEmpty()) return false;
+
         String lower = value.toLowerCase(Locale.ROOT);
         return lower.contains("malware")
                 || lower.contains("phishing")
@@ -328,7 +299,6 @@ public final class DnsQueryRecord {
                 || lower.contains("stealer");
     }
 
-    // ✅ П.44: toString через конкатенацию вместо String.format
     @Override
     public String toString() {
         return "DnsQueryRecord{clientIp='" + clientIp

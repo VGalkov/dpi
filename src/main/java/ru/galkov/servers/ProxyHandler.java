@@ -22,21 +22,14 @@ import static ru.galkov.Main.getConfig;
  */
 public class ProxyHandler implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(ProxyHandler.class);
-
     private final Socket clientSocket;
     private final String clientIp;
     private final BlacklistLoader blacklist;
     private final int connectTimeout, clientReadTimeout, remoteReadTimeout, maxHeaderBytes;
     private final long maxBodyBytes;
     private final long streamBodyThreshold;
-
-    // ✅ П.3: убран static → инстансный финальный детектор, нет гонки данных
     private final HttpAnomalyDetector httpAnomalyDetector;
-
-    // ✅ П.25: политика по SNI-mismatch из конфига (по умолчанию выключена)
     private final boolean blockOnSniMismatch;
-
-    // ✅ П.4: ограничение размера ответа upstream (выключено по умолчанию)
     private final boolean limitResponseBody;
     private final long maxResponseBytes;
 
@@ -44,7 +37,7 @@ public class ProxyHandler implements Runnable {
         this.clientSocket = clientSocket;
         this.clientIp = clientIp != null ? clientIp : "unknown";
         this.blacklist = blacklist;
-        this.httpAnomalyDetector = detector;      // ✅ П.3
+        this.httpAnomalyDetector = detector;
         this.connectTimeout = getConfig().getInt("proxy.connect-timeout-millis");
         this.clientReadTimeout = getConfig().getInt("proxy.client-read-timeout-millis");
         this.remoteReadTimeout = getConfig().getInt("proxy.remote-read-timeout-millis");
@@ -148,9 +141,6 @@ public class ProxyHandler implements Runnable {
 
             byte[] hello = ProxyHandlerHelper.readInitialTlsHandshake(in, clientSocket, clientReadTimeout);
             if (hello == null) {
-                // ✅ П.2-фикс: ClientHello не получен (таймаут) — часть байт могла быть уже прочитана
-                //    и потеряна. Запускать туннель вслепую нельзя — сломает TLS.
-                //    Закрываем remote; клиент переподключится.
                 logger.warn("{} -> CONNECT {}:{}: TLS ClientHello not received, closing",
                         clientIp, hp.host(), hp.port());
                 closeQuietly(remote);
@@ -159,9 +149,6 @@ public class ProxyHandler implements Runnable {
 
             String sni = ProxyHandlerHelper.extractSniFromTlsHandshake(hello);
 
-            // ✅ П.2-фикс: SNI не извлёкся — не молча пропускаем проверку.
-            //    Для DPI это подозрительно (возможен domain-fronting).
-            //    Fail-closed: закрываем соединение.
             if (sni == null || sni.isEmpty()) {
                 logger.warn("{} -> CONNECT {}:{}: SNI not extractable, closing (fail-closed)",
                         clientIp, hp.host(), hp.port());
@@ -179,7 +166,6 @@ public class ProxyHandler implements Runnable {
                 closeQuietly(remote); return;
             }
 
-            // ✅ П.25: действие по SNI-mismatch вместо просто warn
             String normalizedHost = HostNormalizer.normalizeHost(hp.host());
             String normalizedSni = HostNormalizer.normalizeHost(sni);
             boolean mismatch = normalizedHost != null && normalizedSni != null
@@ -196,7 +182,6 @@ public class ProxyHandler implements Runnable {
                         clientIp, hp.host(), hp.port(), sni);
             }
 
-            // ✅ П.25: детектор получает реальный SNI
             if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) {
                 httpAnomalyDetector.recordRequest(clientIp, "CONNECT",
                         sni, hp.port(), "/", "", null);
@@ -243,9 +228,6 @@ public class ProxyHandler implements Runnable {
             return;
         }
 
-        // ✅ П.1-фикс: 100 Continue отправляем ДО чтения тела.
-        //    Клиент с Expect: 100-continue не шлёт тело, пока не получит 100.
-        //    Раньше тело читалось до отправки 100 → блокировка → 408 на каждый POST.
         if (hdrs.expectContinuePresent) {
             out.write("HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
             out.flush();
@@ -264,8 +246,6 @@ public class ProxyHandler implements Runnable {
                     total += r;
                 }
 
-                // ✅ П.3-фикс: клиент не дослал объявленное тело.
-                //    Не отправляем "добитое нулями" тело на upstream.
                 if (total < smallBody.length) {
                     logger.warn("{} -> body truncated: expected {}, got {}",
                             clientIp, smallBody.length, total);
@@ -362,8 +342,6 @@ public class ProxyHandler implements Runnable {
         }
         if (line == null) throw new IOException("Incomplete HTTP request headers");
 
-        // ✅ П.13 (request smuggling): отклоняем запрос с ОДНОВРЕМЕННО
-        //        Content-Length и Transfer-Encoding: chunked.
         if (chunked && contentLen != null) {
             throw new IOException("Both Content-Length and Transfer-Encoding present");
         }
@@ -393,7 +371,6 @@ public class ProxyHandler implements Runnable {
         if (line == null) return;
         ProxyHandlerHelper.writeLine(out, "");
 
-        // ✅ П.4: ограничение размера ответа upstream (выключено по умолчанию)
         long responseLimit = limitResponseBody ? maxResponseBytes : Long.MAX_VALUE;
 
         if (chunked) {
@@ -416,7 +393,7 @@ public class ProxyHandler implements Runnable {
         long total = 0;
         int len;
         while ((len = in.read(buf)) != -1) {
-            if (max != Long.MAX_VALUE && total + len > max) {
+            if (total + len > max) {
                 throw new ProxyHandlerHelper.RequestTooLargeException(
                         "Response body exceeds " + max + " bytes");
             }

@@ -21,17 +21,13 @@ public final class BlacklistLoader implements AutoCloseable {
 
     private static final Logger logger = LoggerFactory.getLogger(BlacklistLoader.class);
 
-    // ✅ П.1: Лимиты на количество правил
     private static final int MAX_RULES_PER_SOURCE = getConfig().getInt("blacklist.max-rules-per-source");
     private static final int MAX_RULES_RKN = getConfig().getInt("blacklist.max-rules-rkn");
     private static final int MAX_RULES_TOTAL = getConfig().getInt("blacklist.max-rules-total");
     private static final long MAX_MEMORY_MB = getConfig().getLong("blacklist.max-memory-mb");
 
-    // ✅ П.5: Размер пула потоков для параллельной загрузки
     private static final int LOADER_THREAD_POOL_SIZE = getConfig().getInt("blacklist.loader-thread-pool-size");
 
-    // ✅ TTL кэша snapshot вынесен в конфиг (был хардкод 5000).
-    //    Читает: blacklist.snapshot-cache-ttl-millis (дефисный ключ!)
     private static final long SNAPSHOT_CACHE_TTL_MILLIS =
             getConfig().getLong("blacklist.snapshot-cache-ttl-millis");
 
@@ -41,7 +37,6 @@ public final class BlacklistLoader implements AutoCloseable {
     private volatile boolean loaded;
     private volatile ScheduledExecutorService reloadExecutor;
 
-    // ✅ П.4 + П.50: кэш snapshot
     private volatile BlacklistSnapshot cachedSnapshot;
     private volatile long cachedSnapshotTime;
 
@@ -52,9 +47,6 @@ public final class BlacklistLoader implements AutoCloseable {
         this.sources = List.copyOf(sources);
     }
 
-    /**
-     * ✅ П.4 + П.50: кэш snapshot с TTL
-     */
     public BlacklistSnapshot snapshot() {
         ensureLoaded();
 
@@ -77,7 +69,6 @@ public final class BlacklistLoader implements AutoCloseable {
         startReloadScheduler();
     }
 
-    // ✅ Асинхронная перезагрузка (не блокирует вызывающий поток)
     public void reloadNow() {
         synchronized (reloadLock) {
             if (pendingSnapshot != null && !pendingSnapshot.isDone()) {
@@ -120,11 +111,6 @@ public final class BlacklistLoader implements AutoCloseable {
         }
     }
 
-    /**
-     * ✅ П.1 + П.5: Параллельная загрузка с лимитами
-     * ✅ П.33: Collections.unmodifiableSet()
-     * ✅ П.53: Проверка на null
-     */
     private BlacklistSnapshot buildSnapshot() {
         DomainTrie domainTrie = new DomainTrie();
         Set<String> ips = new HashSet<>();

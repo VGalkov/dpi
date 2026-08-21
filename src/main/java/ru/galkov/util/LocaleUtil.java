@@ -18,9 +18,6 @@ public class LocaleUtil {
     private static volatile String currentLocalePrefix = "ru";
     private static final Object loadLock = new Object();
 
-    /**
-     * ✅ П.28: Lazy инициализация — грузим только при первом вызове
-     */
     public static void reload() {
         String prefix = loadLocalePrefix();
 
@@ -51,9 +48,6 @@ public class LocaleUtil {
         return "ru";
     }
 
-    /**
-     * ✅ П.28: Lazy загрузка при первом вызове
-     */
     public static String getString(String key) {
         if (messages == null) {
             synchronized (loadLock) {
@@ -77,9 +71,6 @@ public class LocaleUtil {
         }
     }
 
-    /**
-     * ✅ Рекомендация: быстрая подстановка {} (и {0}/{1}) вместо String.format
-     */
     public static String getString(String key, Object... args) {
         if (messages == null) {
             synchronized (loadLock) {
@@ -104,10 +95,6 @@ public class LocaleUtil {
         }
     }
 
-    /**
-     * Подстановка плейсхолдеров без String.format.
-     * Поддерживает и {} (автонумерация), и {0}/{1} (явная нумерация).
-     */
     private static String substitute(String template, Object[] args) {
         if (template == null || args == null || args.length == 0) {
             return template;

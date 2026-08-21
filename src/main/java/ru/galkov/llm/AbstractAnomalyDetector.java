@@ -14,12 +14,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static ru.galkov.util.IpCidr.isBlockedAddressUncheckedIpv4;
+
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public abstract class AbstractAnomalyDetector<T> {
-    protected static final Logger logger =
-            LoggerFactory.getLogger(AbstractAnomalyDetector.class);
+    protected static final Logger logger = LoggerFactory.getLogger(AbstractAnomalyDetector.class);
 
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_PROCESSED_TTL_SECONDS = 3600;
@@ -32,9 +33,7 @@ public abstract class AbstractAnomalyDetector<T> {
     private static final int DEFAULT_MAX_PROMPT_LENGTH = 4096;
     private static final int DEFAULT_LOCAL_LLM_PORT = 1234;
 
-    // ✅ П.35(опт.): Set валидных действий — константа
-    private static final Set<String> VALID_ACTIONS =
-            Set.of("BLOCK_DOMAIN", "LOG_ONLY", "NONE", "BLOCK_REQUEST");
+    private static final Set<String> VALID_ACTIONS = Set.of("BLOCK_DOMAIN", "LOG_ONLY", "NONE", "BLOCK_REQUEST");
 
     protected final boolean enabled;
     protected final LlmClient llmClient;
@@ -53,31 +52,22 @@ public abstract class AbstractAnomalyDetector<T> {
     protected final int maxPromptLength;
     protected final int localLlmPort;
 
-    private final ConcurrentLinkedQueue<Long> requestTimestamps =
-            new ConcurrentLinkedQueue<>();
-
+    private final ConcurrentLinkedQueue<Long> requestTimestamps = new ConcurrentLinkedQueue<>();
     private final Object rateLimitLock = new Object();
     private final Object circuitBreakerLock = new Object();
     private final Object lifecycleLock = new Object();
-
     private volatile int circuitBreakerFailureCount;
     private volatile long circuitBreakerOpenTime;
     private volatile boolean stopped;
 
     protected AbstractAnomalyDetector(String configPrefix) {
-        if (configPrefix == null || configPrefix.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Config prefix cannot be null or blank"
-            );
-        }
+        if (configPrefix == null || configPrefix.isBlank())
+            throw new IllegalArgumentException("Config prefix cannot be null or blank");
+
 
         this.enabled = getConfigBoolean(configPrefix + ".enabled");
+        boolean allowLocalLlm = getConfigBoolean(configPrefix + ".llm-studio.allow-local");
 
-        boolean allowLocalLlm = getConfigBoolean(
-                configPrefix + ".llm-studio.allow-local"
-        );
-
-        // ✅ Константа вынесена в конфиг: <prefix>.llm-studio.local-port
         this.localLlmPort = readPositiveInt(
                 configPrefix + ".llm-studio.local-port",
                 DEFAULT_LOCAL_LLM_PORT,
@@ -85,22 +75,16 @@ public abstract class AbstractAnomalyDetector<T> {
         );
 
         String llmUrl = validateLlmUrl(
-                getConfigString(
-                        configPrefix + ".llm-studio.url"
-                ),
+                getConfigString(configPrefix + ".llm-studio.url"),
                 configPrefix,
                 allowLocalLlm,
                 localLlmPort
         );
 
-        String model = getConfigString(
-                configPrefix + ".llm-studio.model"
-        );
+        String model = getConfigString(configPrefix + ".llm-studio.model");
 
         if (model.isBlank()) {
-            throw new IllegalArgumentException(
-                    configPrefix + ": LLM model must be configured"
-            );
+            throw new IllegalArgumentException(configPrefix + ": LLM model must be configured");
         }
 
         int timeoutSeconds = readPositiveInt(
@@ -109,17 +93,9 @@ public abstract class AbstractAnomalyDetector<T> {
                 configPrefix + ": invalid LLM timeout"
         );
 
-        String apiKey = getConfigString(
-                configPrefix + ".llm-studio.api-key"
-        );
+        String apiKey = getConfigString(configPrefix + ".llm-studio.api-key");
 
-        this.llmClient = new LlmClient(
-                llmUrl,
-                model,
-                timeoutSeconds,
-                apiKey
-        );
-
+        this.llmClient = new LlmClient(llmUrl, model, timeoutSeconds, apiKey);
         this.trustThreshold = readDoubleRange(
                 configPrefix + ".trust-threshold",
                 0.0,
@@ -167,10 +143,7 @@ public abstract class AbstractAnomalyDetector<T> {
         );
 
         this.executor = Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(
-                    runnable,
-                    getClass().getSimpleName() + "-Thread"
-            );
+            Thread thread = new Thread(runnable, getClass().getSimpleName() + "-Thread");
             thread.setDaemon(true);
             return thread;
         });
@@ -189,40 +162,27 @@ public abstract class AbstractAnomalyDetector<T> {
 
     private static String validateLlmUrl(String urlString, String configPrefix,
                                          boolean allowLocalLlm, int localLlmPort) {
-        if (urlString == null || urlString.isBlank()) {
+        if (urlString == null || urlString.isBlank())
             throw new IllegalArgumentException(configPrefix + ": LLM URL must be configured");
-        }
+
 
         try {
             URI uri = new URI(urlString);
             String scheme = uri.getScheme();
             String host = uri.getHost();
 
-            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
                 throw new IllegalArgumentException("Only HTTP and HTTPS schemes are allowed");
-            }
 
-            if (host == null || host.isBlank()) {
-                throw new IllegalArgumentException("LLM URL host is missing");
-            }
+            if (host == null || host.isBlank()) throw new IllegalArgumentException("LLM URL host is missing");
+            if (uri.getUserInfo() != null) throw new IllegalArgumentException("User info in LLM URL is not allowed");
+            if (uri.getFragment() != null) throw new IllegalArgumentException("Fragment in LLM URL is not allowed");
 
-            if (uri.getUserInfo() != null) {
-                throw new IllegalArgumentException("User info in LLM URL is not allowed");
-            }
-
-            if (uri.getFragment() != null) {
-                throw new IllegalArgumentException("Fragment in LLM URL is not allowed");
-            }
 
             int port = uri.getPort();
+            if (port == -1) port = "https".equalsIgnoreCase(scheme) ? 443 : 80;
+            if (port < 1 || port > 65535) throw new IllegalArgumentException("Invalid LLM URL port");
 
-            if (port == -1) {
-                port = "https".equalsIgnoreCase(scheme) ? 443 : 80;
-            }
-
-            if (port < 1 || port > 65535) {
-                throw new IllegalArgumentException("Invalid LLM URL port");
-            }
 
             if (isLocalHost(host)) {
                 if (!allowLocalLlm) {
@@ -236,11 +196,7 @@ public abstract class AbstractAnomalyDetector<T> {
 
                 if (port != localLlmPort) {
                     throw new IllegalArgumentException(
-                            configPrefix
-                                    + ": local LM Studio is allowed only "
-                                    + "on port "
-                                    + localLlmPort
-                    );
+                            configPrefix + ": local LM Studio is allowed only on port " + localLlmPort);
                 }
 
                 return uri.toString();
@@ -250,9 +206,7 @@ public abstract class AbstractAnomalyDetector<T> {
                     InetAddress.getAllByName(host)) {
                 if (isBlockedAddress(address)) {
                     throw new IllegalArgumentException(
-                            "LLM URL resolves to blocked address: "
-                                    + address.getHostAddress()
-                    );
+                            "LLM URL resolves to blocked address: " + address.getHostAddress());
                 }
             }
 
@@ -280,11 +234,7 @@ public abstract class AbstractAnomalyDetector<T> {
         }
 
         byte[] bytes = address.getAddress();
-
-        if (bytes.length == 4) {
-            return isBlockedIpv4(bytes);
-        }
-
+        if (bytes.length == 4) return isBlockedAddressUncheckedIpv4(bytes);
         if (address instanceof Inet6Address) {
             return isUniqueLocalIpv6(bytes) || isIpv4MappedBlockedAddress(bytes);
         }
@@ -292,41 +242,16 @@ public abstract class AbstractAnomalyDetector<T> {
         return false;
     }
 
-    private static boolean isBlockedIpv4(byte[] bytes) {
-        int a = bytes[0] & 0xff;
-        int b = bytes[1] & 0xff;
-        int c = bytes[2] & 0xff;
-        int d = bytes[3] & 0xff;
-
-        return a == 0
-                || a == 10
-                || a == 127
-                || (a == 169 && b == 254)
-                || (a == 172 && b >= 16 && b <= 31)
-                || (a == 192 && b == 168)
-                || (a == 100 && b >= 64 && b <= 127)
-                || (a == 169 && b == 254 && c == 169 && d == 254)
-                || (a == 100 && b == 100 && c == 100 && d == 200);
-    }
-
     private static boolean isUniqueLocalIpv6(byte[] bytes) {
-        if (bytes.length != 16) {
-            return false;
-        }
-
+        if (bytes.length != 16) return false;
         int first = bytes[0] & 0xff;
         return first >= 0xfc && first <= 0xfd;
     }
 
     private static boolean isIpv4MappedBlockedAddress(byte[] bytes) {
-        if (bytes.length != 16) {
-            return false;
-        }
-
+        if (bytes.length != 16) return false;
         for (int i = 0; i < 10; i++) {
-            if (bytes[i] != 0) {
-                return false;
-            }
+            if (bytes[i] != 0) return false;
         }
 
         if (bytes[10] != (byte) 0xff || bytes[11] != (byte) 0xff) {
@@ -340,10 +265,9 @@ public abstract class AbstractAnomalyDetector<T> {
                 bytes[15]
         };
 
-        return isBlockedIpv4(ipv4);
+        return isBlockedAddressUncheckedIpv4(ipv4);
     }
 
-    // ✅ П.35(опт.): санитизация одним проходом вместо 4 regex
     protected static String sanitizeForPrompt(String input, int maxLength) {
         if (input == null || maxLength <= 0) {
             return "";
@@ -390,7 +314,6 @@ public abstract class AbstractAnomalyDetector<T> {
         return sb.toString();
     }
 
-    // ✅ П.35: валидация отправляемых данных ДО вызова LLM
     protected String sanitizePrompt(String prompt) {
         if (prompt == null || prompt.isBlank()) {
             logger.warn("Empty LLM prompt");
@@ -407,17 +330,11 @@ public abstract class AbstractAnomalyDetector<T> {
         return sanitized;
     }
 
-    // ✅ Валидация ПОЛУЧАЕМЫХ данных — свой формат
     protected AnalysisResult validateAnalysisResult(AnalysisResult result) {
-        if (result == null) {
-            return null;
-        }
-
+        if (result == null) return null;
         double confidence = result.confidence();
+        if (!Double.isFinite(confidence)) confidence = 0.0;
 
-        if (!Double.isFinite(confidence)) {
-            confidence = 0.0;
-        }
 
         confidence = Math.max(0.0, Math.min(1.0, confidence));
         String reason = sanitizeForPrompt(result.reason(), maxReasonLength);
@@ -438,13 +355,9 @@ public abstract class AbstractAnomalyDetector<T> {
         return new AnalysisResult(suspicious, confidence, reason, validActions);
     }
 
-    // ✅ П.35: промпт валидируется ДО отправки
     protected AnalysisResult analyzeWithLlm(String prompt) {
         String safePrompt = sanitizePrompt(prompt);
-        if (safePrompt == null) {
-            return null;
-        }
-
+        if (safePrompt == null) return null;
         if (!tryAcquireRateLimit()) {
             logger.warn(LocaleUtil.getString("anomaly_detector_rate_limit_exceeded"));
             return null;
@@ -472,19 +385,11 @@ public abstract class AbstractAnomalyDetector<T> {
             }
 
             AnalysisResult validated = validateAnalysisResult(result);
-
             recordCircuitBreakerSuccess();
-
             return validated;
 
         } catch (Exception e) {
-            logger.error(
-                    LocaleUtil.getString(
-                            getConfigPrefix() + "_analysis_error"
-                    ),
-                    e.getMessage(),
-                    e
-            );
+            logger.error(LocaleUtil.getString(getConfigPrefix() + "_analysis_error"), e.getMessage(), e);
             recordCircuitBreakerFailure();
             return null;
         }
@@ -496,11 +401,7 @@ public abstract class AbstractAnomalyDetector<T> {
 
         synchronized (rateLimitLock) {
             requestTimestamps.removeIf(timestamp -> timestamp < windowStart);
-
-            if (requestTimestamps.size() >= maxRequestsPerMinute) {
-                return false;
-            }
-
+            if (requestTimestamps.size() >= maxRequestsPerMinute) return false;
             requestTimestamps.add(now);
             return true;
         }
@@ -512,17 +413,11 @@ public abstract class AbstractAnomalyDetector<T> {
         synchronized (circuitBreakerLock) {
             if (circuitBreakerOpenTime > 0) {
                 long timeoutMillis = circuitBreakerTimeoutSeconds * 1000L;
-
-                if (now - circuitBreakerOpenTime < timeoutMillis) {
-                    return false;
-                }
-
+                if (now - circuitBreakerOpenTime < timeoutMillis) return false;
                 circuitBreakerOpenTime = 0;
                 circuitBreakerFailureCount = 0;
 
-                logger.info(
-                        "Circuit breaker closed after timeout"
-                );
+                logger.info("Circuit breaker closed after timeout");
             }
 
             return true;
@@ -548,28 +443,14 @@ public abstract class AbstractAnomalyDetector<T> {
 
     public void start() {
         synchronized (lifecycleLock) {
-            if (stopped) {
-                throw new IllegalStateException(
-                        "Detector cannot be restarted after stop()"
-                );
-            }
-
+            if (stopped) throw new IllegalStateException("Detector cannot be restarted after stop()");
             if (!enabled) {
-                logger.info(
-                        LocaleUtil.getString(
-                                getConfigPrefix() + "_disabled"
-                        )
-                );
+                logger.info(LocaleUtil.getString(getConfigPrefix() + "_disabled"));
                 return;
             }
 
             if (running) {
-                logger.warn(
-                        LocaleUtil.getString(
-                                getConfigPrefix()
-                                        + "_already_running"
-                        )
-                );
+                logger.warn(LocaleUtil.getString(getConfigPrefix() + "_already_running"));
                 return;
             }
 
@@ -663,10 +544,7 @@ public abstract class AbstractAnomalyDetector<T> {
         try {
             String value = getConfigString(key);
 
-            if (value.isBlank()) {
-                return defaultValue;
-            }
-
+            if (value.isBlank()) return defaultValue;
             double parsed = Double.parseDouble(value);
 
             if (!Double.isFinite(parsed) || parsed < min || parsed > max) {

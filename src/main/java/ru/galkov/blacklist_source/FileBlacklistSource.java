@@ -34,7 +34,6 @@ public final class FileBlacklistSource extends AbstractBlacklistSource {
             return new FileInputStream(file);
         }
 
-        // ✅ Fallback на classpath-ресурс
         String resourceName = file.getPath().replace('\\', '/').replaceFirst("^/", "");
         URL resource = FileBlacklistSource.class.getClassLoader().getResource(resourceName);
         if (resource != null) {

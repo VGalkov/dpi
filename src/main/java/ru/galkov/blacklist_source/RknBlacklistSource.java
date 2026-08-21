@@ -66,9 +66,7 @@ public final class RknBlacklistSource implements BlacklistSource {
         private final List<BlacklistRule> rules;
         private String currentContentId;
         private String currentBlockType;
-        // ✅ П.41: переиспользуем один StringBuilder
         private final StringBuilder currentText = new StringBuilder(256);
-        // ✅ П.42: поле currentTag удалено (не использовалось)
 
         RknHandler(List<BlacklistRule> rules) {
             this.rules = rules;
@@ -105,9 +103,7 @@ public final class RknBlacklistSource implements BlacklistSource {
                             ? BlacklistRule.RuleType.DOMAIN
                             : BlacklistRule.RuleType.IP;
 
-                    if (value.startsWith("*.")) {
-                        value = value.substring(2);
-                    }
+                    if (value.startsWith("*.")) value = value.substring(2);
 
                     rules.add(new BlacklistRule(
                             type,

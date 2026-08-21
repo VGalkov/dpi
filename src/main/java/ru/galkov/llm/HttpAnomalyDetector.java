@@ -7,7 +7,9 @@ import ru.galkov.util.LocaleUtil;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class HttpAnomalyDetector
         extends AbstractAnomalyDetector<HttpQueryRecord> {
 
@@ -181,12 +183,8 @@ public final class HttpAnomalyDetector
 
         AnalysisResult result = analyzeWithLlm(prompt);
 
-        if (result == null) {
-            return;
-        }
-
-        if (result.suspicious()
-                && result.confidence() >= trustThreshold) {
+        if (result == null) return;
+        if (result.suspicious() && result.confidence() >= trustThreshold) {
             logger.info(
                     "HTTP anomaly detected: client={}, method={}, "
                             + "host={}, path={}, confidence={}, "
@@ -207,108 +205,38 @@ public final class HttpAnomalyDetector
 
         if (inspectBody && !record.getBody().isEmpty()) {
             bodyPreview = record.getBody();
-
             if (bodyPreview.length() > bodyPreviewLength) {
-                bodyPreview = bodyPreview.substring(
-                        0,
-                        bodyPreviewLength
-                );
+                bodyPreview = bodyPreview.substring(0, bodyPreviewLength);
             }
         }
 
-        // ✅ Используем закешированный шаблон, а не грузим файл заново
-        if (promptTemplate == null || promptTemplate.isBlank()) {
+        if (promptTemplate == null || promptTemplate.isBlank())
             return "";
-        }
 
         return promptTemplate
-                .replace(
-                        "{clientIp}",
-                        promptValue(record.getClientIp(), 128)
-                )
-                .replace(
-                        "{method}",
-                        promptValue(record.getMethod(), 32)
-                )
-                .replace(
-                        "{host}",
-                        promptValue(record.getHost(), 253)
-                )
-                .replace(
-                        "{port}",
-                        String.valueOf(record.getPort())
-                )
-                .replace(
-                        "{path}",
-                        promptValue(record.getPath(), 4096)
-                )
-                .replace(
-                        "{headers}",
-                        promptValue(record.getHeaders(), 8192)
-                )
-                .replace(
-                        "{bodyPreview}",
-                        promptValue(bodyPreview, bodyPreviewLength)
-                )
-                .replace(
-                        "{timestamp}",
-                        String.valueOf(record.getTimestamp())
-                )
-                .replace(
-                        "{pathLength}",
-                        String.valueOf(record.getPathLength())
-                )
-                .replace(
-                        "{headerLength}",
-                        String.valueOf(record.getHeaderLength())
-                )
-                .replace(
-                        "{bodyLength}",
-                        String.valueOf(record.getBodyLength())
-                )
-                .replace(
-                        "{https}",
-                        String.valueOf(record.isHttps())
-                )
-                .replace(
-                        "{hostIsIp}",
-                        String.valueOf(record.isHostIp())
-                )
-                .replace(
-                        "{suspiciousTld}",
-                        String.valueOf(record.hasSuspiciousTld())
-                )
-                .replace(
-                        "{pathHasTraversal}",
-                        String.valueOf(record.hasPathTraversal())
-                )
-                .replace(
-                        "{pathHasInjectionMarkers}",
-                        String.valueOf(
-                                record.hasPathInjectionMarkers()
-                        )
-                )
-                .replace(
-                        "{bodyHasInjectionMarkers}",
-                        String.valueOf(
-                                record.hasBodyInjectionMarkers()
-                        )
-                )
-                .replace(
-                        "{suspiciousUserAgent}",
-                        String.valueOf(
-                                record.hasSuspiciousUserAgent()
-                        )
-                );
+                .replace("{clientIp}", promptValue(record.getClientIp(), 128))
+                .replace("{method}", promptValue(record.getMethod(), 32))
+                .replace("{host}", promptValue(record.getHost(), 253))
+                .replace("{port}", String.valueOf(record.getPort()))
+                .replace("{path}", promptValue(record.getPath(), 4096))
+                .replace("{headers}", promptValue(record.getHeaders(), 8192))
+                .replace("{bodyPreview}", promptValue(bodyPreview, bodyPreviewLength))
+                .replace("{timestamp}", String.valueOf(record.getTimestamp()))
+                .replace("{pathLength}", String.valueOf(record.getPathLength()))
+                .replace("{headerLength}", String.valueOf(record.getHeaderLength()))
+                .replace("{bodyLength}", String.valueOf(record.getBodyLength()))
+                .replace("{https}", String.valueOf(record.isHttps()))
+                .replace("{hostIsIp}", String.valueOf(record.isHostIp()))
+                .replace("{suspiciousTld}", String.valueOf(record.hasSuspiciousTld()))
+                .replace("{pathHasTraversal}", String.valueOf(record.hasPathTraversal()))
+                .replace("{pathHasInjectionMarkers}", String.valueOf(record.hasPathInjectionMarkers()))
+                .replace("{bodyHasInjectionMarkers}", String.valueOf(record.hasBodyInjectionMarkers()))
+                .replace("{suspiciousUserAgent}", String.valueOf(record.hasSuspiciousUserAgent()));
     }
 
     private String promptValue(String value, int maxLength) {
         String sanitized = sanitizeForPrompt(value, maxLength);
-
-        if (sanitized.isEmpty()) {
-            return "unknown";
-        }
-
+        if (sanitized.isEmpty()) return "unknown";
         return sanitized;
     }
 

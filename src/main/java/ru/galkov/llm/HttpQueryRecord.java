@@ -1,7 +1,9 @@
 package ru.galkov.llm;
 
 import java.util.Locale;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class HttpQueryRecord {
     private static final int MAX_STRING_LENGTH = 16_384;
 
@@ -98,22 +100,13 @@ public final class HttpQueryRecord {
     }
 
     private static String limit(String value) {
-        if (value.length() <= MAX_STRING_LENGTH) {
-            return value;
-        }
+        if (value.length() <= MAX_STRING_LENGTH) return value;
         return value.substring(0, MAX_STRING_LENGTH);
     }
 
-    // ✅ П.15: ручной разбор IPv4 вместо regex matches
     private static boolean isIpLiteral(String value) {
-        if (value.isEmpty()) {
-            return false;
-        }
-
-        if (value.indexOf(':') >= 0) {
-            return isIpv6Literal(value);
-        }
-
+        if (value.isEmpty()) return false;
+        if (value.indexOf(':') >= 0) return isIpv6Literal(value);
         return isIpv4Literal(value);
     }
 
@@ -150,10 +143,7 @@ public final class HttpQueryRecord {
         if (value.isEmpty()) return false;
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-            if (!(c == ':' || (c >= '0' && c <= '9')
-                    || (c >= 'a' && c <= 'f'))) {
-                return false;
-            }
+            if (!(c == ':' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
         }
         return true;
     }

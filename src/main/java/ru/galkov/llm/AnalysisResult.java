@@ -17,9 +17,6 @@ public record AnalysisResult(boolean suspicious, double confidence, String reaso
                 : Collections.emptyList();
     }
 
-    /**
-     * ✅ П.44: toString через конкатенацию вместо String.format
-     */
     @Override
     public String toString() {
         return "AnalysisResult{suspicious=" + suspicious

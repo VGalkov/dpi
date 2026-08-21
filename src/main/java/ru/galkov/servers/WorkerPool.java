@@ -15,16 +15,12 @@ import static ru.galkov.Main.getConfig;
 public final class WorkerPool {
     private static final Logger logger = LoggerFactory.getLogger(WorkerPool.class);
 
-    // ✅ П.27: Валидация size — при отсутствии/<=0 берём дефолт,
-    //    вместо NPE/Invalid в static-ините
     private static final int POOL_SIZE =
             readPositiveInt("dns.thread.num", 4, "worker pool size");
 
     private static final int QUEUE_SIZE =
             readPositiveInt("worker-pool.queue-size", 100, "worker queue size");
 
-    // ✅ П.60: Больше НЕ requireNonNull → нет ExceptionInInitializerError.
-    //    Дефолт CALLER_RUNS
     private static final String REJECTION_POLICY =
             readRejectionPolicy("worker-pool.rejection-policy", "CALLER_RUNS");
 
@@ -39,8 +35,6 @@ public final class WorkerPool {
             case "DISCARD" -> new ThreadPoolExecutor.DiscardPolicy();
             case "DISCARD_OLDEST" -> new ThreadPoolExecutor.DiscardOldestPolicy();
             default ->
-                // ✅ П.58: НЕ выполняем в caller-потоке (иначе deadlock при
-                //    заблокированном вызывающем). Отбрасываем + логируем.
                     (r, executor) -> {
                         logger.warn(LocaleUtil.getString("worker_pool_queue_full"),
                                 taskQueue.size(), QUEUE_SIZE);
@@ -125,9 +119,7 @@ public final class WorkerPool {
     private static String readRejectionPolicy(String key, String defaultVal) {
         try {
             String value = getConfig().get(key);
-            if (value == null || value.isBlank()) {
-                return defaultVal;
-            }
+            if (value.isBlank()) return defaultVal;
             String upper = value.toUpperCase(Locale.ROOT);
             return switch (upper) {
                 case "ABORT", "DISCARD", "DISCARD_OLDEST", "CALLER_RUNS" -> upper;

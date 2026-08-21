@@ -59,9 +59,7 @@ public class BlacklistSnapshot {
         this.ipCache = Collections.synchronizedMap(
                 new LinkedHashMap<String, CacheEntry<BlockDecision>>(16, 0.75f, true) {
                     @Override
-                    protected boolean removeEldestEntry(
-                            Map.Entry<String, CacheEntry<BlockDecision>> eldest
-                    ) {
+                    protected boolean removeEldestEntry(Map.Entry<String, CacheEntry<BlockDecision>> eldest) {
                         return size() > maxIpCacheSize;
                     }
                 }
@@ -70,9 +68,7 @@ public class BlacklistSnapshot {
         this.domainCache = Collections.synchronizedMap(
                 new LinkedHashMap<String, CacheEntry<BlockDecision>>(16, 0.75f, true) {
                     @Override
-                    protected boolean removeEldestEntry(
-                            Map.Entry<String, CacheEntry<BlockDecision>> eldest
-                    ) {
+                    protected boolean removeEldestEntry(Map.Entry<String, CacheEntry<BlockDecision>> eldest) {
                         return size() > maxDomainCacheSize;
                     }
                 }
@@ -82,26 +78,18 @@ public class BlacklistSnapshot {
     private String getCidrPrefix(IpCidr cidr) {
         String network = cidr.toString();
         int slashIndex = network.indexOf('/');
-        if (slashIndex > 0) {
-            return network.substring(0, slashIndex);
-        }
+        if (slashIndex > 0) return network.substring(0, slashIndex);
+
         return network;
     }
 
     public static BlacklistSnapshot empty() {
-        return new BlacklistSnapshot(
-                new DomainTrie(),
-                Collections.emptySet(),
-                Collections.emptySet()
-        );
+        return new BlacklistSnapshot(new DomainTrie(), Collections.emptySet(), Collections.emptySet());
     }
 
     private static int getMaxIpCacheSize() {
         try {
             ru.galkov.AppConfig config = ru.galkov.Main.getConfig();
-            if (config == null) {
-                return DEFAULT_MAX_IP_CACHE_SIZE;
-            }
             return config.getInt("blacklist.snapshot.max-ip-cache-size");
         } catch (Exception e) {
             logger.debug("BlacklistSnapshot: using default max-ip-cache-size={}", DEFAULT_MAX_IP_CACHE_SIZE);
@@ -133,19 +121,11 @@ public class BlacklistSnapshot {
     }
 
     public BlockDecision checkIp(String ip) {
-        if (ip == null || ip.isEmpty()) {
-            return BlockDecision.allow();
-        }
-
+        if (ip == null || ip.isEmpty()) return BlockDecision.allow();
         String normalizedIp = HostNormalizer.normalizeHost(ip);
-        if (normalizedIp == null) {
-            return BlockDecision.allow();
-        }
-
+        if (normalizedIp == null) return BlockDecision.allow();
         CacheEntry<BlockDecision> cached = ipCache.get(normalizedIp);
-        if (cached != null && !cached.isExpired(cacheTtlMillis)) {
-            return cached.value;
-        }
+        if (cached != null && !cached.isExpired(cacheTtlMillis)) return cached.value;
 
         Boolean exactMatch = ipExactMap.get(normalizedIp);
         if (exactMatch != null && exactMatch) {
@@ -154,8 +134,7 @@ public class BlacklistSnapshot {
             return decision;
         }
 
-        boolean blocked = !cidrPrefixMap.isEmpty()
-                && matchesCidr(normalizedIp);
+        boolean blocked = !cidrPrefixMap.isEmpty() && matchesCidr(normalizedIp);
 
         BlockDecision decision = blocked
                 ? BlockDecision.blockIpExact("ip:" + normalizedIp, "blacklist")
@@ -165,22 +144,13 @@ public class BlacklistSnapshot {
         return decision;
     }
 
-    // ✅ ГЛАВНЫЙ ФИКС: BloomFilter-гейт удалён. Всегда выполняем поиск в trie.
-    //    Раньше false->allow ложно пропускал поддомены SUBTREE-правил.
     public BlockDecision checkDomain(String domain) {
-        if (domain == null || domain.isEmpty()) {
-            return BlockDecision.allow();
-        }
-
+        if (domain == null || domain.isEmpty()) return BlockDecision.allow();
         String normalized = HostNormalizer.normalizeHost(domain);
-        if (normalized == null) {
-            return BlockDecision.allow();
-        }
-
+        if (normalized == null) return BlockDecision.allow();
         CacheEntry<BlockDecision> cached = domainCache.get(normalized);
-        if (cached != null && !cached.isExpired(cacheTtlMillis)) {
-            return cached.value;
-        }
+        if (cached != null && !cached.isExpired(cacheTtlMillis)) return cached.value;
+
 
         boolean blocked = domainTrie.matches(normalized);
         BlockDecision decision = blocked
@@ -198,14 +168,9 @@ public class BlacklistSnapshot {
     private boolean matchesCidr(String ip) {
         String ipPrefix = getIpPrefix(ip);
         IpCidr direct = cidrPrefixMap.get(ipPrefix);
-        if (direct != null && direct.contains(ip)) {
-            return true;
-        }
-
+        if (direct != null && direct.contains(ip)) return true;
         for (IpCidr cidr : cidrSet) {
-            if (cidr.contains(ip)) {
-                return true;
-            }
+            if (cidr.contains(ip)) return true;
         }
 
         return false;
@@ -213,9 +178,7 @@ public class BlacklistSnapshot {
 
     private String getIpPrefix(String ip) {
         int lastDot = ip.lastIndexOf('.');
-        if (lastDot > 0) {
-            return ip.substring(0, lastDot);
-        }
+        if (lastDot > 0) return ip.substring(0, lastDot);
         return ip;
     }
 
@@ -229,8 +192,7 @@ public class BlacklistSnapshot {
         }
 
         boolean isExpired(long ttlMillis) {
-            return ttlMillis > 0
-                    && (System.currentTimeMillis() - created) > ttlMillis;
+            return ttlMillis > 0 && (System.currentTimeMillis() - created) > ttlMillis;
         }
     }
 }

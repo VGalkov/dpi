@@ -35,7 +35,6 @@ public final class BlockDecision {
         return rule != null ? new BlockDecision(true, BlockReason.IP_EXACT, rule, source, BlockAction.BLOCK_HTTP_403) : BLOCK_IP_EXACT;
     }
 
-    // ✅ П.43: blockIpCidr() и кэш BLOCK_IP_CIDR удалены (не используются)
 
     public static BlockDecision blockDomain(DomainTrie.MatchType type, String rule, String source) {
         BlockReason reason = switch (type) {

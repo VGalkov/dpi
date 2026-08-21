@@ -21,14 +21,10 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
     private static final long DEFAULT_MIN_LLM_INTERVAL_MILLIS = 120000;
 
     private final int maxQueueSize;
-
-    // ✅ п.12: лимиты на processed-коллекции
     private final int maxProcessedDomains;
     private final int maxProcessedClients;
-
     private final long minLlmIntervalMillis;
     private final String promptTemplate;
-
     private final ConcurrentHashMap<String, DnsQueryRecord> queue = new ConcurrentHashMap<>();
     private final Set<String> processingDomains = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> processedDomains = new ConcurrentHashMap<>();
@@ -45,8 +41,7 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
         this.maxProcessedClients = Math.max(1000,
                 getConfigInt("dns.anomaly-detector.max-processed-clients", DEFAULT_MAX_PROCESSED_CLIENTS));
 
-        this.minLlmIntervalMillis = Math.max(100,
-                getConfigInt("dns.anomaly-detector.min-llm-interval-millis"));
+        this.minLlmIntervalMillis = Math.max(100, getConfigInt("dns.anomaly-detector.min-llm-interval-millis"));
 
         this.promptTemplate = llmClient.loadPromptTemplate("prompts/dns_anomaly_prompt.txt");
     }
@@ -58,8 +53,7 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
 
     @Override
     public void record(DnsQueryRecord record) {
-        if (!enabled || !running || record == null
-                || record.getDomain() == null || record.getClientIp() == null) {
+        if (!enabled || !running || record == null || record.getDomain() == null || record.getClientIp() == null) {
             return;
         }
 
@@ -98,8 +92,7 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
                 List<String> domainsToProcess = new ArrayList<>();
                 for (Map.Entry<String, DnsQueryRecord> entry : queue.entrySet()) {
                     String domain = entry.getKey();
-                    if (!processingDomains.contains(domain)
-                            && !processedDomains.containsKey(domain)) {
+                    if (!processingDomains.contains(domain) && !processedDomains.containsKey(domain)) {
                         domainsToProcess.add(domain);
                     }
                 }
@@ -110,7 +103,6 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
 
                     DnsQueryRecord record = queue.remove(domain);
                     if (record == null) continue;
-
                     processingDomains.add(domain);
 
                     try {
@@ -131,8 +123,7 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
                                     LogFields.kv("timestamp", record.getTimestamp()));
                         }
                     } catch (Exception e) {
-                        logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"),
-                                e.getMessage());
+                        logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"), e.getMessage());
                     } finally {
                         processingDomains.remove(domain);
                     }
@@ -145,14 +136,12 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"),
-                        e.getMessage());
+                logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"), e.getMessage());
             }
         }
         logger.info(LocaleUtil.getString("dns_anomaly_detector_queue_completed"));
     }
 
-    // ✅ п.12: TTL-очистка + жёсткие лимиты размера
     private void cleanupProcessed() {
         long expiry = System.currentTimeMillis() - processedTtlMillis;
 
@@ -177,21 +166,16 @@ public final class DnsAnomalyDetector extends AbstractAnomalyDetector<DnsQueryRe
         }
     }
 
-    // ✅ п.12: вытеснение по размеру — удаляем самые старые
     private void trimToSize(Map<String, Long> map, int maxSize, AtomicInteger removedCounter) {
         int excess = map.size() - maxSize;
-        if (excess <= 0) {
-            return;
-        }
+        if (excess <= 0) return;
 
         List<Map.Entry<String, Long>> eldest = new ArrayList<>(map.entrySet());
         eldest.sort(Comparator.comparingLong(Map.Entry::getValue));
 
         int toRemove = Math.min(excess, eldest.size());
         for (int i = 0; i < toRemove; i++) {
-            if (map.remove(eldest.get(i).getKey(), eldest.get(i).getValue())) {
-                removedCounter.incrementAndGet();
-            }
+            if (map.remove(eldest.get(i).getKey(), eldest.get(i).getValue())) removedCounter.incrementAndGet();
         }
     }
 

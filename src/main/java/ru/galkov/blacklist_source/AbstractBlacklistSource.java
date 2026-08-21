@@ -30,7 +30,6 @@ public abstract class AbstractBlacklistSource implements BlacklistSource {
         return rules;
     }
 
-    // ✅ Защита: источник, способный вернуть null/пустое значение — отсекается
     protected BlacklistRule parseLine(String line, String sourceName) {
         if (line == null) return null;
         String value = line.trim();

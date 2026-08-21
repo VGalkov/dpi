@@ -31,13 +31,11 @@ public final class Main {
 
     private static volatile boolean shutdownStarted;
 
-    private Main() {
-    }
+    private Main() {}
 
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
-
             if (config == null) {
                 logger.error(LocaleUtil.getString("main_config_null"));
                 return;
@@ -84,13 +82,8 @@ public final class Main {
     }
 
     private static void startDetectors() {
-        if (dnsAnomalyDetector != null) {
-            dnsAnomalyDetector.start();
-        }
-
-        if (httpAnomalyDetector != null) {
-            httpAnomalyDetector.start();
-        }
+        if (dnsAnomalyDetector != null) dnsAnomalyDetector.start();
+        if (httpAnomalyDetector != null) httpAnomalyDetector.start();
 
         logger.info(
                 "Anomaly detectors started: dns={}, http={}",
@@ -106,15 +99,10 @@ public final class Main {
         }
 
         try {
-            if (!config.getBoolean("blacklist.local.enabled")) {
-                return;
-            }
-
+            if (!config.getBoolean("blacklist.local.enabled")) return;
             String filePath = config.get("blacklist.local.file");
             FileBlacklistSource source = new FileBlacklistSource(new File(filePath));
-
             sources.add(source);
-
             logger.info(LocaleUtil.getString("source_local_file_added"), source);
         } catch (Exception e) {
             logger.error(LocaleUtil.getString("main_source_add_error"), "LocalFile", e);
@@ -128,9 +116,7 @@ public final class Main {
         }
 
         try {
-            if (!config.getBoolean("blacklist.adguard.enabled")) {
-                return;
-            }
+            if (!config.getBoolean("blacklist.adguard.enabled")) return;
 
             AdguardBlacklistSource source = new AdguardBlacklistSource(
                     config.get("blacklist.adguard.url"),
@@ -139,7 +125,6 @@ public final class Main {
             );
 
             sources.add(source);
-
             logger.info(LocaleUtil.getString("source_adguard_added"), source);
         } catch (Exception e) {
             logger.error(LocaleUtil.getString("main_source_add_error"), "AdGuard", e);
@@ -153,10 +138,7 @@ public final class Main {
         }
 
         try {
-            if (!config.getBoolean("blacklist.mvps_hosts.enabled")) {
-                return;
-            }
-
+            if (!config.getBoolean("blacklist.mvps_hosts.enabled")) return;
             AdguardBlacklistSource source = new AdguardBlacklistSource(
                     config.get("blacklist.mvps_hosts.url"),
                     config.getInt("blacklist.mvps_hosts.connect-timeout"),
@@ -164,7 +146,6 @@ public final class Main {
             );
 
             sources.add(source);
-
             logger.info(LocaleUtil.getString("source_mvps_hosts_added"), source);
         } catch (Exception e) {
             logger.error(LocaleUtil.getString("main_source_add_error"), "MVPS", e);
@@ -178,15 +159,10 @@ public final class Main {
         }
 
         try {
-            if (!config.getBoolean("blacklist.rkn.enabled")) {
-                return;
-            }
-
+            if (!config.getBoolean("blacklist.rkn.enabled")) return;
             Path xmlPath = Path.of(config.get("blacklist.rkn.xml-file"));
             RknBlacklistSource source = new RknBlacklistSource(xmlPath);
-
             sources.add(source);
-
             logger.info(LocaleUtil.getString("source_rkn_added"), source);
         } catch (Exception e) {
             logger.error(LocaleUtil.getString("main_source_add_error"), "RKN", e);
@@ -194,42 +170,25 @@ public final class Main {
     }
 
     private static void registerShutdownHook() {
-        Runtime.getRuntime().addShutdownHook(
-                new Thread(Main::stopApplication, "Dpi-Shutdown-Hook")
-        );
+        Runtime.getRuntime().addShutdownHook(new Thread(Main::stopApplication, "Dpi-Shutdown-Hook"));
     }
 
     private static synchronized void stopApplication() {
-        if (shutdownStarted) {
-            return;
-        }
-
+        if (shutdownStarted) return;
         shutdownStarted = true;
-
         logger.info(LocaleUtil.getString("shutdown_started"));
-
-        // 1. Останавливаем серверы (приём новых запросов)
         stopProxyServer();
         stopDnsServer();
-
-        // 2. Останавливаем детекторы (очереди)
         stopHttpAnomalyDetector();
         stopDnsAnomalyDetector();
-
-        // 3. Пул воркеров
         shutdownWorkerPool();
-
-        // 4. Чёрный список — последним
         closeBlacklist();
-
         logger.info(LocaleUtil.getString("shutdown_completed"));
     }
 
     private static void stopProxyServer() {
         HttpProxyServer server = proxyServer;
-        if (server == null) {
-            return;
-        }
+        if (server == null) return;
 
         try {
             server.stop();
@@ -242,9 +201,7 @@ public final class Main {
 
     private static void stopDnsServer() {
         DnsServer server = dnsServer;
-        if (server == null) {
-            return;
-        }
+        if (server == null) return;
 
         try {
             server.stop();
@@ -257,10 +214,7 @@ public final class Main {
 
     private static void stopHttpAnomalyDetector() {
         HttpAnomalyDetector detector = httpAnomalyDetector;
-        if (detector == null) {
-            return;
-        }
-
+        if (detector == null) return;
         try {
             detector.stop();
         } catch (Exception e) {
@@ -272,9 +226,7 @@ public final class Main {
 
     private static void stopDnsAnomalyDetector() {
         DnsAnomalyDetector detector = dnsAnomalyDetector;
-        if (detector == null) {
-            return;
-        }
+        if (detector == null) return;
 
         try {
             detector.stop();
@@ -295,9 +247,7 @@ public final class Main {
 
     private static void closeBlacklist() {
         BlacklistLoader loader = blacklist;
-        if (loader == null) {
-            return;
-        }
+        if (loader == null) return;
 
         try {
             loader.close();
@@ -338,16 +288,11 @@ public final class Main {
 
         try {
             DnsServer server = new DnsServer(blacklist, dnsAnomalyDetector);
-
             Thread dnsThread = new Thread(server::run, "DnsServer-Main-Thread");
             dnsThread.setDaemon(false);
             dnsThread.start();
-
             dnsServer = server;
-
-            logger.info(
-                    LocaleUtil.getString("dns_server_started"),
-                    config.getInt("dns.local.port"));
+            logger.info(LocaleUtil.getString("dns_server_started"), config.getInt("dns.local.port"));
         } catch (Exception e) {
             dnsServer = null;
             logger.error(LocaleUtil.getString("main_dns_server_start_error"), e);
@@ -383,14 +328,10 @@ public final class Main {
 
         try {
             int port = config.getInt("proxy.local.port");
-
             logger.info(LocaleUtil.getString("http_proxy_init_start"), port);
-
             HttpProxyServer server = new HttpProxyServer(port, blacklist, httpAnomalyDetector);
             server.start();
-
             proxyServer = server;
-
         } catch (Exception e) {
             proxyServer = null;
             logger.error(LocaleUtil.getString("main_proxy_server_start_error"), e);

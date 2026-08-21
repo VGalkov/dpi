@@ -9,9 +9,6 @@ import java.util.Objects;
 public record BlacklistRule(RuleType type, String value, String source, String sourceRecordId, String blockType) {
     public enum RuleType {DOMAIN, IP, URL}
 
-    /**
-     * ✅ П.11: equals по value + type
-     */
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
@@ -20,9 +17,6 @@ public record BlacklistRule(RuleType type, String value, String source, String s
         return type == that.type && Objects.equals(value, that.value);
     }
 
-    /**
-     * ✅ П.11: hashCode для Set/Map
-     */
     @Override
     public int hashCode() {
         int result = type != null ? type.hashCode() : 0;
