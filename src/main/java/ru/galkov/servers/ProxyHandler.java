@@ -16,9 +16,10 @@ import java.util.Locale;
 import java.util.StringTokenizer;
 
 import static ru.galkov.Main.getConfig;
+import static ru.galkov.util.IoUtil.closeQuietly;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public class ProxyHandler implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(ProxyHandler.class);
@@ -111,7 +112,7 @@ public class ProxyHandler implements Runnable {
 
     private void handleConnect(InputStream in, OutputStream out, String target) throws IOException {
         readAndDiscardHeaders(in);
-        ProxyHandlerHelper.HostAndPort hp = ProxyHandlerHelper.parseConnectTarget(target);
+        HostNormalizer.HostAndPort hp = HostNormalizer.parseHostPort(target);
         if (hp == null || hp.host() == null) {
             logger.warn(LocaleUtil.getString("proxy_handler_invalid_target"), clientIp, target);
             sendError(out, 400, "Bad Request (invalid host and port)");
@@ -125,8 +126,7 @@ public class ProxyHandler implements Runnable {
             sendError(out, 403, "Forbidden"); return;
         }
 
-        logger.info("{} {} {} {}", LogFields.kv("event", "PROXY_CONNECT"),
-                LogFields.kv("client", clientIp), LogFields.kv("host", hp.host()), LogFields.kv("port", hp.port()));
+        logger.info("PROXY_CONNECT client={} host={} port={}", clientIp, hp.host(), hp.port());
 
         Socket remote = null;
         try {
@@ -160,9 +160,8 @@ public class ProxyHandler implements Runnable {
             BlacklistSnapshot snapshot = blacklist.snapshot();
             BlockDecision sniDecision = snapshot.checkDomain(sni);
             if (sniDecision.isBlocked()) {
-                logger.info("{} {} {} {} {}", LogFields.kv("event", "PROXY_CONNECT_BLOCKED"),
-                        LogFields.kv("client", clientIp), LogFields.kv("sni", sni),
-                        LogFields.kv("reason", "SNI"), LogFields.kv("rule", sniDecision.getMatchedRule()));
+                logger.info("PROXY_CONNECT_BLOCKED client={} sni={} reason={} rule={}",
+                        clientIp, sni, "SNI", sniDecision.getMatchedRule());
                 closeQuietly(remote); return;
             }
 
@@ -172,9 +171,8 @@ public class ProxyHandler implements Runnable {
                     && !normalizedHost.equals(normalizedSni);
             if (mismatch) {
                 if (blockOnSniMismatch) {
-                    logger.warn("{} {} {} {} {}", LogFields.kv("event", "PROXY_CONNECT_SNI_MISMATCH_BLOCKED"),
-                            LogFields.kv("client", clientIp), LogFields.kv("host", hp.host()),
-                            LogFields.kv("sni", sni), LogFields.kv("action", "block"));
+                    logger.warn("PROXY_CONNECT_SNI_MISMATCH_BLOCKED client={} host={} sni={} action=block",
+                            clientIp, hp.host(), sni);
                     closeQuietly(remote);
                     return;
                 }
@@ -207,7 +205,7 @@ public class ProxyHandler implements Runnable {
 
     private void handleHttp(InputStream in, OutputStream out, String firstLine, String target, String method) throws IOException {
         HttpHeaders hdrs = readHttpHeaders(in, firstLine);
-        ProxyHandlerHelper.HostAndPort hp = ProxyHandlerHelper.resolveHttpTarget(hdrs.hostHeader, target);
+        HostNormalizer.HostAndPort hp = ProxyHandlerHelper.resolveHttpTarget(hdrs.hostHeader, target);
         if (hp == null || hp.host() == null) {
             logger.warn(LocaleUtil.getString("proxy_handler_invalid_target"), clientIp, target);
             sendError(out, 400, "Cannot determine target host");
@@ -387,7 +385,6 @@ public class ProxyHandler implements Runnable {
         out.flush();
     }
 
-    // ✅ П.4: релей до EOF с ограничением размера (для ответов без Content-Length)
     private void relayUntilEofLimited(InputStream in, OutputStream out, long max) throws IOException {
         byte[] buf = new byte[8192];
         long total = 0;
@@ -424,11 +421,6 @@ public class ProxyHandler implements Runnable {
 
         out.write(resp.getBytes(StandardCharsets.UTF_8));
         out.flush();
-    }
-
-    private void closeQuietly(Socket s) {
-        if (s == null) return;
-        try { s.close(); } catch (IOException e) { logger.trace("Socket close error: {}", e.getMessage()); }
     }
 
     private record HttpHeaders(String rawHeaders, String hostHeader, long contentLength, boolean chunked,

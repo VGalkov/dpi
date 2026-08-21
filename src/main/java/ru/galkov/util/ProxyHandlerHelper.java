@@ -10,69 +10,47 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class ProxyHandlerHelper {
 
     private static final int MAX_TLS_RECORD = 18432;
     private static final int MAX_TLS_HELLO = 65536;
 
-    public record HostAndPort(String host, int port) {
-    }
-
     public static byte[] readInitialTlsHandshake(InputStream in, Socket socket, int clientReadTimeout) throws IOException {
         int origTimeout = socket.getSoTimeout();
         try {
             socket.setSoTimeout(Math.min(clientReadTimeout, 10000));
-
             byte[] hdr = readExactly(in, 5);
             if (hdr == null) return null;
-
-            int contentType = unsignedByte(hdr[0]);
-            int recordLen = unsignedShort(hdr[3], hdr[4]);
-
+            int contentType = hdr[0] & 0xFF;
+            int recordLen = ((hdr[3] & 0xFF) << 8) | (hdr[4] & 0xFF);
             if (recordLen < 1 || recordLen > MAX_TLS_RECORD) return hdr;
-
             byte[] payload = readExactly(in, recordLen);
             if (payload == null) return hdr;
-
             ByteArrayOutputStream res = new ByteArrayOutputStream(5 + recordLen);
             res.write(hdr);
             res.write(payload);
-
-            if (contentType != 22) {
-                return res.toByteArray();
-            }
-
-            int handshakeLen = getTlsHandshakeLength(payload);
-            if (handshakeLen < 0 || handshakeLen > MAX_TLS_HELLO) {
-                return res.toByteArray();
-            }
-
+            if (contentType != 22) return res.toByteArray();
+            int handshakeLen = (payload.length < 4 || (payload[0] & 0xFF) != 1) ? -1
+                    : ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+            if (handshakeLen < 0 || handshakeLen > MAX_TLS_HELLO) return res.toByteArray();
             int need = 4 + handshakeLen;
             int have = payload.length;
-
             while (have < need) {
                 if (res.size() > MAX_TLS_HELLO + 40) break;
-
                 byte[] nextHdr = readExactly(in, 5);
                 if (nextHdr == null) break;
-
-                int nextContentType = unsignedByte(nextHdr[0]);
-                int nextLen = unsignedShort(nextHdr[3], nextHdr[4]);
-
+                int nextContentType = nextHdr[0] & 0xFF;
+                int nextLen = ((nextHdr[3] & 0xFF) << 8) | (nextHdr[4] & 0xFF);
                 if (nextLen < 1 || nextLen > MAX_TLS_RECORD) {
                     res.write(nextHdr);
                     break;
                 }
-
                 byte[] nextPayload = readExactly(in, nextLen);
                 res.write(nextHdr);
-
                 if (nextPayload == null) break;
-
                 res.write(nextPayload);
-
                 if (nextContentType == 22) {
                     have += nextPayload.length;
                     if (have >= need) break;
@@ -80,7 +58,6 @@ public final class ProxyHandlerHelper {
                     break;
                 }
             }
-
             return res.toByteArray();
         } catch (SocketTimeoutException e) {
             return null;
@@ -95,41 +72,43 @@ public final class ProxyHandlerHelper {
             int off = 0;
             ByteArrayOutputStream hs = new ByteArrayOutputStream();
             while (off + 5 <= data.length) {
-                int ct = unsignedByte(data[off]), len = unsignedShort(data[off + 3], data[off + 4]);
+                int ct = data[off] & 0xFF;
+                int len = ((data[off + 3] & 0xFF) << 8) | (data[off + 4] & 0xFF);
                 off += 5;
                 if (len < 0 || off + len > data.length) return null;
                 if (ct == 22) hs.write(data, off, len);
                 off += len;
             }
             byte[] hello = hs.toByteArray();
-            if (hello.length < 4 || unsignedByte(hello[0]) != 1) return null;
-            int hsLen = unsignedMedium(hello[1], hello[2], hello[3]);
+            if (hello.length < 4 || (hello[0] & 0xFF) != 1) return null;
+            int hsLen = ((hello[1] & 0xFF) << 16) | ((hello[2] & 0xFF) << 8) | (hello[3] & 0xFF);
             if (hsLen < 0 || hsLen + 4 > hello.length) return null;
             int pos = 4, end = 4 + hsLen;
             if (pos + 34 > end) return null;
             pos += 2 + 32;
             if (pos + 1 > end) return null;
-            int sidLen = unsignedByte(hello[pos]);
+            int sidLen = hello[pos] & 0xFF;
             pos++;
             if (pos + sidLen > end) return null;
             pos += sidLen;
             if (pos + 2 > end) return null;
-            int csLen = unsignedShort(hello[pos], hello[pos + 1]);
+            int csLen = ((hello[pos] & 0xFF) << 8) | (hello[pos + 1] & 0xFF);
             pos += 2;
             if (pos + csLen > end) return null;
             pos += csLen;
             if (pos + 1 > end) return null;
-            int cmLen = unsignedByte(hello[pos]);
+            int cmLen = hello[pos] & 0xFF;
             pos++;
             if (pos + cmLen > end) return null;
             pos += cmLen;
             if (pos == end || pos + 2 > end) return null;
-            int extLen = unsignedShort(hello[pos], hello[pos + 1]);
+            int extLen = ((hello[pos] & 0xFF) << 8) | (hello[pos + 1] & 0xFF);
             pos += 2;
             int extEnd = pos + extLen;
             if (extEnd > end) return null;
             while (pos + 4 <= extEnd) {
-                int extType = unsignedShort(hello[pos], hello[pos + 1]), extL = unsignedShort(hello[pos + 2], hello[pos + 3]);
+                int extType = ((hello[pos] & 0xFF) << 8) | (hello[pos + 1] & 0xFF);
+                int extL = ((hello[pos + 2] & 0xFF) << 8) | (hello[pos + 3] & 0xFF);
                 pos += 4;
                 if (pos + extL > extEnd) return null;
                 if (extType == 0) return extractServerName(hello, pos, extL);
@@ -143,10 +122,12 @@ public final class ProxyHandlerHelper {
 
     private static String extractServerName(byte[] hello, int off, int len) {
         if (len < 2 || off + len > hello.length) return null;
-        int listLen = unsignedShort(hello[off], hello[off + 1]), pos = off + 2, end = pos + listLen;
+        int listLen = ((hello[off] & 0xFF) << 8) | (hello[off + 1] & 0xFF);
+        int pos = off + 2, end = pos + listLen;
         if (end > off + len) return null;
         while (pos + 3 <= end) {
-            int nt = unsignedByte(hello[pos]), nl = unsignedShort(hello[pos + 1], hello[pos + 2]);
+            int nt = hello[pos] & 0xFF;
+            int nl = ((hello[pos + 1] & 0xFF) << 8) | (hello[pos + 2] & 0xFF);
             pos += 3;
             if (pos + nl > end) return null;
             if (nt == 0 && nl > 0)
@@ -154,11 +135,6 @@ public final class ProxyHandlerHelper {
             pos += nl;
         }
         return null;
-    }
-
-    private static int getTlsHandshakeLength(byte[] p) {
-        if (p == null || p.length < 4 || unsignedByte(p[0]) != 1) return -1;
-        return unsignedMedium(p[1], p[2], p[3]);
     }
 
     private static byte[] readExactly(InputStream in, int len) throws IOException {
@@ -172,41 +148,22 @@ public final class ProxyHandlerHelper {
         return buf;
     }
 
-    public static HostAndPort parseConnectTarget(String target) {
-        if (target == null || target.isEmpty()) return null;
-        String host, portText;
-        if (target.startsWith("[")) {
-            int close = target.indexOf(']');
-            if (close <= 1 || close + 1 >= target.length() || target.charAt(close + 1) != ':') return null;
-            host = target.substring(1, close);
-            portText = target.substring(close + 2);
-        } else {
-            int colon = target.lastIndexOf(':');
-            if (colon <= 0 || colon == target.length() - 1) return null;
-            host = target.substring(0, colon);
-            portText = target.substring(colon + 1);
-            if (host.indexOf(':') >= 0) return null;
-        }
-        int port;
-        try {
-            port = Integer.parseInt(portText);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-        if (port < 1 || port > 65535) return null;
-        return new HostAndPort(host, port);
+    public static HostNormalizer.HostAndPort parseConnectTarget(String target) {
+        return HostNormalizer.parseHostPort(target);
     }
 
-    public static HostAndPort resolveHttpTarget(String hostHeader, String target) {
+    public static HostNormalizer.HostAndPort resolveHttpTarget(String hostHeader, String target) {
         try {
-            if (hostHeader != null && !hostHeader.isEmpty()) return parseHttpHostHeader(hostHeader);
+            if (hostHeader != null && !hostHeader.isEmpty()) {
+                return parseHttpHostHeader(hostHeader);
+            }
             if (target.startsWith("http://") || target.startsWith("https://")) {
                 URL url = new URL(target);
                 String host = url.getHost();
                 if (host == null || host.isEmpty()) return null;
                 int port = url.getPort() == -1 ? url.getDefaultPort() : url.getPort();
                 if (port < 1 || port > 65535) return null;
-                return new HostAndPort(host, port);
+                return new HostNormalizer.HostAndPort(host, port);
             }
             return null;
         } catch (Exception e) {
@@ -214,29 +171,29 @@ public final class ProxyHandlerHelper {
         }
     }
 
-    private static HostAndPort parseHttpHostHeader(String h) {
+    private static HostNormalizer.HostAndPort parseHttpHostHeader(String h) {
         if (h == null || h.isEmpty()) return null;
         if (h.startsWith("[")) {
             int close = h.indexOf(']');
             if (close <= 1) return null;
             String host = h.substring(1, close);
-            if (close == h.length() - 1) return new HostAndPort(host, 80);
+            if (close == h.length() - 1) return new HostNormalizer.HostAndPort(host, 80);
             if (h.charAt(close + 1) != ':') return null;
             try {
                 int port = Integer.parseInt(h.substring(close + 2));
                 if (port < 1 || port > 65535) return null;
-                return new HostAndPort(host, port);
+                return new HostNormalizer.HostAndPort(host, port);
             } catch (NumberFormatException e) {
                 return null;
             }
         }
         int colon = h.lastIndexOf(':');
-        if (colon < 0) return new HostAndPort(h, 80);
+        if (colon < 0) return new HostNormalizer.HostAndPort(h, 80);
         String host = h.substring(0, colon);
         try {
             int port = Integer.parseInt(h.substring(colon + 1));
             if (host.isEmpty() || port < 1 || port > 65535) return null;
-            return new HostAndPort(host, port);
+            return new HostNormalizer.HostAndPort(host, port);
         } catch (NumberFormatException e) {
             return null;
         }
@@ -263,11 +220,10 @@ public final class ProxyHandlerHelper {
         t2.setDaemon(true);
         t1.start();
         t2.start();
-
         try {
             t1.join();
-            if (t1.isAlive() == false) {
-                closeQuietly(remote);
+            if (!t1.isAlive()) {
+                IoUtil.closeQuietly(remote);
             }
             t2.join(30000);
             if (t2.isAlive()) {
@@ -278,8 +234,8 @@ public final class ProxyHandlerHelper {
             t1.interrupt();
             t2.interrupt();
         } finally {
-            closeQuietly(client);
-            closeQuietly(remote);
+            IoUtil.closeQuietly(client);
+            IoUtil.closeQuietly(remote);
         }
     }
 
@@ -294,7 +250,6 @@ public final class ProxyHandlerHelper {
             int len;
             while ((len = in.read(buf)) != -1) {
                 out.write(buf, 0, len);
-                out.flush();
             }
             try {
                 dst.shutdownOutput();
@@ -303,16 +258,10 @@ public final class ProxyHandlerHelper {
         } catch (IOException _) {
         } finally {
             if (in != null) {
-                try {
-                    in.close();
-                } catch (IOException ignored) {
-                }
+                try { IoUtil.closeQuietly(src); } catch (Exception ignored) {}
             }
             if (out != null) {
-                try {
-                    out.close();
-                } catch (IOException ignored) {
-                }
+                try { IoUtil.closeQuietly(dst); } catch (Exception ignored) {}
             }
         }
     }
@@ -400,29 +349,7 @@ public final class ProxyHandlerHelper {
         while ((len = in.read(buf)) != -1) out.write(buf, 0, len);
     }
 
-    private static int unsignedByte(byte v) {
-        return v & 0xFF;
-    }
-
-    private static int unsignedShort(byte a, byte b) {
-        return ((a & 0xFF) << 8) | (b & 0xFF);
-    }
-
-    private static int unsignedMedium(byte a, byte b, byte c) {
-        return ((a & 0xFF) << 16) | ((b & 0xFF) << 8) | (c & 0xFF);
-    }
-
-    private static void closeQuietly(Socket s) {
-        if (s == null) return;
-        try {
-            s.close();
-        } catch (IOException ignored) {
-        }
-    }
-
     public static final class RequestTooLargeException extends IOException {
-        public RequestTooLargeException(String msg) {
-            super(msg);
-        }
+        public RequestTooLargeException(String msg) { super(msg); }
     }
 }

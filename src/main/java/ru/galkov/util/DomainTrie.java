@@ -2,15 +2,16 @@ package ru.galkov.util;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class DomainTrie {
 
     private final TrieNode root = new TrieNode();
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
     public enum MatchType {EXACT, WILDCARD, SUBTREE}
 
@@ -33,70 +34,82 @@ public final class DomainTrie {
                     }
             );
 
-    public synchronized void addDomain(String domain, MatchType matchType) {
+    public void addDomain(String domain, MatchType matchType) {
         if (matchType == null) return;
-        String normalized = normalizeDomain(domain);
+        String normalized = HostNormalizer.normalizeDomain(domain);
         if (normalized == null) return;
         String[] labels = getLabelsCached(normalized);
         if (labels.length == 0) return;
-        TrieNode node = root;
 
-        for (int i = labels.length - 1; i >= 0; i--) {
-            TrieNode child = node.children.get(labels[i]);
-
-            if (child == null) {
-                child = new TrieNode();
-                node.children.put(labels[i], child);
+        lock.writeLock().lock();
+        try {
+            TrieNode node = root;
+            for (int i = labels.length - 1; i >= 0; i--) {
+                TrieNode child = node.children.get(labels[i]);
+                if (child == null) {
+                    child = new TrieNode();
+                    node.children.put(labels[i], child);
+                }
+                node = child;
             }
-
-            node = child;
-        }
-
-        switch (matchType) {
-            case EXACT -> node.exactBlocked = true;
-            case WILDCARD -> node.wildcardBlocked = true;
-            case SUBTREE -> node.subtreeBlocked = true;
+            switch (matchType) {
+                case EXACT -> node.exactBlocked = true;
+                case WILDCARD -> node.wildcardBlocked = true;
+                case SUBTREE -> node.subtreeBlocked = true;
+            }
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 
-    public synchronized boolean contains(String domain) {
-        String normalized = normalizeDomain(domain);
+    public boolean contains(String domain) {
+        String normalized = HostNormalizer.normalizeDomain(domain);
         if (normalized == null) return false;
         String[] labels = getLabelsCached(normalized);
         if (labels.length == 0) return false;
-        TrieNode node = root;
 
-        for (int i = labels.length - 1; i >= 0; i--) {
-            node = node.children.get(labels[i]);
-            if (node == null) return false;
+        lock.readLock().lock();
+        try {
+            TrieNode node = root;
+            for (int i = labels.length - 1; i >= 0; i--) {
+                node = node.children.get(labels[i]);
+                if (node == null) return false;
+            }
+            return node.exactBlocked || node.wildcardBlocked || node.subtreeBlocked;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        return node.exactBlocked || node.wildcardBlocked || node.subtreeBlocked;
     }
 
-    public synchronized boolean matches(String domain) {
-        String normalized = normalizeDomain(domain);
+    public boolean matches(String domain) {
+        String normalized = HostNormalizer.normalizeDomain(domain);
         if (normalized == null) return false;
-
-
         String[] labels = getLabelsCached(normalized);
         if (labels.length == 0) return false;
-        TrieNode node = root;
 
-        for (int i = labels.length - 1; i >= 0; i--) {
-            node = node.children.get(labels[i]);
-
-            if (node == null) return false;
-            if (node.subtreeBlocked) return true;
-            if (i == 0 && node.exactBlocked) return true;
-            if (i > 0 && node.wildcardBlocked) return true;
+        lock.readLock().lock();
+        try {
+            TrieNode node = root;
+            for (int i = labels.length - 1; i >= 0; i--) {
+                node = node.children.get(labels[i]);
+                if (node == null) return false;
+                if (node.subtreeBlocked) return true;
+                if (i == 0 && node.exactBlocked) return true;
+                if (i > 0 && node.wildcardBlocked) return true;
+            }
+            return false;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        return false;
     }
 
-    public synchronized int size() {
-        return countNodes(root);
+    public int size() {
+        lock.readLock().lock();
+        try {
+            return countNodes(root);
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     private int countNodes(TrieNode node) {
@@ -108,45 +121,13 @@ public final class DomainTrie {
         return count;
     }
 
-    private static String normalizeDomain(String domain) {
-        if (domain == null) return null;
-        String normalized = domain.trim().toLowerCase(Locale.ROOT);
-        while (normalized.endsWith(".")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-
-        return normalized.isEmpty() ? null : normalized;
-    }
-
     private static String[] getLabelsCached(String domain) {
         synchronized (labelsCache) {
             String[] labels = labelsCache.get(domain);
             if (labels != null) return labels;
-            labels = splitByDot(domain);
+            labels = HostNormalizer.splitHostToLabels(domain);
             labelsCache.put(domain, labels);
             return labels;
         }
-    }
-
-    private static String[] splitByDot(String domain) {
-        int dots = 0;
-
-        for (int i = 0; i < domain.length(); i++) {
-            if (domain.charAt(i) == '.') dots++;
-        }
-
-        if (dots == 0) return new String[]{domain};
-        String[] labels = new String[dots + 1];
-        int start = 0;
-        int index = 0;
-
-        for (int i = 0; i <= domain.length(); i++) {
-            if (i == domain.length() || domain.charAt(i) == '.') {
-                labels[index++] = domain.substring(start, i);
-                start = i + 1;
-            }
-        }
-
-        return labels;
     }
 }

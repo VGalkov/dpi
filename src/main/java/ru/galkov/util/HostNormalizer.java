@@ -4,7 +4,7 @@ import java.net.InetAddress;
 import java.util.Locale;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class HostNormalizer {
 
@@ -14,13 +14,10 @@ public final class HostNormalizer {
     public static String normalizeHost(String value) {
         if (value == null || value.trim().isEmpty()) return null;
         String host = value.trim().toLowerCase(Locale.ROOT);
-
         host = removeTrailingDot(host);
-
         if (host.isEmpty()) return null;
         if (host.indexOf(':') >= 0) return null;
         if (host.indexOf(' ') >= 0 || host.indexOf('/') >= 0) return null;
-
         return host;
     }
 
@@ -28,8 +25,7 @@ public final class HostNormalizer {
         if (value == null || value.trim().isEmpty()) return null;
         String ip = value.trim();
         if (ip.indexOf('/') >= 0) return null;
-        if (!looksLikeIp(ip)) return null;
-
+        if (!isIpLiteralFast(ip)) return null;
         try {
             return InetAddress.getByName(ip).getHostAddress().toLowerCase(Locale.ROOT);
         } catch (Exception e) {
@@ -40,34 +36,123 @@ public final class HostNormalizer {
     public static String removeTrailingDot(String value) {
         if (value == null) return null;
         String result = value;
-
         while (result.endsWith(".")) {
             result = result.substring(0, result.length() - 1);
         }
-
         return result;
     }
 
-    private static boolean looksLikeIp(String value) {
-        if (value.indexOf(':') >= 0) return true;
-        String[] parts = value.split("\\.", -1);
-        if (parts.length != 4) return false;
+    public static String normalizeDomain(String domain) {
+        if (domain == null) return null;
+        String normalized = domain.trim().toLowerCase(Locale.ROOT);
+        while (normalized.endsWith(".")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.isEmpty() ? null : normalized;
+    }
 
-        for (String part : parts) {
-            if (part.isEmpty()) return false;
-
-            for (int i = 0; i < part.length(); i++) {
-                if (!Character.isDigit(part.charAt(i))) return false;
+    public static String[] splitHostToLabels(String domain) {
+        if (domain == null || domain.isEmpty()) return new String[0];
+        int dots = 0;
+        for (int i = 0; i < domain.length(); i++) {
+            if (domain.charAt(i) == '.') dots++;
+        }
+        if (dots == 0) return new String[]{domain};
+        String[] labels = new String[dots + 1];
+        int start = 0, index = 0;
+        for (int i = 0; i <= domain.length(); i++) {
+            if (i == domain.length() || domain.charAt(i) == '.') {
+                labels[index++] = domain.substring(start, i);
+                start = i + 1;
             }
+        }
+        return labels;
+    }
 
-            try {
-                int number = Integer.parseInt(part);
-                if (number < 0 || number > 255) return false;
-            } catch (NumberFormatException e) {
+    public static HostAndPort parseHostPort(String value) {
+        if (value == null || value.isEmpty()) return null;
+        String host, portText;
+        if (value.startsWith("[")) {
+            int close = value.indexOf(']');
+            if (close <= 1 || close + 1 >= value.length() || value.charAt(close + 1) != ':') return null;
+            host = value.substring(1, close);
+            portText = value.substring(close + 2);
+        } else {
+            int colon = value.lastIndexOf(':');
+            if (colon <= 0 || colon == value.length() - 1) return null;
+            host = value.substring(0, colon);
+            portText = value.substring(colon + 1);
+            if (host.indexOf(':') >= 0) return null;
+        }
+        int port;
+        try {
+            port = Integer.parseInt(portText);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (port < 1 || port > 65535) return null;
+        return new HostAndPort(host, port);
+    }
+
+    public static boolean isPrivateIp(byte[] bytes) {
+        if (bytes.length != 4) return false;
+        int a = bytes[0] & 0xff;
+        int b = bytes[1] & 0xff;
+        if (a == 0 || a == 10 || a == 127) return true;
+        if (a == 169 && b == 254) return true;
+        if (a == 172 && b >= 16 && b <= 31) return true;
+        if (a == 192 && b == 168) return true;
+        if (a == 100 && b >= 64 && b <= 127) return true;
+        if (a == 100 && b == 100) {
+            int c = bytes[2] & 0xff;
+            int d = bytes[3] & 0xff;
+            if (c == 100 && d == 200) return true;
+        }
+        return false;
+    }
+
+    public static boolean isIpLiteralFast(String value) {
+        if (value == null || value.isEmpty()) return false;
+        if (value.indexOf(':') >= 0) return isIpv6LiteralFast(value);
+        int len = value.length(), dots = 0, lastDot = -1;
+        for (int i = 0; i < len; i++) {
+            char c = value.charAt(i);
+            if (c == '.') {
+                if (++dots > 3 || i - lastDot - 1 > 3) return false;
+                lastDot = i;
+            } else if (c < '0' || c > '9') {
                 return false;
             }
         }
-
+        if (dots != 3) return false;
+        int start = 0;
+        for (int i = 0; i <= len; i++) {
+            if (i == len || value.charAt(i) == '.') {
+                if (i - start > 3) return false;
+                try {
+                    int n = Integer.parseInt(value.substring(start, i));
+                    if (n < 0 || n > 255) return false;
+                } catch (NumberFormatException e) {
+                    return false;
+                }
+                start = i + 1;
+            }
+        }
         return true;
+    }
+
+    public static boolean isIpv6LiteralFast(String value) {
+        if (value == null || value.isEmpty()) return false;
+        int len = value.length();
+        for (int i = 0; i < len; i++) {
+            char c = value.charAt(i);
+            if (!(c == ':' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public record HostAndPort(String host, int port) {
     }
 }

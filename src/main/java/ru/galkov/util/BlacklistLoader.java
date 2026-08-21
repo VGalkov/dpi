@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static ru.galkov.Main.getConfig;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class BlacklistLoader implements AutoCloseable {
 
@@ -72,7 +72,7 @@ public final class BlacklistLoader implements AutoCloseable {
     public void reloadNow() {
         synchronized (reloadLock) {
             if (pendingSnapshot != null && !pendingSnapshot.isDone()) {
-                logger.info("{}", LogFields.kv("event", "blacklist_reload_already_in_progress"));
+                logger.info("Blacklist reload already in progress");
                 return;
             }
 
@@ -84,12 +84,12 @@ public final class BlacklistLoader implements AutoCloseable {
                     cachedSnapshot = null;
                     cachedSnapshotTime = 0;
                     loaded = true;
-                    logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_ok")));
+                    logger.info("Blacklist reload completed successfully");
                 } catch (Exception e) {
-                    logger.error("{} error={}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_error")), e.getMessage());
+                    logger.error("Blacklist reload error: {}", e.getMessage());
                 }
             }).exceptionally(ex -> {
-                logger.error("{} error={}", LogFields.kv("event", LocaleUtil.getString("blacklist_reload_error")), ex.getMessage());
+                logger.error("Blacklist reload error: {}", ex.getMessage());
                 return null;
             });
         }
@@ -101,7 +101,7 @@ public final class BlacklistLoader implements AutoCloseable {
             if (loaded) return;
             try {
                 snapshot.set(buildSnapshot());
-                logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_first_load_ok")));
+                logger.info("Blacklist first load completed successfully");
             } catch (Exception e) {
                 logger.error(LocaleUtil.getString("blacklist_critical_load_error"), e);
                 snapshot.set(BlacklistSnapshot.empty());
@@ -184,7 +184,7 @@ public final class BlacklistLoader implements AutoCloseable {
                     if (value == null) { invalid++; continue; }
                     if (value.indexOf('/') >= 0) {
                         try { cidrs.add(new IpCidr(value)); accepted++; } catch (Exception e) { invalid++; }
-                    } else if (isIpLiteral(value)) {
+                    } else if (HostNormalizer.isIpLiteralFast(value)) {
                         String ip = HostNormalizer.normalizeIp(value);
                         if (ip == null) { invalid++; } else { if (!ips.add(ip)) duplicateIps++; accepted++; }
                     } else {
@@ -240,12 +240,8 @@ public final class BlacklistLoader implements AutoCloseable {
         }
 
         if (!sources.isEmpty() && loadedSources == 0) throw new IllegalStateException(LocaleUtil.getString("blacklist_no_sources_loaded"));
-        logger.info("{} {} {} {} {} {} {} {}",
-                LogFields.kv("event", LocaleUtil.getString("blacklist_snapshot_built")),
-                LogFields.kv("sourcesLoaded", loadedSources), LogFields.kv("rulesTotal", totalRules),
-                LogFields.kv("ipsUnique", ips.size()), LogFields.kv("ipsCidr", cidrs.size()),
-                LogFields.kv("ipsDuplicate", duplicateIps), LogFields.kv("domainsDuplicate", duplicateDomains),
-                LogFields.kv("rulesInvalid", invalidRules));
+        logger.info("Blacklist snapshot built: sourcesLoaded={} rulesTotal={} ipsUnique={} ipsCidr={} ipsDuplicate={} domainsDuplicate={} rulesInvalid={}",
+                loadedSources, totalRules, ips.size(), cidrs.size(), duplicateIps, duplicateDomains, invalidRules);
 
         return new BlacklistSnapshot(domainTrie, Collections.unmodifiableSet(ips), Collections.unmodifiableSet(cidrs));
     }
@@ -274,32 +270,6 @@ public final class BlacklistLoader implements AutoCloseable {
         }
     }
 
-    private static boolean isIpLiteral(String value) {
-        if (value == null || value.isEmpty()) return false;
-        if (value.indexOf(':') >= 0) return true;
-        int len = value.length(), dots = 0, lastDot = -1;
-        for (int i = 0; i < len; i++) {
-            char c = value.charAt(i);
-            if (c == '.') {
-                if (++dots > 3 || i - lastDot - 1 > 3) return false;
-                lastDot = i;
-            } else if (c < '0' || c > '9') {
-                return false;
-            }
-        }
-        if (dots != 3) return false;
-        String[] parts = value.split("\\.");
-        for (String p : parts) {
-            try {
-                int n = Integer.parseInt(p);
-                if (n < 0 || n > 255) return false;
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     @Override
     public void close() {
         ScheduledExecutorService executor;
@@ -311,7 +281,7 @@ public final class BlacklistLoader implements AutoCloseable {
         executor.shutdown();
         try { if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow(); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); executor.shutdownNow(); }
-        logger.info("{}", LogFields.kv("event", LocaleUtil.getString("blacklist_scheduler_stopped")));
+        logger.info("Blacklist reload scheduler stopped");
     }
 
     private static boolean isSubtreeRule(BlacklistSource source) {

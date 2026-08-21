@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class IpCidr {
     private final InetAddress network;
@@ -21,8 +21,7 @@ public final class IpCidr {
             Collections.synchronizedMap(
                     new LinkedHashMap<String, InetAddress>(256, 0.75f, true) {
                         @Override
-                        protected boolean removeEldestEntry(
-                                Map.Entry<String, InetAddress> eldest) {
+                        protected boolean removeEldestEntry(Map.Entry<String, InetAddress> eldest) {
                             return size() > MAX_CACHE_SIZE;
                         }
                     }
@@ -30,36 +29,22 @@ public final class IpCidr {
 
     public IpCidr(String cidr) throws UnknownHostException {
         if (cidr == null || cidr.isEmpty()) {
-            throw new UnknownHostException(
-                    LocaleUtil.getString("invalid_cidr", cidr)
-            );
+            throw new UnknownHostException(LocaleUtil.getString("invalid_cidr", cidr));
         }
-
         int slash = cidr.indexOf('/');
         if (slash <= 0 || slash == cidr.length() - 1) {
-            throw new UnknownHostException(
-                    LocaleUtil.getString("invalid_cidr", cidr)
-            );
+            throw new UnknownHostException(LocaleUtil.getString("invalid_cidr", cidr));
         }
-
         this.network = InetAddress.getByName(cidr.substring(0, slash));
         this.prefixLength = Integer.parseInt(cidr.substring(slash + 1));
-
         int maxPrefix = this.network.getAddress().length == 4 ? 32 : 128;
         if (prefixLength < 0 || prefixLength > maxPrefix) {
-            throw new UnknownHostException(
-                    LocaleUtil.getString("prefix_out_of_range", maxPrefix, cidr)
-            );
+            throw new UnknownHostException(LocaleUtil.getString("prefix_out_of_range", maxPrefix, cidr));
         }
-
         this.networkBytes = this.network.getAddress();
-
         if (this.networkBytes.length == 0) {
-            throw new UnknownHostException(
-                    LocaleUtil.getString("invalid_cidr", cidr)
-            );
+            throw new UnknownHostException(LocaleUtil.getString("invalid_cidr", cidr));
         }
-
         this.maskBytes = createMask(this.networkBytes.length, prefixLength);
     }
 
@@ -67,39 +52,27 @@ public final class IpCidr {
         byte[] mask = new byte[length];
         for (int i = 0; i < length; i++) {
             int bits = prefixLength - i * 8;
-            if (bits >= 8) {
-                mask[i] = (byte) 0xFF;
-            } else if (bits <= 0) {
-                mask[i] = 0;
-            } else {
-                mask[i] = (byte) (0xFF << (8 - bits));
-            }
+            if (bits >= 8) mask[i] = (byte) 0xFF;
+            else if (bits <= 0) mask[i] = 0;
+            else mask[i] = (byte) (0xFF << (8 - bits));
         }
         return mask;
     }
 
     private static InetAddress getCachedAddress(String ip) throws UnknownHostException {
         InetAddress cached = addressCache.get(ip);
-        if (cached != null) {
-            return cached;
-        }
-
+        if (cached != null) return cached;
         InetAddress address = InetAddress.getByName(ip);
-
         synchronized (addressCache) {
             if (!addressCache.containsKey(ip)) {
                 addressCache.put(ip, address);
             }
         }
-
         return address;
     }
 
     public boolean contains(String ip) {
-        if (ip == null) {
-            return false;
-        }
-
+        if (ip == null) return false;
         try {
             InetAddress address = getCachedAddress(ip);
             return contains(address);
@@ -109,50 +82,33 @@ public final class IpCidr {
     }
 
     public boolean contains(InetAddress address) {
-        if (address == null) {
-            return false;
-        }
-
+        if (address == null) return false;
         byte[] addr = address.getAddress();
-        if (addr == null || addr.length != networkBytes.length) {
-            return false;
-        }
-
+        if (addr == null || addr.length != networkBytes.length) return false;
         for (int i = 0; i < networkBytes.length; i++) {
-            if ((addr[i] & maskBytes[i]) != (networkBytes[i] & maskBytes[i])) {
-                return false;
-            }
+            if ((addr[i] & maskBytes[i]) != (networkBytes[i] & maskBytes[i])) return false;
         }
         return true;
     }
 
-    public static boolean isBlockedAddressUncheckedIpv4(byte[] bytes) {
-        if (bytes.length != 4) return false;
+    public boolean isPrivateIp() {
+        return HostNormalizer.isPrivateIp(networkBytes);
+    }
 
+    public static boolean isBlockedAddressUncheckedIpv4(byte[] bytes) {
+        if (bytes == null || bytes.length != 4) return false;
         int a = bytes[0] & 0xff;
         int b = bytes[1] & 0xff;
-
-        // Быстрые проверки по первому октету
         if (a == 0 || a == 10 || a == 127) return true;
-
-        // Проверки по первым двум октетам
-        if (a == 169 && b == 254) return true;  // Link-local
-        if (a == 172 && b >= 16 && b <= 31) return true;  // Private
-        if (a == 192 && b == 168) return true;  // Private
-        if (a == 100 && b >= 64 && b <= 127) return true;  // CGNAT
-
-        // Редкие случаи (APIPA, CGNAT fallback)
-        if (a == 169 && b == 254) {
-            int c = bytes[2] & 0xff;
-            int d = bytes[3] & 0xff;
-            if (c == 169 && d == 254) return true;  // APIPA
-        }
+        if (a == 169 && b == 254) return true;
+        if (a == 172 && b >= 16 && b <= 31) return true;
+        if (a == 192 && b == 168) return true;
+        if (a == 100 && b >= 64 && b <= 127) return true;
         if (a == 100 && b == 100) {
             int c = bytes[2] & 0xff;
             int d = bytes[3] & 0xff;
-            if (c == 100 && d == 200) return true;  // CGNAT fallback
+            if (c == 100 && d == 200) return true;
         }
-
         return false;
     }
 

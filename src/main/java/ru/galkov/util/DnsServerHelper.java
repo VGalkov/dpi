@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static ru.galkov.Main.getConfig;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class DnsServerHelper {
 
@@ -220,31 +220,15 @@ public final class DnsServerHelper {
 
 
     public static void closeQuietly(DatagramSocket socket) {
-        if (socket != null && !socket.isClosed()) {
-            socket.close();
-        }
+        IoUtil.closeQuietly(socket);
     }
 
     public static void closeQuietly(ServerSocket socket) {
-        if (socket == null || socket.isClosed()) {
-            return;
-        }
-
-        try {
-            socket.close();
-        } catch (IOException ignored) {
-        }
+        IoUtil.closeQuietly(socket);
     }
 
     public static void closeQuietly(Socket socket) {
-        if (socket == null || socket.isClosed()) {
-            return;
-        }
-
-        try {
-            socket.close();
-        } catch (IOException ignored) {
-        }
+        IoUtil.closeQuietly(socket);
     }
 
     public static byte[] shortToBytes(int value) {
@@ -269,7 +253,7 @@ public final class DnsServerHelper {
         String[] parts = reversedIp.split("\\.");
         if (parts.length != 4) return null;
         String ip = parts[3] + "." + parts[2] + "." + parts[1] + "." + parts[0];
-        return isValidIpv4(ip) ? ip : null;
+        return HostNormalizer.isIpLiteralFast(ip) ? ip : null;
     }
 
     public static String extractIpv6FromPtrQuery(String ptrName) {
@@ -296,26 +280,6 @@ public final class DnsServerHelper {
         }
 
         return ipv6.toString();
-    }
-
-    private static boolean isValidIpv4(String value) {
-        if (value == null || value.isEmpty()) return false;
-        String[] parts = value.split("\\.", -1);
-        if (parts.length != 4) return false;
-
-        for (String part : parts) {
-            if (part.isEmpty() || part.length() > 3) return false;
-
-            try {
-                int number = Integer.parseInt(part);
-
-                if (number < 0 || number > 255) return false;
-            } catch (NumberFormatException e) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     public static Optional<String> checkQueryBlacklist(Message query, BlacklistSnapshot snapshot) {
