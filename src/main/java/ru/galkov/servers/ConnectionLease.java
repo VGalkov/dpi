@@ -98,7 +98,7 @@ public final class ConnectionLease
      * The method does not increment the counter and does
      * not acquire a semaphore permit.
      */
-    static ConnectionLease fromReserved(
+    public static ConnectionLease fromReserved(
             Socket socket,
             String clientIp,
             ClientCounterMap counters,
