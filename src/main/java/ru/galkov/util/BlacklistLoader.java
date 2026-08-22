@@ -5,16 +5,8 @@ import org.slf4j.LoggerFactory;
 import ru.galkov.blacklist_source.BlacklistSource;
 import ru.galkov.blacklist_source.RknBlacklistSource;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static ru.galkov.Main.getConfig;
@@ -486,7 +478,7 @@ public final class BlacklistLoader implements AutoCloseable {
             int duplicateDomains,
             int invalidRules
     ) {
-        logger.info(
+        logger.debug(
                 "Blacklist snapshot built: "
                         + "sourcesLoaded={}/{}, "
                         + "sourceLoadErrors={}, "

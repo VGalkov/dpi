@@ -677,7 +677,7 @@ public class HttpProxyServer {
             return;
         }
 
-        logger.info(
+        logger.debug(
                 "HTTP Proxy aggregated statistics: " +
                         "duplicateSockets={}, " +
                         "maxSocketsRejected={}, " +

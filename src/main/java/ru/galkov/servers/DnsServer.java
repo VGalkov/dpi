@@ -170,9 +170,7 @@ public class DnsServer {
                 InetAddress addr = request.getAddress();
                 String clientIp = addr != null ? addr.getHostAddress() : "unknown";
 
-                int maxActiveSocketsLimit =
-                        maxActiveSockets
-                                * maxActiveUdpSocketsMultiplier;
+                int maxActiveSocketsLimit = maxActiveSockets * maxActiveUdpSocketsMultiplier;
 
                 if (activeUdpSockets.size() >= maxActiveSocketsLimit) {
                     activeUdpSocketsOverflowCount.increment();
@@ -181,15 +179,11 @@ public class DnsServer {
                     continue;
                 }
 
-                AtomicInteger clientQueries =
-                        queriesByClient.getOrCreate(clientIp);
+                AtomicInteger clientQueries = queriesByClient.getOrCreate(clientIp);
 
                 if (clientQueries.incrementAndGet() > maxQueriesPerClient) {
                     maxQueriesByClientExceededCount.increment();
-                    queriesByClient.decrementAndRemoveIfZero(
-                            clientIp,
-                            clientQueries
-                    );
+                    queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
                     packetPool.offer(request);
                     continue;
                 }
@@ -197,21 +191,13 @@ public class DnsServer {
                 if (rateLimiter.getActiveClients() >= maxClients) {
                     maxClientsExceededCount.increment();
                     rateLimiter.cleanupOldClients();
-
-                    queriesByClient.decrementAndRemoveIfZero(
-                            clientIp,
-                            clientQueries
-                    );
-
+                    queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
                     packetPool.offer(request);
                     continue;
                 }
 
-                AtomicInteger activeSockets =
-                        activeUdpSockets.getOrCreate(clientIp);
-
+                AtomicInteger activeSockets = activeUdpSockets.getOrCreate(clientIp);
                 activeSockets.incrementAndGet();
-
                 DatagramPacket finalRequest = request;
 
                 WorkerPool.SubmitResult submitResult =
@@ -225,33 +211,19 @@ public class DnsServer {
                                 )
                         );
 
-                if (
-                        submitResult
-                                != WorkerPool.SubmitResult.ACCEPTED
-                ) {
+                if (submitResult != WorkerPool.SubmitResult.ACCEPTED) {
                     udpWorkerRejectedCount.increment();
-
-                    queriesByClient.decrementAndRemoveIfZero(
-                            clientIp,
-                            clientQueries
-                    );
-
-                    activeUdpSockets.decrementAndRemoveIfZero(
-                            clientIp,
-                            activeSockets
-                    );
+                    queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
+                    activeUdpSockets.decrementAndRemoveIfZero(clientIp, activeSockets);
 
                     finalRequest.setLength(maxPacketSize);
                     packetPool.offer(finalRequest);
                 }
             }
         } catch (IOException e) {
-            if (running.get()) {
-                logger.error(
-                        "Критическая ошибка запуска DNS-сервера",
-                        e
-                );
-            }
+            if (running.get())
+                logger.error("Критическая ошибка запуска DNS-сервера", e);
+
         } finally {
             running.set(false);
             udpSocket = null;
@@ -263,30 +235,21 @@ public class DnsServer {
     }
 
     public void stop() {
-        if (!running.compareAndSet(true, false)) {
-            return;
-        }
-
+        if (!running.compareAndSet(true, false)) return;
         closeQuietly(udpSocket);
         closeQuietly(tcpListener);
-
         Thread currentTcpThread = tcpThread;
 
-        if (currentTcpThread != null) {
-            currentTcpThread.interrupt();
-        }
+        if (currentTcpThread != null) currentTcpThread.interrupt();
+
     }
 
-    private void startTcpAcceptor(
-            ServerSocket serverSocket
-    ) {
+    private void startTcpAcceptor(ServerSocket serverSocket) {
         tcpThread =
                 new NamedThreadFactory(
                         "DnsServer-TCP-Acceptor",
                         false
-                ).newThread(
-                        () -> handleTcpConnections(serverSocket)
-                );
+                ).newThread(() -> handleTcpConnections(serverSocket));
 
         tcpThread.start();
     }
@@ -296,24 +259,16 @@ public class DnsServer {
     ) {
         while (running.get()) {
             try {
-                Socket socket =
-                        serverSocket.accept();
+                Socket socket = serverSocket.accept();
 
                 if (!running.get()) {
                     closeQuietly(socket);
                     break;
                 }
 
-                InetAddress addr =
-                        socket.getInetAddress();
-
-                String clientIp =
-                        addr != null
-                                ? addr.getHostAddress()
-                                : "unknown";
-
-                int active =
-                        activeTcpSessions.incrementAndGet();
+                InetAddress addr = socket.getInetAddress();
+                String clientIp = addr != null ? addr.getHostAddress() : "unknown";
+                int active = activeTcpSessions.incrementAndGet();
 
                 if (active > maxTcpSessions) {
                     activeTcpSessions.decrementAndGet();
@@ -322,21 +277,10 @@ public class DnsServer {
                     continue;
                 }
 
-                AtomicInteger tcpCount =
-                        tcpConnectionsByClient.getOrCreate(
-                                clientIp
-                        );
+                AtomicInteger tcpCount = tcpConnectionsByClient.getOrCreate(clientIp);
 
-                if (
-                        tcpCount.incrementAndGet()
-                                > maxTcpConnectionsPerClient
-                ) {
-                    tcpConnectionsByClient
-                            .decrementAndRemoveIfZero(
-                                    clientIp,
-                                    tcpCount
-                            );
-
+                if (tcpCount.incrementAndGet() > maxTcpConnectionsPerClient) {
+                    tcpConnectionsByClient.decrementAndRemoveIfZero(clientIp, tcpCount);
                     activeTcpSessions.decrementAndGet();
                     tcpClientLimitExceededCount.increment();
                     closeQuietly(socket);
@@ -344,79 +288,35 @@ public class DnsServer {
                 }
 
                 WorkerPool.SubmitResult submitResult =
-                        WorkerPool.submit(
-                                () -> handleSingleTcpSession(
-                                        socket,
-                                        clientIp,
-                                        tcpCount
-                                )
-                        );
+                        WorkerPool.submit(() -> handleSingleTcpSession(socket, clientIp, tcpCount));
 
-                if (
-                        submitResult
-                                != WorkerPool.SubmitResult.ACCEPTED
-                ) {
+                if (submitResult != WorkerPool.SubmitResult.ACCEPTED) {
                     tcpWorkerRejectedCount.increment();
-
-                    tcpConnectionsByClient
-                            .decrementAndRemoveIfZero(
-                                    clientIp,
-                                    tcpCount
-                            );
+                    tcpConnectionsByClient.decrementAndRemoveIfZero(clientIp, tcpCount);
 
                     activeTcpSessions.decrementAndGet();
                     closeQuietly(socket);
                 }
             } catch (SocketException e) {
-                if (running.get()) {
-                    tcpSocketErrorCount.increment();
-                }
-
+                if (running.get()) tcpSocketErrorCount.increment();
                 break;
             } catch (IOException e) {
-                if (running.get()) {
-                    tcpSessionErrorCount.increment();
-                }
+                if (running.get()) tcpSessionErrorCount.increment();
             }
         }
     }
 
     private DnsRateLimiter createRateLimiter() {
-        boolean enabled =
-                getConfig().getBoolean(
-                        "dns.rate-limit.enabled"
-                );
-
-        if (!enabled) {
-            return DnsRateLimiter.disabled();
-        }
-
-        int rps =
-                getConfig().getInt(
-                        "dns.rate-limit.requests-per-second"
-                );
-
-        int burst =
-                getConfig().getInt(
-                        "dns.rate-limit.burst"
-                );
-
-        int idle =
-                getConfig().getInt(
-                        "dns.rate-limit.client-idle-seconds"
-                );
-
+        boolean enabled = getConfig().getBoolean("dns.rate-limit.enabled");
+        if (!enabled) {return DnsRateLimiter.disabled();}
+        int rps = getConfig().getInt("dns.rate-limit.requests-per-second");
+        int burst = getConfig().getInt("dns.rate-limit.burst");
+        int idle = getConfig().getInt("dns.rate-limit.client-idle-seconds");
         if (rps <= 0 || burst <= 0 || idle <= 0) {
-            throw new IllegalArgumentException(
-                    "Rate limit params must be > 0"
-            );
+            throw new IllegalArgumentException("Rate limit params must be > 0");
         }
 
-        return new DnsRateLimiter(
-                rps,
-                burst,
-                TimeUnit.SECONDS.toNanos(idle)
-        );
+        return new DnsRateLimiter(rps, burst, TimeUnit.SECONDS.toNanos(idle));
     }
 
     private class CachedInetAddress {
@@ -425,175 +325,78 @@ public class DnsServer {
 
         CachedInetAddress(InetAddress address) {
             this.address = address;
-            this.timestamp =
-                    System.currentTimeMillis();
+            this.timestamp = System.currentTimeMillis();
         }
 
         boolean isExpired() {
-            return System.currentTimeMillis()
-                    - timestamp
-                    > dnsCacheTtlMillis;
+            return System.currentTimeMillis() - timestamp > dnsCacheTtlMillis;
         }
 
         long getAgeSeconds() {
-            return (
-                    System.currentTimeMillis()
-                            - timestamp
-            ) / 1000;
+            return (System.currentTimeMillis() - timestamp) / 1000;
         }
     }
 
     private Map<String, SimpleResolver> createResolvers() {
-        if (dnsCache.size() >= maxDnsCacheSize) {
-            cleanupDnsCacheBySize();
-        }
-
-        Map<String, SimpleResolver> result =
-                new LinkedHashMap<>();
-
-        int timeout =
-                getConfig().getInt(
-                        "dns.timeout"
-                );
-
-        for (
-                String dns :
-                getConfig().getList("dns.list")
-        ) {
+        if (dnsCache.size() >= maxDnsCacheSize) cleanupDnsCacheBySize();
+        Map<String, SimpleResolver> result = new LinkedHashMap<>();
+        int timeout = getConfig().getInt("dns.timeout");
+        for (String dns : getConfig().getList("dns.list")) {
             try {
-                CachedInetAddress cached =
-                        dnsCache.get(dns);
-
+                CachedInetAddress cached = dnsCache.get(dns);
                 InetAddress addr;
 
-                if (
-                        cached != null
-                                && !cached.isExpired()
-                ) {
+                if (cached != null && !cached.isExpired()) {
                     addr = cached.address;
-
-                    logger.debug(
-                            "Используем кэшированный DNS: {} -> {}",
-                            dns,
-                            addr
-                    );
+                    logger.debug("Используем кэшированный DNS: {} -> {}", dns, addr);
                 } else {
                     if (cached != null) {
                         logger.debug(
-                                LocaleUtil.getString(
-                                        "dns_resolver_cache_expired"
-                                ),
+                                LocaleUtil.getString("dns_resolver_cache_expired"),
                                 dns,
-                                cached.getAgeSeconds()
-                        );
+                                cached.getAgeSeconds());
                     }
 
-                    addr =
-                            InetAddress.getByName(
-                                    dns
-                            );
+                    addr = InetAddress.getByName(dns);
 
-                    if (dnsCache.size() >= maxDnsCacheSize) {
-                        cleanupDnsCacheBySize();
-                    }
-
-                    dnsCache.put(
-                            dns,
-                            new CachedInetAddress(addr)
-                    );
-
-                    resolverCacheRefreshCount
-                            .incrementAndGet();
-
-                    logger.debug(
-                            LocaleUtil.getString(
-                                    "dns_resolver_cache_refreshed"
-                            ),
-                            dns,
-                            addr
-                    );
+                    if (dnsCache.size() >= maxDnsCacheSize) cleanupDnsCacheBySize();
+                    dnsCache.put(dns, new CachedInetAddress(addr));
+                    resolverCacheRefreshCount.incrementAndGet();
+                    logger.debug(LocaleUtil.getString("dns_resolver_cache_refreshed"), dns, addr);
                 }
 
-                if (addr == null) {
-                    throw new IllegalArgumentException(
-                            "Некорректный DNS upstream: "
-                                    + dns
-                    );
-                }
+                if (addr == null)
+                    throw new IllegalArgumentException("Некорректный DNS upstream: " + dns);
 
-                SimpleResolver resolver =
-                        new SimpleResolver(addr);
-
-                resolver.setTimeout(
-                        Duration.ofSeconds(
-                                timeout
-                        )
-                );
-
-                result.put(
-                        dns,
-                        resolver
-                );
+                SimpleResolver resolver = new SimpleResolver(addr);
+                resolver.setTimeout(Duration.ofSeconds(timeout));
+                result.put(dns, resolver);
             } catch (Exception e) {
-                throw new IllegalArgumentException(
-                        "Некорректный DNS upstream: "
-                                + dns,
-                        e
-                );
+                throw new IllegalArgumentException("Некорректный DNS upstream: " + dns, e);
             }
         }
 
-        if (result.isEmpty()) {
-            throw new IllegalStateException(
-                    "Список DNS upstream пуст"
-            );
-        }
-
-        return Collections.unmodifiableMap(
-                result
-        );
+        if (result.isEmpty())
+            throw new IllegalStateException("Список DNS upstream пуст");
+        return Collections.unmodifiableMap(result);
     }
 
     private void cleanupDnsCacheBySize() {
         int removed = 0;
 
-        Iterator<
-                Map.Entry<
-                        String,
-                        CachedInetAddress
-                        >
-                > it =
-                dnsCache.entrySet().iterator();
-
+        Iterator<Map.Entry<String, CachedInetAddress>> it = dnsCache.entrySet().iterator();
         while (it.hasNext()) {
-            if (it.next().getValue().isExpired()) {
-                it.remove();
-                removed++;
-            }
+            if (it.next().getValue().isExpired()) {it.remove();removed++;}
         }
 
-        while (
-                dnsCache.size() > maxDnsCacheSize
-                        && !dnsCache.isEmpty()
-        ) {
-            dnsCache.remove(
-                    dnsCache.keySet()
-                            .iterator()
-                            .next()
-            );
-
+        while (dnsCache.size() > maxDnsCacheSize && !dnsCache.isEmpty()) {
+            dnsCache.remove(dnsCache.keySet().iterator().next());
             removed++;
         }
 
         if (removed > 0) {
             logger.debug(
-                    LocaleUtil.getString(
-                            "dns_cache_size_eviction"
-                    ),
-                    removed,
-                    dnsCache.size(),
-                    maxDnsCacheSize
-            );
+                    LocaleUtil.getString("dns_cache_size_eviction"), removed, dnsCache.size(), maxDnsCacheSize);
         }
     }
 
@@ -602,75 +405,28 @@ public class DnsServer {
             String clientIp,
             String qname
     ) {
-        BlacklistSnapshot snapshot =
-                blacklist.snapshot();
+        BlacklistSnapshot snapshot = blacklist.snapshot();
 
         if (!rateLimiter.tryAcquire(clientIp)) {
-            if (rateLimitLoggingEnabled) {
-                rateLimitExceededCount.increment();
-            }
-
+            if (rateLimitLoggingEnabled) rateLimitExceededCount.increment();
             return null;
         }
 
-        if (
-                DnsServerHelper
-                        .checkQueryBlacklist(
-                                query,
-                                snapshot
-                        )
-                        .isPresent()
-        ) {
+        if (DnsServerHelper.checkQueryBlacklist(query, snapshot).isPresent())
             return null;
-        }
 
-        Message response =
-                forwardToResolver(
-                        query
-                );
-
-        if (response == null) {
+        Message response = forwardToResolver(query);
+        if (response == null) return null;
+        if (DnsServerHelper.checkResponseBlacklist(response, qname, blacklist) != null)
             return null;
-        }
 
-        if (
-                DnsServerHelper
-                        .checkResponseBlacklist(
-                                response,
-                                qname,
-                                blacklist
-                        ) != null
-        ) {
-            return null;
-        }
-
-        if (
-                dnsAnomalyDetector != null
-                        && dnsAnomalyDetector.isEnabled()
-        ) {
-            int queryType =
-                    query.getQuestion()
-                            .getType();
-
-            boolean isQuery =
-                    !query.getHeader()
-                            .getFlag(Flags.QR);
-
-            int opcode =
-                    query.getHeader()
-                            .getOpcode();
-
-            boolean isTruncated =
-                    query.getHeader()
-                            .getFlag(Flags.TC);
-
-            boolean recursionDesired =
-                    query.getHeader()
-                            .getFlag(Flags.RD);
-
-            int rcode =
-                    query.getHeader()
-                            .getRcode();
+        if (dnsAnomalyDetector != null && dnsAnomalyDetector.isEnabled()) {
+            int queryType = query.getQuestion().getType();
+            boolean isQuery = !query.getHeader().getFlag(Flags.QR);
+            int opcode = query.getHeader().getOpcode();
+            boolean isTruncated = query.getHeader().getFlag(Flags.TC);
+            boolean recursionDesired = query.getHeader().getFlag(Flags.RD);
+            int rcode = query.getHeader().getRcode();
 
             dnsAnomalyDetector.recordQuery(
                     clientIp,
@@ -696,13 +452,8 @@ public class DnsServer {
             AtomicInteger activeSockets
     ) {
         try {
-            int length =
-                    packet.getLength();
-
-            if (
-                    length == 0
-                            || length > maxPacketSize
-            ) {
+            int length = packet.getLength();
+            if (length == 0 || length > maxPacketSize) {
                 maxPacketSizeExceededCount.increment();
                 return;
             }
@@ -714,47 +465,21 @@ public class DnsServer {
                             ? queryDataBuffer.get()
                             : new byte[length];
 
-            System.arraycopy(
-                    packet.getData(),
-                    packet.getOffset(),
-                    queryData,
-                    0,
-                    length
-            );
-
+            System.arraycopy(packet.getData(), packet.getOffset(), queryData, 0, length);
             Message query;
 
             try {
-                query =
-                        new Message(
-                                Arrays.copyOf(
-                                        queryData,
-                                        length
-                                )
-                        );
+                query = new Message(Arrays.copyOf(queryData, length));
             } catch (Exception e) {
                 return;
             }
 
-            String qname =
-                    DnsServerHelper.getQuestionName(
-                            query
-                    );
-
-            Message response =
-                    processQuery(
-                            query,
-                            clientIp,
-                            qname
-                    );
+            String qname = DnsServerHelper.getQuestionName(query);
+            Message response = processQuery(query, clientIp, qname);
 
             if (response == null) {
                 try {
-                    DnsServerHelper.sendRefusedResponse(
-                            socket,
-                            packet,
-                            query
-                    );
+                    DnsServerHelper.sendRefusedResponse(socket, packet, query);
                 } catch (IOException ignored) {
                     // Client may have disconnected.
                 }
@@ -762,39 +487,22 @@ public class DnsServer {
                 return;
             }
 
-            byte[] wire =
-                    response.toWire();
-
+            byte[] wire = response.toWire();
             try {
                 socket.send(
                         new DatagramPacket(
                                 wire,
-                                wire.length,
-                                packet.getAddress(),
-                                packet.getPort()
-                        )
+                                wire.length, packet.getAddress(),
+                                packet.getPort())
                 );
             } catch (IOException e) {
-                if (running.get()) {
-                    udpSendErrorCount.increment();
-                }
+                if (running.get()) udpSendErrorCount.increment();
             }
         } catch (Throwable t) {
-            logger.error(
-                    "Unexpected error in processUdpRequest",
-                    t
-            );
+            logger.error("Unexpected error in processUdpRequest", t);
         } finally {
-            queriesByClient.decrementAndRemoveIfZero(
-                    clientIp,
-                    clientQueries
-            );
-
-            activeUdpSockets.decrementAndRemoveIfZero(
-                    clientIp,
-                    activeSockets
-            );
-
+            queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
+            activeUdpSockets.decrementAndRemoveIfZero(clientIp, activeSockets);
             packet.setLength(maxPacketSize);
             packetPool.offer(packet);
         }
@@ -808,33 +516,14 @@ public class DnsServer {
         AtomicInteger clientQueries = null;
 
         try {
-            socket.setSoTimeout(
-                    tcpSocketTimeoutMillis
-            );
+            socket.setSoTimeout(tcpSocketTimeoutMillis);
+            socket.setKeepAlive(tcpKeepAlive);
+            socket.setTcpNoDelay(tcpNoDelay);
+            clientQueries = queriesByClient.getOrCreate(clientIp);
 
-            socket.setKeepAlive(
-                    tcpKeepAlive
-            );
-
-            socket.setTcpNoDelay(
-                    tcpNoDelay
-            );
-
-            clientQueries =
-                    queriesByClient.getOrCreate(
-                            clientIp
-                    );
-
-            if (
-                    clientQueries.incrementAndGet()
-                            > maxQueriesPerClient
-            ) {
+            if (clientQueries.incrementAndGet() > maxQueriesPerClient) {
                 maxQueriesByClientExceededCount.increment();
-
-                queriesByClient.decrementAndRemoveIfZero(
-                        clientIp,
-                        clientQueries
-                );
+                queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
 
                 clientQueries = null;
                 return;
@@ -842,71 +531,42 @@ public class DnsServer {
 
             try (
                     Socket currentSocket = socket;
-                    InputStream input =
-                            currentSocket.getInputStream();
-                    OutputStream output =
-                            currentSocket.getOutputStream()
+                    InputStream input = currentSocket.getInputStream();
+                    OutputStream output = currentSocket.getOutputStream()
             ) {
-                DataInputStream dataInput =
-                        new DataInputStream(input);
+                DataInputStream dataInput = new DataInputStream(input);
 
-                while (
-                        running.get()
-                                && !currentSocket.isClosed()
-                ) {
+                while (running.get() && !currentSocket.isClosed()) {
                     int length;
 
                     try {
-                        length =
-                                dataInput.readUnsignedShort();
+                        length = dataInput.readUnsignedShort();
                     } catch (EOFException e) {
                         break;
                     }
 
-                    if (
-                            length == 0
-                                    || length > maxPacketSize
-                    ) {
+                    if (length == 0 || length > maxPacketSize) {
                         maxPacketSizeExceededCount.increment();
                         break;
                     }
 
-                    byte[] requestData =
-                            new byte[length];
+                    byte[] requestData = new byte[length];
 
-                    dataInput.readFully(
-                            requestData
-                    );
+                    dataInput.readFully(requestData);
 
                     Message query;
-
                     try {
-                        query =
-                                new Message(
-                                        requestData
-                                );
+                        query = new Message(requestData);
                     } catch (Exception e) {
                         continue;
                     }
 
-                    String qname =
-                            DnsServerHelper.getQuestionName(
-                                    query
-                            );
-
-                    Message response =
-                            processQuery(
-                                    query,
-                                    clientIp,
-                                    qname
-                            );
+                    String qname = DnsServerHelper.getQuestionName(query);
+                    Message response = processQuery(query, clientIp, qname);
 
                     if (response == null) {
                         try {
-                            DnsServerHelper.sendTcpRefusedResponse(
-                                    output,
-                                    query
-                            );
+                            DnsServerHelper.sendTcpRefusedResponse(output, query);
                         } catch (IOException ignored) {
                             // Client may have disconnected.
                         }
@@ -914,115 +574,47 @@ public class DnsServer {
                         continue;
                     }
 
-                    byte[] responseBytes =
-                            response.toWire();
+                    byte[] responseBytes = response.toWire();
+                    if (responseBytes.length > 65535) break;
+                    output.write(DnsServerHelper.shortToBytes(responseBytes.length));
 
-                    if (responseBytes.length > 65535) {
-                        break;
-                    }
-
-                    output.write(
-                            DnsServerHelper.shortToBytes(
-                                    responseBytes.length
-                            )
-                    );
-
-                    output.write(
-                            responseBytes
-                    );
+                    output.write(responseBytes);
 
                     output.flush();
                 }
             } catch (SocketTimeoutException e) {
                 tcpSessionErrorCount.increment();
             } catch (IOException e) {
-                if (
-                        running.get()
-                                && !(
-                                e instanceof
-                                        java.nio.channels.ClosedChannelException
-                        )
-                ) {
+                if (running.get() && !(e instanceof java.nio.channels.ClosedChannelException))
                     tcpSessionErrorCount.increment();
-                }
             } finally {
-                if (clientQueries != null) {
-                    queriesByClient.decrementAndRemoveIfZero(
-                            clientIp,
-                            clientQueries
-                    );
-
-                    clientQueries = null;
-                }
+                queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
+                clientQueries = null;
             }
         } catch (SocketException e) {
-            if (running.get()) {
-                tcpSocketErrorCount.increment();
-            }
+            if (running.get()) tcpSocketErrorCount.increment();
         } catch (Throwable t) {
-            logger.error(
-                    "Unexpected error in handleSingleTcpSession",
-                    t
-            );
+            logger.error("Unexpected error in handleSingleTcpSession", t);
         } finally {
-            if (clientQueries != null) {
-                queriesByClient.decrementAndRemoveIfZero(
-                        clientIp,
-                        clientQueries
-                );
-            }
-
-            tcpConnectionsByClient.decrementAndRemoveIfZero(
-                    clientIp,
-                    tcpCount
-            );
-
+            if (clientQueries != null)
+                queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
+            tcpConnectionsByClient.decrementAndRemoveIfZero(clientIp, tcpCount);
             activeTcpSessions.decrementAndGet();
         }
     }
 
-    private Message forwardToResolver(
-            Message query
-    ) {
-        if (
-                query == null
-                        || query.getQuestion() == null
-        ) {
-            return null;
-        }
+    private Message forwardToResolver(Message query) {
+        if (query == null || query.getQuestion() == null) return null;
 
-        for (
-                Map.Entry<
-                        String,
-                        SimpleResolver
-                        > entry :
-                resolvers.entrySet()
-        ) {
-            SimpleResolver resolver =
-                    entry.getValue();
+        for (Map.Entry<String, SimpleResolver> entry : resolvers.entrySet()) {
+            SimpleResolver resolver = entry.getValue();
 
             try {
-                Message response =
-                        resolver.send(
-                                query
-                        );
-
-                if (response == null) {
-                    continue;
-                }
-
-                byte[] responseBytes =
-                        response.toWire();
-
-                if (
-                        responseBytes.length
-                                > maxResponseSize
-                ) {
-                    response.getHeader()
-                            .setFlag(
-                                    Flags.TC
-                            );
-
+                Message response = resolver.send(query);
+                if (response == null) continue;
+                byte[] responseBytes = response.toWire();
+                if (responseBytes.length > maxResponseSize) {
+                    response.getHeader().setFlag(Flags.TC);
                     logger.debug(
                             "DNS response truncated: size={} > max={}",
                             responseBytes.length,
@@ -1030,16 +622,9 @@ public class DnsServer {
                     );
                 }
 
-                if (
-                        response.getHeader()
-                                .getFlag(Flags.TC)
-                ) {
-                    response =
-                            forwardToResolverTcp(
-                                    query,
-                                    resolver
-                            );
-                }
+                if (response.getHeader().getFlag(Flags.TC))
+                    response = forwardToResolverTcp(query, resolver);
+
 
                 return response;
             } catch (Exception e) {
@@ -1050,10 +635,7 @@ public class DnsServer {
         return null;
     }
 
-    private Message forwardToResolverTcp(
-            Message query,
-            SimpleResolver resolver
-    ) {
+    private Message forwardToResolverTcp(Message query, SimpleResolver resolver) {
         try {
             resolver.setTCP(true);
             return resolver.send(query);
@@ -1068,21 +650,12 @@ public class DnsServer {
     private void cleanupOldSockets() {
         activeUdpSockets.removeZeroCounters();
 
-        while (
-                activeUdpSockets.size() > maxActiveSockets
-                        && activeUdpSockets.removeOne()
-        ) {
-            // cleanup
-        }
     }
 
     private void startCacheCleanup() {
         cleanupExecutor =
                 Executors.newSingleThreadScheduledExecutor(
-                        new NamedThreadFactory(
-                                "DnsServer-Cache-Cleanup-Thread",
-                                true
-                        )
+                        new NamedThreadFactory("DnsServer-Cache-Cleanup-Thread", true)
                 );
 
         cleanupExecutor.scheduleWithFixedDelay(
@@ -1090,10 +663,7 @@ public class DnsServer {
                     try {
                         cleanupCaches();
                     } catch (Exception e) {
-                        logger.error(
-                                "Error in cache cleanup",
-                                e
-                        );
+                        logger.error("Error in cache cleanup", e);
                     }
                 },
                 cacheCleanupIntervalSeconds,
@@ -1103,26 +673,15 @@ public class DnsServer {
     }
 
     private void stopCacheCleanup() {
-        ScheduledExecutorService executor =
-                cleanupExecutor;
+        ScheduledExecutorService executor = cleanupExecutor;
 
         cleanupExecutor = null;
-
-        if (executor == null) {
-            return;
-        }
-
+        if (executor == null) return;
         executor.shutdown();
 
         try {
-            if (
-                    !executor.awaitTermination(
-                            5,
-                            TimeUnit.SECONDS
-                    )
-            ) {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS))
                 executor.shutdownNow();
-            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
@@ -1131,15 +690,7 @@ public class DnsServer {
 
     private void cleanupCaches() {
         int removedDns = 0;
-
-        Iterator<
-                Map.Entry<
-                        String,
-                        CachedInetAddress
-                        >
-                > dnsIt =
-                dnsCache.entrySet().iterator();
-
+        Iterator<Map.Entry<String, CachedInetAddress>> dnsIt = dnsCache.entrySet().iterator();
         while (dnsIt.hasNext()) {
             if (dnsIt.next().getValue().isExpired()) {
                 dnsIt.remove();
@@ -1147,29 +698,17 @@ public class DnsServer {
             }
         }
 
-        while (
-                dnsCache.size() > maxDnsCacheSize
-                        && !dnsCache.isEmpty()
-        ) {
-            dnsCache.remove(
-                    dnsCache.keySet()
-                            .iterator()
-                            .next()
-            );
-
+        while (dnsCache.size() > maxDnsCacheSize && !dnsCache.isEmpty()) {
+            dnsCache.remove(dnsCache.keySet().iterator().next());
             removedDns++;
         }
 
         queriesByClient.removeZeroCounters();
         activeUdpSockets.removeZeroCounters();
         tcpConnectionsByClient.removeZeroCounters();
+        if (removedDns > 0)
+            logger.debug("DNS cache cleanup completed: removed={}", removedDns);
 
-        if (removedDns > 0) {
-            logger.debug(
-                    "DNS cache cleanup completed: removed={}",
-                    removedDns
-            );
-        }
     }
 
     private void logStartupSummary() {
@@ -1264,7 +803,7 @@ public class DnsServer {
             return;
         }
 
-        logger.info(
+        logger.debug(
                 "DNS server aggregated statistics: "
                         + "packetPoolEmpty={}, "
                         + "maxPacketSizeExceeded={}, "

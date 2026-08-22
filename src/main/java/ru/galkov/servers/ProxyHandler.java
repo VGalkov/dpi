@@ -125,7 +125,7 @@ public class ProxyHandler implements Runnable {
 
     private void handleConnect(InputStream in, OutputStream out, String target) throws IOException {
         if (released()) return;
-        readAndDiscardHeaders(in);
+        ProxyHandlerHelper.readHeaders(in, maxHeaderBytes, true, "", this::released);
         if (released()) return;
         HostNormalizer.HostAndPort hp = HostNormalizer.parseHostPort(target);
         if (hp == null || hp.host() == null) { invalidTargetCounter.increment(); sendError(out, 400, "Bad Request (invalid host and port)"); return; }
@@ -169,7 +169,9 @@ public class ProxyHandler implements Runnable {
 
     private void handleHttp(InputStream in, OutputStream out, String firstLine, String target, String method) throws IOException {
         if (released()) return;
-        HttpHeaders hdrs = readHttpHeaders(in, firstLine);
+        StringBuilder sb = ProxyHandlerHelper.readHeaders(in, maxHeaderBytes, false, firstLine, this::released);
+        if (released()) return;
+        HttpHeaders hdrs = parseHttpHeaders(sb.toString());
         if (released()) return;
         HostNormalizer.HostAndPort hp = ProxyHandlerHelper.resolveHttpTarget(hdrs.hostHeader, target);
         if (hp == null || hp.host() == null) { invalidTargetCounter.increment(); sendError(out, 400, "Cannot determine target host"); return; }
@@ -207,16 +209,37 @@ public class ProxyHandler implements Runnable {
         }
     }
 
-    private void readAndDiscardHeaders(InputStream in) throws IOException {
-        int total = 0;
-        String line;
-        while ((line = ProxyHandlerHelper.readLine(in, maxHeaderBytes)) != null) {
-            total += line.length() + 2;
-            if (total > maxHeaderBytes) throw new ProxyHandlerHelper.RequestTooLargeException("CONNECT headers exceed " + maxHeaderBytes + " bytes");
-            if (line.isEmpty()) return;
-            if (released()) throw new IOException("Connection lease released");
+    private HttpHeaders parseHttpHeaders(String rawHeaders) throws IOException {
+        String[] lines = rawHeaders.split("\r\n");
+        if (lines.length < 1) throw new IOException("No HTTP headers");
+        String firstLine = lines[0];
+        StringTokenizer t = new StringTokenizer(firstLine);
+        if (!t.hasMoreTokens()) throw new IOException("Invalid first line");
+        t.nextToken(); // method
+        if (!t.hasMoreTokens()) throw new IOException("No target in first line");
+        t.nextToken(); // target
+        String host = null;
+        Long contentLen = null;
+        boolean chunked = false, expect = false;
+        for (int i = 1; i < lines.length; i++) {
+            String line = lines[i];
+            if (line.isEmpty()) break;
+            if (regionMatches(line, "host:")) host = line.substring(5).trim();
+            else if (regionMatches(line, "content-length:")) {
+                Long v = parseContentLength(line.substring(15).trim());
+                if (v == null) throw new IOException("Invalid Content-Length");
+                if (contentLen != null && contentLen.longValue() != v.longValue()) throw new IOException("Conflicting Content-Length");
+                contentLen = v;
+            }
+            else if (regionMatches(line, "transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked")) chunked = true;
+            else if (regionMatches(line, "expect:") && line.substring(7).trim().equalsIgnoreCase("100-continue")) expect = true;
         }
-        throw new IOException("Incomplete CONNECT request");
+        if (chunked && contentLen != null) throw new IOException("Both Content-Length and Transfer-Encoding present");
+        return new HttpHeaders(rawHeaders, host, contentLen == null ? 0L : contentLen, chunked, expect);
+    }
+
+    private static boolean regionMatches(String str, String prefix) {
+        return str.regionMatches(true, 0, prefix, 0, prefix.length());
     }
 
     private BlockDecision checkBlockedHostOrIp(String host) {
@@ -224,30 +247,6 @@ public class ProxyHandler implements Runnable {
         BlacklistSnapshot snapshot = blacklist.snapshot();
         BlockDecision ip = snapshot.checkIp(host);
         return ip.isBlocked() ? ip : snapshot.checkDomain(host);
-    }
-
-    private HttpHeaders readHttpHeaders(InputStream in, String firstLine) throws IOException {
-        StringBuilder sb = new StringBuilder(firstLine).append("\r\n");
-        int total = firstLine.length() + 2;
-        String host = null;
-        Long contentLen = null;
-        boolean chunked = false, expect = false;
-        String line;
-        while ((line = ProxyHandlerHelper.readLine(in, maxHeaderBytes)) != null && !line.isEmpty()) {
-            total += line.length() + 2;
-            if (total > maxHeaderBytes) throw new ProxyHandlerHelper.RequestTooLargeException("HTTP headers exceed " + maxHeaderBytes + " bytes");
-            sb.append(line).append("\r\n");
-            String low = line.toLowerCase(Locale.ROOT);
-            if (low.startsWith("host:")) host = line.substring(5).trim();
-            else if (low.startsWith("content-length:")) { Long v = parseContentLength(line.substring(15).trim()); if (v == null) throw new IOException("Invalid Content-Length"); if (contentLen != null && contentLen.longValue() != v.longValue()) throw new IOException("Conflicting Content-Length"); contentLen = v; }
-            else if (low.startsWith("transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked")) chunked = true;
-            else if (low.startsWith("expect:") && low.substring(7).trim().equals("100-continue")) expect = true;
-            if (released()) throw new IOException("Connection lease released");
-        }
-        if (line == null) throw new IOException("Incomplete HTTP request headers");
-        if (chunked && contentLen != null) throw new IOException("Both Content-Length and Transfer-Encoding present");
-        sb.append("\r\n");
-        return new HttpHeaders(sb.toString(), host, contentLen == null ? 0L : contentLen, chunked, expect);
     }
 
     private Long parseContentLength(String value) {
@@ -265,9 +264,8 @@ public class ProxyHandler implements Runnable {
         String line;
         while ((line = ProxyHandlerHelper.readLine(in, maxHeaderBytes)) != null && !line.isEmpty()) {
             ProxyHandlerHelper.writeLine(out, line);
-            String low = line.toLowerCase(Locale.ROOT);
-            if (low.startsWith("content-length:")) { Long v = parseContentLength(line.substring(15).trim()); if (v != null) contentLen = v; }
-            else if (low.startsWith("transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked")) chunked = true;
+            if (regionMatches(line, "content-length:")) { Long v = parseContentLength(line.substring(15).trim()); if (v != null) contentLen = v; }
+            else if (regionMatches(line, "transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked")) chunked = true;
             if (released()) return;
         }
         if (line == null) return;
