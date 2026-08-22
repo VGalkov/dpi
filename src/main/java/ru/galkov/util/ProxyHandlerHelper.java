@@ -280,24 +280,18 @@ public final class ProxyHandlerHelper {
     }
 
     public static String readLine(InputStream in, int max) throws IOException {
-        StringBuilder sb = null;
+        byte[] buf = new byte[max];
+        int pos = 0;
         int b;
-        int total = 0;
         while ((b = in.read()) != -1) {
             if (b == '\n') {
-                if (sb != null && !sb.isEmpty() && sb.charAt(sb.length() - 1) == '\r')
-                    sb.setLength(sb.length() - 1);
-                return sb == null ? "" : sb.toString();
+                int len = (pos > 0 && buf[pos - 1] == '\r') ? pos - 1 : pos;
+                return new String(buf, 0, len, StandardCharsets.ISO_8859_1);
             }
-            if (sb == null) sb = new StringBuilder();
-            if (sb.length() >= max) throw new RequestTooLargeException("Line exceeds " + max + " bytes");
-            sb.append((char) b);
-            total++;
-            if (total > max * 2) {
-                throw new RequestTooLargeException("Line exceeds " + max + " bytes");
-            }
+            if (pos >= max) throw new RequestTooLargeException("Line exceeds " + max + " bytes");
+            buf[pos++] = (byte) b;
         }
-        return sb == null ? null : sb.toString();
+        return pos == 0 ? null : new String(buf, 0, pos, StandardCharsets.ISO_8859_1);
     }
 
     public static void writeLine(OutputStream out, String line) throws IOException {
@@ -353,6 +347,36 @@ public final class ProxyHandlerHelper {
         }
     }
 
+
+    public static StringBuilder readHeaders(
+            InputStream in,
+            int maxHeaderBytes,
+            boolean discardOnly,
+            String firstLine,
+            java.util.function.BooleanSupplier releasedChecker
+    ) throws IOException {
+        StringBuilder sb = discardOnly ? null : new StringBuilder(firstLine).append("\r\n");
+        int total = firstLine.length() + 2;
+        String line;
+        while ((line = readLine(in, maxHeaderBytes)) != null && !line.isEmpty()) {
+            total += line.length() + 2;
+            if (total > maxHeaderBytes) {
+                throw new RequestTooLargeException(
+                        discardOnly
+                                ? "CONNECT headers exceed " + maxHeaderBytes + " bytes"
+                                : "HTTP headers exceed " + maxHeaderBytes + " bytes"
+                );
+            }
+            if (!discardOnly) sb.append(line).append("\r\n");
+            if (releasedChecker.getAsBoolean()) throw new IOException("Connection lease released");
+
+        }
+        if (line == null) {
+            throw new IOException(discardOnly ? "Incomplete CONNECT request" : "Incomplete HTTP request headers");
+        }
+        if (!discardOnly) sb.append("\r\n");
+        return sb;
+    }
 
     public static final class RequestTooLargeException extends IOException {
         public RequestTooLargeException(String msg) { super(msg); }
