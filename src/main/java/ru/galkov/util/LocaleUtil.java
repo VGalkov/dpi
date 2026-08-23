@@ -21,10 +21,7 @@ public class LocaleUtil {
     public static void reload() {
         String prefix = loadLocalePrefix();
 
-        if (prefix.equals(currentLocalePrefix) && messages != null) {
-            return;
-        }
-
+        if (prefix.equals(currentLocalePrefix) && messages != null) return;
         currentLocalePrefix = prefix;
         messagesCache.clear();
 
@@ -51,9 +48,7 @@ public class LocaleUtil {
     public static String getString(String key) {
         if (messages == null) {
             synchronized (loadLock) {
-                if (messages == null) {
-                    reload();
-                }
+                if (messages == null) reload();
             }
         }
 
@@ -74,9 +69,7 @@ public class LocaleUtil {
     public static String getString(String key, Object... args) {
         if (messages == null) {
             synchronized (loadLock) {
-                if (messages == null) {
-                    reload();
-                }
+                if (messages == null) reload();
             }
         }
 
@@ -96,9 +89,7 @@ public class LocaleUtil {
     }
 
     private static String substitute(String template, Object[] args) {
-        if (template == null || args == null || args.length == 0) {
-            return template;
-        }
+        if (template == null || args == null || args.length == 0) return template;
 
         StringBuilder sb = new StringBuilder(template.length() + 16);
         int i = 0;

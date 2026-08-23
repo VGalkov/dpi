@@ -26,7 +26,6 @@ public record BlacklistRule(RuleType type, String value, String source, String s
 
     @Override
     public String toString() {
-        return String.format(Locale.ROOT, "BlacklistRule{type=%s, value='%s', source='%s'}",
-                type, value, source);
+        return String.format(Locale.ROOT, "BlacklistRule{type=%s, value='%s', source='%s'}", type, value, source);
     }
 }

@@ -168,9 +168,8 @@ public final class ProxyHandlerHelper {
             }
             return null;
         } catch (Exception e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Unable to resolve HTTP target", e);
-            }
+            if (logger.isDebugEnabled()) logger.debug("Unable to resolve HTTP target", e);
+
             return null;
         }
     }
@@ -213,9 +212,8 @@ public final class ProxyHandlerHelper {
             if (url.getQuery() != null) path += "?" + url.getQuery();
             return path;
         } catch (Exception e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Unable to extract HTTP path", e);
-            }
+            if (logger.isDebugEnabled()) logger.debug("Unable to extract HTTP path", e);
+
             return "/";
         }
     }
@@ -229,20 +227,16 @@ public final class ProxyHandlerHelper {
         t2.start();
         try {
             t1.join();
-            if (!t1.isAlive()) {
-                IoUtil.closeQuietly(remote);
-            }
+            if (!t1.isAlive()) IoUtil.closeQuietly(remote);
             t2.join(30000);
-            if (t2.isAlive()) {
-                t2.interrupt();
-            }
+            if (t2.isAlive()) t2.interrupt();
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             t1.interrupt();
             t2.interrupt();
-            if (logger.isDebugEnabled()) {
-                logger.debug("Proxy tunnel interrupted", e);
-            }
+            if (logger.isDebugEnabled()) logger.debug("Proxy tunnel interrupted", e);
+
         } finally {
             IoUtil.closeQuietly(client);
             IoUtil.closeQuietly(remote);
@@ -266,9 +260,8 @@ public final class ProxyHandlerHelper {
             } catch (IOException ignored) {
             }
         } catch (IOException e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Proxy tunnel pipe closed: {}", e.getMessage());
-            }
+            if (logger.isDebugEnabled()) logger.debug("Proxy tunnel pipe closed: {}", e.getMessage());
+
         } finally {
             if (in != null) {
                 try { IoUtil.closeQuietly(src); } catch (Exception ignored) {}

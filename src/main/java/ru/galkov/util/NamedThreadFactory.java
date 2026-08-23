@@ -15,10 +15,7 @@ public final class NamedThreadFactory implements ThreadFactory {
 
     @Override
     public Thread newThread(Runnable runnable) {
-        Thread thread = new Thread(
-                runnable,
-                name + "-" + counter.incrementAndGet()
-        );
+        Thread thread = new Thread(runnable, name + "-" + counter.incrementAndGet());
         thread.setDaemon(daemon);
         return thread;
     }

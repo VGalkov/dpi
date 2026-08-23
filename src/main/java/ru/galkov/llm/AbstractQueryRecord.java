@@ -1,12 +1,9 @@
 package ru.galkov.llm;
 
-import ru.galkov.util.BlacklistSnapshot;
-
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Абстрактный базовый класс для записей запросов.
  * s0506777@yandex.ru Galkov V.A.
  */
 public abstract class AbstractQueryRecord {
@@ -27,58 +24,14 @@ public abstract class AbstractQueryRecord {
         return timestamp;
     }
 
-    /**
-     * Проверяет, является ли целевой хост/IP заблокированным.
-     */
-    public boolean isBlocked(BlacklistSnapshot snapshot) {
-        if (snapshot == null) return false;
-
-        if (snapshot.checkIp(clientIp).isBlocked()) return true;
-
-        String target = getTarget();
-        if (target == null || target.isEmpty()) return false;
-
-        return snapshot.checkDomain(target).isBlocked();
-    }
-
-    /**
-     * Целевой домен/хост запроса.
-     */
     public abstract String getTarget();
 
-    /**
-     * Длина целевого домена/хоста.
-     */
-    public abstract int getTargetLength();
-
-    /**
-     * Является ли хост IP-адресом.
-     */
-    public abstract boolean isTargetIp();
-
-    /**
-     * Подозрительный TLD.
-     */
     public abstract boolean hasSuspiciousTld();
 
-    /**
-     * Признаки инъекций.
-     */
-    public abstract boolean hasInjectionMarkers();
-
-    /**
-     * Подозрительный индикатор.
-     */
-    public abstract boolean hasSuspiciousIndicator();
-
-    /**
-     * Краткое описание для логирования.
-     */
     protected String buildBaseToString() {
         return "clientIp='" + clientIp + "', timestamp=" + timestamp;
     }
 
-    // ✅ Пункт 1: Универсальный метод нормализации
     public static String normalize(String value) {
         return value == null ? "" : value.trim();
     }
@@ -97,7 +50,6 @@ public abstract class AbstractQueryRecord {
         return normalize(value, true, true);
     }
 
-    // ✅ Универсальный метод нормализации (вместо 4 дублирующихся)
     public static String normalize(String value, boolean toLowerCase, boolean removeTrailingDots) {
         if (value == null) return null;
         String result = value.trim();
@@ -110,7 +62,6 @@ public abstract class AbstractQueryRecord {
         return result.isEmpty() ? null : result;
     }
 
-    // ✅ Проверка IP
     public static boolean isIpLiteral(String value) {
         if (value.isEmpty()) return false;
         return value.indexOf(':') >= 0 ? isIpv6Literal(value) : isIpv4Literal(value);
@@ -149,7 +100,6 @@ public abstract class AbstractQueryRecord {
         return true;
     }
 
-    // ✅ Пункт 2: Универсальный метод для расчёта ratio символов
     public static double calculateDigitRatio(String value) {
         if (value == null || value.isEmpty()) return 0.0;
         int count = 0;
@@ -163,7 +113,6 @@ public abstract class AbstractQueryRecord {
         return calculateCharRatio(value, '-');
     }
 
-    // ✅ Универсальный метод для расчёта ratio (вместо дублирования)
     public static double calculateCharRatio(String value, char target) {
         if (value == null || value.isEmpty()) return 0.0;
         int count = 0;
@@ -173,13 +122,11 @@ public abstract class AbstractQueryRecord {
         return (double) count / value.length();
     }
 
-    // ✅ Ограничение длины
     public static String limit(String value, int maxLength) {
         if (value.length() <= maxLength) return value;
         return value.substring(0, maxLength);
     }
 
-    // ✅ Расчёт энтропии (только для DNS)
     public static double calculateEntropy(String value) {
         if (value == null || value.isEmpty()) return 0.0;
         double LOG_2 = Math.log(2.0);
@@ -201,7 +148,6 @@ public abstract class AbstractQueryRecord {
         return result;
     }
 
-    // ✅ Подсчёт точек (только для DNS)
     public static int countDots(String value) {
         if (value == null || value.isEmpty()) return 0;
         int count = 0;
@@ -211,7 +157,7 @@ public abstract class AbstractQueryRecord {
         return count;
     }
 
-    // ✅ Parent domain (только для DNS)
+
     public static String calculateParentDomain(String value) {
         if (value == null || value.isEmpty()) return "";
         int index = value.indexOf('.');
@@ -219,14 +165,12 @@ public abstract class AbstractQueryRecord {
         return value.substring(index + 1);
     }
 
-    // ✅ Leftmost label (только для DNS)
     public static String calculateLeftmostLabel(String value) {
         if (value == null || value.isEmpty()) return "";
         int index = value.indexOf('.');
         return index < 0 ? value : value.substring(0, index);
     }
 
-    // ✅ Max label length (только для DNS)
     public static int calculateMaxLabelLength(String value) {
         if (value == null || value.isEmpty()) return 0;
         int max = 0, current = 0;
@@ -241,7 +185,6 @@ public abstract class AbstractQueryRecord {
         return Math.max(max, current);
     }
 
-    // ✅ Unique character ratio (только для DNS)
     public static double calculateUniqueCharacterRatio(String value) {
         if (value == null || value.isEmpty()) return 0.0;
         boolean[] seen = new boolean[Character.MAX_VALUE + 1];
@@ -256,7 +199,6 @@ public abstract class AbstractQueryRecord {
         return (double) unique / value.length();
     }
 
-    // ✅ Пункт 3: Универсальный метод для Base32/Base64-like проверки
     public static boolean isBase32Like(String value) {
         return isLikeEncoding(value, c -> {
             char upper = Character.toUpperCase(c);
@@ -272,7 +214,6 @@ public abstract class AbstractQueryRecord {
         );
     }
 
-    // ✅ Универсальный метод для Base32/Base64-like (вместо дублирования)
     public static boolean isLikeEncoding(String value, java.util.function.Predicate<Character> validator, int minLength) {
         if (value == null || value.length() < minLength) return false;
         int valid = 0;
@@ -282,7 +223,6 @@ public abstract class AbstractQueryRecord {
         return (double) valid / value.length() >= 0.95;
     }
 
-    // ✅ Punycode (только для DNS)
     public static boolean containsPunycode(String value) {
         if (value == null || value.isEmpty()) return false;
         for (String label : value.split("\\.")) {
@@ -291,7 +231,6 @@ public abstract class AbstractQueryRecord {
         return false;
     }
 
-    // ✅ IP-like label (только для DNS)
     public static boolean containsIpLikeLabel(String value) {
         if (value == null || value.isEmpty()) return false;
         for (String label : value.split("\\.")) {
@@ -306,7 +245,6 @@ public abstract class AbstractQueryRecord {
         return false;
     }
 
-    // ✅ Suspicious keyword (только для DNS)
     public static boolean containsSuspiciousKeyword(String value) {
         if (value == null || value.isEmpty()) return false;
         String lower = value.toLowerCase(Locale.ROOT);
@@ -316,14 +254,12 @@ public abstract class AbstractQueryRecord {
                 lower.contains("stealer");
     }
 
-    // ✅ Suspicious TLD (только для HTTP)
     public static boolean hasSuspiciousTld(String host) {
         return host.endsWith(".xyz") || host.endsWith(".top") ||
                 host.endsWith(".tk") || host.endsWith(".club") ||
                 host.endsWith(".work");
     }
 
-    // ✅ Path traversal (только для HTTP)
     public static boolean hasPathTraversal(String value) {
         String lower = value.toLowerCase(Locale.ROOT);
         return lower.contains("../") || lower.contains("..\\") ||
@@ -331,7 +267,6 @@ public abstract class AbstractQueryRecord {
                 lower.contains("2e2e5c");
     }
 
-    // ✅ Пункт 4: Оптимизация через список маркеров (вместо 20+ проверок)
     private static final List<String> INJECTION_MARKERS = List.of(
             "select ", " union ", " drop ", " insert ", " update ", " delete ",
             " or 1=1", "<script", "javascript:", "onerror=", "onload=",
@@ -343,7 +278,6 @@ public abstract class AbstractQueryRecord {
         return INJECTION_MARKERS.stream().anyMatch(lower::contains);
     }
 
-    // ✅ Suspicious User-Agent (только для HTTP)
     public static boolean hasSuspiciousUserAgent(String headers) {
         String lower = headers.toLowerCase(Locale.ROOT);
         return lower.contains("user-agent: curl") ||

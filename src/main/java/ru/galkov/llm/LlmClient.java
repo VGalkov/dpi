@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import ru.galkov.util.LocaleUtil;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -222,12 +221,8 @@ public final class LlmClient {
             else if (confidence > 1.0) confidence = 1.0;
 
             String reason = "";
-            if (reasonNode != null && reasonNode.isTextual()) {
-                reason = reasonNode.asText().trim();
-            }
-            if (reason.length() > MAX_REASON_LENGTH) {
-                reason = reason.substring(0, MAX_REASON_LENGTH);
-            }
+            if (reasonNode != null && reasonNode.isTextual()) reason = reasonNode.asText().trim();
+            if (reason.length() > MAX_REASON_LENGTH) reason = reason.substring(0, MAX_REASON_LENGTH);
 
             List<String> actions = new ArrayList<>();
             if (actionsNode != null) {
@@ -305,30 +300,9 @@ public final class LlmClient {
         return null;
     }
 
-    public String loadPromptTemplate(String resourceName) {
-        if (resourceName == null || resourceName.isBlank()) {
-            return "";
-        }
-
-        try (InputStream input = getClass().getClassLoader().getResourceAsStream(resourceName)) {
-            if (input == null) {
-                logger.warn("Prompt template not found: {}", resourceName);
-                return "";
-            }
-            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            logger.error("Prompt template loading failed: {}", resourceName, e);
-            return "";
-        }
-    }
-
     private static String truncate(String value, int maxLength) {
-        if (value == null) {
-            return "";
-        }
-        if (value.length() <= maxLength) {
-            return value;
-        }
+        if (value == null) return "";
+        if (value.length() <= maxLength) return value;
         return value.substring(0, maxLength) + "...";
     }
 }

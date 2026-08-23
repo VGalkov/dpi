@@ -7,7 +7,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- * DNS-детектор аномалий на базе LlmAnomalyDetector.
  */
 public class DnsAnomalyDetector extends LlmAnomalyDetector<DnsQueryRecord> {
     private static final int DEFAULT_MAX_QUEUE_SIZE = 10000;

@@ -22,21 +22,13 @@ public final class DnsRateLimiter {
             LoggerFactory.getLogger(DnsRateLimiter.class);
 
     private static final boolean RATE_LIMIT_LOGGING_ENABLED =
-            getConfig().getBoolean(
-                    "dns.logging.rate-limit-enabled"
-            );
+            getConfig().getBoolean("dns.logging.rate-limit-enabled");
 
     private static final int CLEANUP_EVERY_N_REQUESTS =
-            getPositiveInt(
-                    "dns.rate-limit.cleanup-every-n-requests",
-                    1000
-            );
+            getPositiveInt("dns.rate-limit.cleanup-every-n-requests", 1000);
 
     private static final int CLEANUP_PERCENT_TO_REMOVE =
-            getPercent(
-                    "dns.rate-limit.cleanup-percent-to-remove",
-                    10
-            );
+            getPercent("dns.rate-limit.cleanup-percent-to-remove", 10);
 
     private final boolean enabled;
     private final int requestsPerSecond;
@@ -44,14 +36,11 @@ public final class DnsRateLimiter {
     private final long clientIdleNanos;
     private final ConcurrentHashMap<String, TokenBucket> buckets;
 
-    private final AtomicLong requestCounter =
-            new AtomicLong();
+    private final AtomicLong requestCounter = new AtomicLong();
 
-    private final AtomicLong rejectedRequestCounter =
-            new AtomicLong();
+    private final AtomicLong rejectedRequestCounter = new AtomicLong();
 
-    private final Object cleanupLock =
-            new Object();
+    private final Object cleanupLock = new Object();
 
     private volatile long nextCleanupNanos;
 
@@ -84,23 +73,9 @@ public final class DnsRateLimiter {
             int burst,
             long clientIdleNanos
     ) {
-        if (requestsPerSecond <= 0) {
-            throw new IllegalArgumentException(
-                    "requestsPerSecond must be > 0"
-            );
-        }
-
-        if (burst <= 0) {
-            throw new IllegalArgumentException(
-                    "burst must be > 0"
-            );
-        }
-
-        if (clientIdleNanos <= 0) {
-            throw new IllegalArgumentException(
-                    "clientIdleNanos must be > 0"
-            );
-        }
+        if (requestsPerSecond <= 0) throw new IllegalArgumentException("requestsPerSecond must be > 0");
+        if (burst <= 0) throw new IllegalArgumentException("burst must be > 0");
+        if (clientIdleNanos <= 0) throw new IllegalArgumentException("clientIdleNanos must be > 0");
 
         this.enabled = true;
         this.requestsPerSecond = requestsPerSecond;
@@ -110,113 +85,52 @@ public final class DnsRateLimiter {
     }
 
     public boolean tryAcquire(String clientIp) {
-        if (!enabled) {
-            return true;
-        }
-
-        if (clientIp == null || clientIp.isEmpty()) {
-            return false;
-        }
-
+        if (!enabled) return true;
+        if (clientIp == null || clientIp.isEmpty()) return false;
         long now = System.nanoTime();
-
         cleanupIfNeeded(now);
-
-        TokenBucket bucket = buckets.computeIfAbsent(
-                clientIp,
-                ignored -> new TokenBucket(burst, now)
-        );
-
-        boolean acquired = bucket.tryAcquire(
-                now,
-                requestsPerSecond,
-                burst
-        );
+        TokenBucket bucket = buckets.computeIfAbsent(clientIp, ignored -> new TokenBucket(burst, now));
+        boolean acquired = bucket.tryAcquire(now, requestsPerSecond, burst);
 
         if (!acquired) {
-            if (RATE_LIMIT_LOGGING_ENABLED) {
-                rejectedRequestCounter.incrementAndGet();
-            }
-
+            if (RATE_LIMIT_LOGGING_ENABLED) rejectedRequestCounter.incrementAndGet();
             return false;
         }
-
-        long count =
-                requestCounter.incrementAndGet();
-
-        if (count % CLEANUP_EVERY_N_REQUESTS == 0) {
+        long count = requestCounter.incrementAndGet();
+        if (count % CLEANUP_EVERY_N_REQUESTS == 0)
             triggerFastCleanup(now);
-        }
 
         return true;
     }
 
     private void cleanupIfNeeded(long now) {
-        if (now < nextCleanupNanos) {
-            return;
-        }
-
+        if (now < nextCleanupNanos) return;
         synchronized (cleanupLock) {
-            if (now < nextCleanupNanos) {
-                return;
-            }
-
+            if (now < nextCleanupNanos) return;
             removeIdleBuckets(now);
 
-            nextCleanupNanos =
-                    now + Math.min(
-                            clientIdleNanos,
-                            TimeUnit.SECONDS.toNanos(60)
-                    );
+            nextCleanupNanos = now + Math.min(clientIdleNanos, TimeUnit.SECONDS.toNanos(60));
         }
     }
 
     private void triggerFastCleanup(long now) {
         synchronized (cleanupLock) {
             int currentSize = buckets.size();
+            if (currentSize < CLEANUP_EVERY_N_REQUESTS) return;
+            List<Map.Entry<String, TokenBucket>> idle = new ArrayList<>();
 
-            if (currentSize < CLEANUP_EVERY_N_REQUESTS) {
-                return;
+            for (Map.Entry<String, TokenBucket> entry : buckets.entrySet()) {
+                if (now - entry.getValue().getLastSeenNanos() > clientIdleNanos) idle.add(entry);
+
             }
 
-            List<Map.Entry<String, TokenBucket>> idle =
-                    new ArrayList<>();
-
-            for (Map.Entry<String, TokenBucket> entry
-                    : buckets.entrySet()) {
-                if (now - entry.getValue().getLastSeenNanos()
-                        > clientIdleNanos) {
-                    idle.add(entry);
-                }
-            }
-
-            idle.sort(
-                    Comparator.comparingLong(
-                            entry -> entry.getValue()
-                                    .getLastSeenNanos()
-                    )
-            );
-
-            int target = Math.max(
-                    1,
-                    currentSize
-                            * CLEANUP_PERCENT_TO_REMOVE
-                            / 100
-            );
-
+            idle.sort(Comparator.comparingLong(entry -> entry.getValue().getLastSeenNanos()));
+            int target = Math.max(1, currentSize * CLEANUP_PERCENT_TO_REMOVE / 100);
             int removed = 0;
 
             for (Map.Entry<String, TokenBucket> entry : idle) {
-                if (removed >= target) {
-                    break;
-                }
-
-                if (buckets.remove(
-                        entry.getKey(),
-                        entry.getValue()
-                )) {
-                    removed++;
-                }
+                if (removed >= target) break;
+                if (buckets.remove(entry.getKey(), entry.getValue())) removed++;
             }
 
             if (removed > 0) {
@@ -230,17 +144,9 @@ public final class DnsRateLimiter {
     }
 
     private void removeIdleBuckets(long now) {
-        for (Map.Entry<String, TokenBucket> entry
-                : buckets.entrySet()) {
+        for (Map.Entry<String, TokenBucket> entry : buckets.entrySet()) {
             TokenBucket bucket = entry.getValue();
-
-            if (now - bucket.getLastSeenNanos()
-                    > clientIdleNanos) {
-                buckets.remove(
-                        entry.getKey(),
-                        bucket
-                );
-            }
+            if (now - bucket.getLastSeenNanos() > clientIdleNanos) buckets.remove(entry.getKey(), bucket);
         }
     }
 
@@ -256,22 +162,14 @@ public final class DnsRateLimiter {
         }
     }
 
-    private static int getPositiveInt(
-            String key,
-            int defaultValue
-    ) {
+    private static int getPositiveInt(String key, int defaultValue) {
         int value = getConfig().getInt(key);
         return value > 0 ? value : defaultValue;
     }
 
-    private static int getPercent(
-            String key,
-            int defaultValue
-    ) {
+    private static int getPercent(String key, int defaultValue) {
         int value = getConfig().getInt(key);
-        return value >= 0 && value <= 100
-                ? value
-                : defaultValue;
+        return value >= 0 && value <= 100 ? value : defaultValue;
     }
 
     private static final class TokenBucket {
@@ -285,34 +183,16 @@ public final class DnsRateLimiter {
             this.lastSeenNanos = now;
         }
 
-        private synchronized boolean tryAcquire(
-                long now,
-                int requestsPerSecond,
-                int burst
-        ) {
-            long elapsedNanos =
-                    now - lastRefillNanos;
-
+        private synchronized boolean tryAcquire(long now, int requestsPerSecond, int burst) {
+            long elapsedNanos = now - lastRefillNanos;
             if (elapsedNanos > 0) {
-                double newTokens =
-                        elapsedNanos
-                                / 1_000_000_000.0d
-                                * requestsPerSecond;
-
-                tokens = Math.min(
-                        burst,
-                        tokens + newTokens
-                );
-
+                double newTokens = elapsedNanos / 1_000_000_000.0d * requestsPerSecond;
+                tokens = Math.min(burst, tokens + newTokens);
                 lastRefillNanos = now;
             }
 
             lastSeenNanos = now;
-
-            if (tokens < 1.0d) {
-                return false;
-            }
-
+            if (tokens < 1.0d) return false;
             tokens -= 1.0d;
             return true;
         }

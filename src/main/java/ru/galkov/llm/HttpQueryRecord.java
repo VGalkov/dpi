@@ -65,22 +65,10 @@ public final class HttpQueryRecord extends AbstractQueryRecord {
     @Override
     public String getTarget() { return host; }
 
-    @Override
-    public int getTargetLength() { return host.length(); }
-
-    @Override
-    public boolean isTargetIp() { return hostIsIp; }
 
     @Override
     public boolean hasSuspiciousTld() { return suspiciousTld; }
 
-    @Override
-    public boolean hasInjectionMarkers() { return pathHasInjectionMarkers || bodyHasInjectionMarkers; }
-
-    @Override
-    public boolean hasSuspiciousIndicator() { return suspiciousUserAgent; }
-
-    // ✅ Специфичные для HTTP методы
     public String getMethod() { return method; }
     public String getHost() { return host; }
     public int getPort() { return port; }
