@@ -615,15 +615,10 @@ public class DnsServer {
                 byte[] responseBytes = response.toWire();
                 if (responseBytes.length > maxResponseSize) {
                     response.getHeader().setFlag(Flags.TC);
-                    logger.debug(
-                            "DNS response truncated: size={} > max={}",
-                            responseBytes.length,
-                            maxResponseSize
-                    );
+                    logger.debug("DNS response truncated: size={} > max={}", responseBytes.length, maxResponseSize);
                 }
 
-                if (response.getHeader().getFlag(Flags.TC))
-                    response = forwardToResolverTcp(query, resolver);
+                if (response.getHeader().getFlag(Flags.TC)) response = forwardToResolverTcp(query, resolver);
 
 
                 return response;
@@ -712,10 +707,7 @@ public class DnsServer {
     }
 
     private void logStartupSummary() {
-        long packetPoolMemoryKb =
-                (long) maxPacketPoolSize
-                        * maxPacketSize
-                        / 1024;
+        long packetPoolMemoryKb = (long) maxPacketPoolSize * maxPacketSize / 1024;
 
         logger.info(
                 "DNS server started: port={}, "
@@ -742,47 +734,20 @@ public class DnsServer {
     }
 
     private void logAggregatedRuntimeStatistics() {
-        long packetPoolEmpty =
-                packetPoolEmptyCount.sum();
-
-        long maxPacketSizeExceeded =
-                maxPacketSizeExceededCount.sum();
-
-        long activeUdpSocketsOverflow =
-                activeUdpSocketsOverflowCount.sum();
-
-        long maxQueriesByClientExceeded =
-                maxQueriesByClientExceededCount.sum();
-
-        long maxClientsExceeded =
-                maxClientsExceededCount.sum();
-
-        long rateLimitExceeded =
-                rateLimitExceededCount.sum();
-
-        long udpWorkerRejected =
-                udpWorkerRejectedCount.sum();
-
-        long tcpWorkerRejected =
-                tcpWorkerRejectedCount.sum();
-
-        long tcpSessionLimitExceeded =
-                tcpSessionLimitExceededCount.sum();
-
-        long tcpClientLimitExceeded =
-                tcpClientLimitExceededCount.sum();
-
-        long upstreamErrors =
-                upstreamErrorCount.sum();
-
-        long udpSendErrors =
-                udpSendErrorCount.sum();
-
-        long tcpSessionErrors =
-                tcpSessionErrorCount.sum();
-
-        long tcpSocketErrors =
-                tcpSocketErrorCount.sum();
+        long packetPoolEmpty = packetPoolEmptyCount.sum();
+        long maxPacketSizeExceeded = maxPacketSizeExceededCount.sum();
+        long activeUdpSocketsOverflow = activeUdpSocketsOverflowCount.sum();
+        long maxQueriesByClientExceeded = maxQueriesByClientExceededCount.sum();
+        long maxClientsExceeded = maxClientsExceededCount.sum();
+        long rateLimitExceeded = rateLimitExceededCount.sum();
+        long udpWorkerRejected = udpWorkerRejectedCount.sum();
+        long tcpWorkerRejected = tcpWorkerRejectedCount.sum();
+        long tcpSessionLimitExceeded = tcpSessionLimitExceededCount.sum();
+        long tcpClientLimitExceeded = tcpClientLimitExceededCount.sum();
+        long upstreamErrors = upstreamErrorCount.sum();
+        long udpSendErrors = udpSendErrorCount.sum();
+        long tcpSessionErrors = tcpSessionErrorCount.sum();
+        long tcpSocketErrors = tcpSocketErrorCount.sum();
 
         if (
                 packetPoolEmpty == 0

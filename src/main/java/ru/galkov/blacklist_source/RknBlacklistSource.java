@@ -57,12 +57,9 @@ public final class RknBlacklistSource implements BlacklistSource {
     }
 
     private List<BlacklistRule> parseRegisterXml(InputStream inputStream) throws IOException {
-        // ✅ Начальная ёмкость 1000 (вместо дефолтной 10)
         List<BlacklistRule> rules = new ArrayList<>(1000);
         RknHandler handler = new RknHandler(rules);
-
         try {
-            // ✅ Используем кэшированную фабрику
             SAXParser parser = FACTORY.newSAXParser();
             parser.parse(inputStream, handler);
         } catch (Exception e) {
@@ -89,7 +86,6 @@ public final class RknBlacklistSource implements BlacklistSource {
                 currentContentId = attributes.getValue("id");
                 currentBlockType = null;
             }
-
             currentText.setLength(0);
         }
 

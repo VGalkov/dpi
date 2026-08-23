@@ -16,8 +16,7 @@ import java.util.Optional;
  */
 public final class DnsServerHelper {
 
-    private DnsServerHelper() {
-    }
+    private DnsServerHelper() {}
 
 
     public static byte[] shortToBytes(int value) {
@@ -109,13 +108,7 @@ public final class DnsServerHelper {
 
             if (records == null || records.isEmpty()) continue;
             for (Record record : records) {
-                String reason = checkRecordBlacklist(
-                        record,
-                        section,
-                        requestedDomain,
-                        snapshot
-                );
-
+                String reason = checkRecordBlacklist(record, section, requestedDomain, snapshot);
                 if (reason != null) return reason;
             }
         }
@@ -129,14 +122,9 @@ public final class DnsServerHelper {
             String requestedDomain,
             BlacklistSnapshot snapshot
     ) {
-        if (record == null || snapshot == null) {
-            return null;
-        }
-
+        if (record == null || snapshot == null) return null;
         Name ownerName = record.getName();
-
-        if (ownerName != null
-                && snapshot.checkDomain(ownerName.toString()).isBlocked()) {
+        if (ownerName != null && snapshot.checkDomain(ownerName.toString()).isBlocked()) {
             return "запрещённый owner domain "
                     + ownerName
                     + " в секции "
@@ -212,13 +200,11 @@ public final class DnsServerHelper {
             DatagramPacket originalPacket,
             Message query
     ) throws IOException {
-        if (socket == null || originalPacket == null || query == null) {
+        if (socket == null || originalPacket == null || query == null)
             throw new IllegalArgumentException("socket, originalPacket and query are required");
-        }
 
         Message response = createRefusedResponse(query);
         byte[] responseBytes = response.toWire();
-
         DatagramPacket reply = new DatagramPacket(
                 responseBytes,
                 responseBytes.length,
@@ -230,12 +216,10 @@ public final class DnsServerHelper {
     }
 
     public static void sendTcpRefusedResponse(OutputStream output, Message query) throws IOException {
-        if (output == null || query == null)
-            throw new IllegalArgumentException("output and query are required");
+        if (output == null || query == null) throw new IllegalArgumentException("output and query are required");
 
         Message refused = createRefusedResponse(query);
         byte[] refusedBytes = refused.toWire();
-
         output.write(shortToBytes(refusedBytes.length));
         output.write(refusedBytes);
         output.flush();

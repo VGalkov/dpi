@@ -7,16 +7,13 @@ public final class RuleNormalizer {
     private RuleNormalizer() {}
 
     public static String normalizeRule(String line) {
-        if (line == null)
-            return null;
+        if (line == null) return null;
 
         String value = line.trim();
-        if (value.isEmpty() || value.startsWith("#") || value.startsWith("!"))
-            return null;
+        if (value.isEmpty() || value.startsWith("#") || value.startsWith("!")) return null;
 
         int commentIndex = value.indexOf('#');
-        if (commentIndex >= 0)
-            value = value.substring(0, commentIndex).trim();
+        if (commentIndex >= 0) value = value.substring(0, commentIndex).trim();
 
         return value.isEmpty() ? null : value;
     }

@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 
 /**
  * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- * Стратегия для DNS-аномалий.
  */
 public class DnsAnomalyStrategy implements AnomalyStrategy<DnsQueryRecord> {
     private static final Logger logger = LoggerFactory.getLogger(DnsAnomalyStrategy.class);

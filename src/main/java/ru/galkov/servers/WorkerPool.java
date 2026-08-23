@@ -101,58 +101,36 @@ public final class WorkerPool {
 
     public static void shutdown() {
         synchronized (POOL) {
-            if (!SHUTDOWN_STARTED.compareAndSet(false, true)) {
-                return;
-            }
-
-            logger.info(
-                    LocaleUtil.getString(
-                            "worker_pool_shutdown_initiated"
-                    )
-            );
-
+            if (!SHUTDOWN_STARTED.compareAndSet(false, true)) return;
+            logger.info(LocaleUtil.getString("worker_pool_shutdown_initiated"));
             POOL.shutdown();
         }
 
         try {
             if (!POOL.awaitTermination(10, TimeUnit.SECONDS)) {
-                logger.warn(
-                        "WorkerPool did not terminate in time, "
-                                + "forcing shutdown"
-                );
+                logger.warn("WorkerPool did not terminate in time, " + "forcing shutdown");
                 POOL.shutdownNow();
             }
 
             TASK_QUEUE.clear();
             logRejectedTasks();
-
-            logger.info(
-                    LocaleUtil.getString(
-                            "worker_pool_shutdown_completed"
-                    )
-            );
+            logger.info(LocaleUtil.getString("worker_pool_shutdown_completed"));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             POOL.shutdownNow();
             TASK_QUEUE.clear();
             logRejectedTasks();
 
-            logger.info(
-                    LocaleUtil.getString(
-                            "worker_pool_shutdown_completed"
-                    )
-            );
+            logger.info(LocaleUtil.getString("worker_pool_shutdown_completed"));
         }
     }
 
     private static void logRejectedTasks() {
-        long rejected =
-                REJECTED_TASK_COUNTER.sumThenReset();
+        long rejected = REJECTED_TASK_COUNTER.sumThenReset();
 
         if (rejected > 0) {
             logger.warn(
-                    "WorkerPool rejected tasks: total={}, "
-                            + "queueSize={}, queueCapacity={}",
+                    "WorkerPool rejected tasks: total={}, queueSize={}, queueCapacity={}",
                     rejected,
                     TASK_QUEUE.size(),
                     QUEUE_SIZE
@@ -160,17 +138,10 @@ public final class WorkerPool {
         }
     }
 
-    private static int readPositiveInt(
-            String key,
-            int defaultValue,
-            String description
-    ) {
+    private static int readPositiveInt(String key, int defaultValue, String description) {
         try {
             int value = getConfig().getInt(key);
-
-            if (value > 0) {
-                return value;
-            }
+            if (value > 0) return value;
 
             logger.warn(
                     "Invalid or missing {} ({}), using default {}",
@@ -190,28 +161,16 @@ public final class WorkerPool {
         return defaultValue;
     }
 
-    private static String readRejectionPolicy(
-            String key,
-            String defaultValue
-    ) {
+    private static String readRejectionPolicy(String key, String defaultValue) {
         try {
             String value = getConfig().get(key);
-
-            if (value == null || value.isBlank()) {
-                return defaultValue;
-            }
-
-            String normalized =
-                    value.trim().toUpperCase(Locale.ROOT);
+            if (value.isBlank()) return defaultValue;
+            String normalized = value.trim().toUpperCase(Locale.ROOT);
 
             return switch (normalized) {
                 case "ABORT", "DISCARD", "DISCARD_OLDEST", "CALLER_RUNS" -> normalized;
                 default -> {
-                    logger.warn(
-                            "Unknown rejection policy {}, using {}",
-                            value,
-                            defaultValue
-                    );
+                    logger.warn("Unknown rejection policy {}, using {}", value, defaultValue);
                     yield defaultValue;
                 }
             };

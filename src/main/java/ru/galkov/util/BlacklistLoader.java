@@ -615,22 +615,14 @@ public final class BlacklistLoader implements AutoCloseable {
         private int rulesAccepted;
         private int invalidRules;
         private int truncatedSources;
-
         private boolean totalLimitReached;
-
         private long sourceLoadTimeMillis;
         private long maxSourceDurationMillis;
         private long maxMemoryMb;
         private long buildDurationMillis;
-
-        private final List<String> failedSources =
-                new ArrayList<>();
-
-        private final List<String> truncatedSourceDetails =
-                new ArrayList<>();
-
-        private final List<SourceLogStats> sourceResults =
-                new ArrayList<>();
+        private final List<String> failedSources = new ArrayList<>();
+        private final List<String> truncatedSourceDetails = new ArrayList<>();
+        private final List<SourceLogStats> sourceResults = new ArrayList<>();
 
         private LoadLogStats(int sourcesTotal) {
             this.sourcesTotal = sourcesTotal;
@@ -657,35 +649,19 @@ public final class BlacklistLoader implements AutoCloseable {
 
     private void startReloadScheduler() {
         if (!getConfig().getBoolean("blacklist.reload.enabled")) {
-            logger.info(
-                    LocaleUtil.getString(
-                            "blacklist_reload_disabled"
-                    )
-            );
+            logger.info(LocaleUtil.getString("blacklist_reload_disabled"));
             return;
         }
 
-        int interval =
-                getConfig().getInt(
-                        "blacklist.reload.interval-seconds"
-                );
+        int interval = getConfig().getInt("blacklist.reload.interval-seconds");
 
         if (interval <= 0) {
-            logger.warn(
-                    LocaleUtil.getString(
-                            "blacklist_reload_invalid_interval"
-                    ),
-                    interval
-            );
+            logger.warn(LocaleUtil.getString("blacklist_reload_invalid_interval"), interval);
             return;
         }
 
         synchronized (reloadLock) {
-            if (reloadExecutor != null
-                    && !reloadExecutor.isShutdown()) {
-                return;
-            }
-
+            if (reloadExecutor != null && !reloadExecutor.isShutdown()) {return;}
             ScheduledExecutorService newExecutor =
                     Executors.newSingleThreadScheduledExecutor(r -> {
                         Thread thread = new Thread(
@@ -697,20 +673,8 @@ public final class BlacklistLoader implements AutoCloseable {
                     });
 
             reloadExecutor = newExecutor;
-
-            newExecutor.scheduleWithFixedDelay(
-                    this::reloadNow,
-                    interval,
-                    interval,
-                    TimeUnit.SECONDS
-            );
-
-            logger.info(
-                    LocaleUtil.getString(
-                            "blacklist_reload_enabled"
-                    ),
-                    interval
-            );
+            newExecutor.scheduleWithFixedDelay(this::reloadNow, interval, interval, TimeUnit.SECONDS);
+            logger.info(LocaleUtil.getString("blacklist_reload_enabled"), interval);
         }
     }
 
@@ -723,19 +687,12 @@ public final class BlacklistLoader implements AutoCloseable {
             reloadExecutor = null;
         }
 
-        if (executor == null) {
-            return;
-        }
-
+        if (executor == null) return;
         executor.shutdown();
 
         try {
-            if (!executor.awaitTermination(
-                    5,
-                    TimeUnit.SECONDS
-            )) {
-                executor.shutdownNow();
-            }
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow();
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             executor.shutdownNow();
@@ -744,9 +701,7 @@ public final class BlacklistLoader implements AutoCloseable {
         logger.info("Blacklist reload scheduler stopped");
     }
 
-    private static boolean isSubtreeRule(
-            BlacklistSource source
-    ) {
+    private static boolean isSubtreeRule(BlacklistSource source) {
         return source instanceof RknBlacklistSource;
     }
 }

@@ -155,7 +155,7 @@ public abstract class LlmAnomalyDetector<T extends AbstractQueryRecord> {
         String safePrompt = sanitizePrompt(prompt);
         if (safePrompt == null) return null;
         if (!tryAcquireRateLimit()) {
-            logger.warn(LocaleUtil.getString("anomaly_detector_rate_limit_exceeded"));
+            logger.debug(LocaleUtil.getString("anomaly_detector_rate_limit_exceeded"));
             return null;
         }
         if (!tryCircuitBreaker()) {

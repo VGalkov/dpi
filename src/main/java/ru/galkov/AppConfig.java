@@ -21,9 +21,7 @@ public final class AppConfig {
     private static final int BOOLEAN_CACHE_MAX = 256;
     private static final int LIST_CACHE_MAX = 128;
     private static final int SHORT_CACHE_MAX = 128;
-
     private final Properties props;
-
     private final Map<String, Integer> intCache = new ConcurrentHashMap<>(256);
     private final Map<String, Long> longCache = new ConcurrentHashMap<>(256);
     private final Map<String, Boolean> booleanCache = new ConcurrentHashMap<>(256);
@@ -32,9 +30,7 @@ public final class AppConfig {
 
     private AppConfig(String path) throws IOException {
         this.props = load(path);
-        if (this.props.isEmpty()) {
-            throw new IOException("Config is null or empty after load");
-        }
+        if (this.props.isEmpty()) throw new IOException("Config is null or empty after load");
         validateConfig();
     }
 
@@ -60,20 +56,14 @@ public final class AppConfig {
 
         try {
             if (configFile.exists() && configFile.isFile()) {
-                logger.info(
-                        LocaleUtil.getString("config_found_disk"),
-                        configFile.getAbsolutePath()
-                );
+                logger.info(LocaleUtil.getString("config_found_disk"), configFile.getAbsolutePath());
                 try (FileInputStream fis = new FileInputStream(configFile)) {
                     raw.load(fis);
                     loadedFromFile = true;
                 }
             }
         } catch (IOException e) {
-            logger.warn(
-                    LocaleUtil.getString("config_load_error"),
-                    e.getMessage()
-            );
+            logger.warn(LocaleUtil.getString("config_load_error"), e.getMessage());
             loadedFromFile = false;
         }
 
@@ -86,26 +76,19 @@ public final class AppConfig {
                     raw.load(is);
                 }
             } else {
-                throw new IllegalStateException(
-                        LocaleUtil.getString("config_critical_not_found")
-                );
+                throw new IllegalStateException(LocaleUtil.getString("config_critical_not_found"));
             }
         }
 
-        if (raw.isEmpty()) {
-            throw new IOException(LocaleUtil.getString("config_empty"));
-        }
+        if (raw.isEmpty()) throw new IOException(LocaleUtil.getString("config_empty"));
 
         Properties expanded = new Properties();
         for (String key : raw.stringPropertyNames()) {
             String value = raw.getProperty(key);
-            if (value != null) {
-                expanded.setProperty(key, resolveValue(value.trim(), raw));
-            }
+            if (value != null) expanded.setProperty(key, resolveValue(value.trim(), raw));
         }
-        if (expanded.isEmpty()) {
-            throw new IOException("Config is empty after expansion");
-        }
+        if (expanded.isEmpty()) throw new IOException("Config is empty after expansion");
+
         return expanded;
     }
 
@@ -179,9 +162,7 @@ public final class AppConfig {
 
     private void validateSecuritySettings() {
         String dnsLlmUrl = getOptional("dns.anomaly-detector.llm-studio.url");
-        if (dnsLlmUrl != null
-                && (dnsLlmUrl.contains("localhost")
-                || dnsLlmUrl.contains("127.0.0.1"))) {
+        if (dnsLlmUrl != null && (dnsLlmUrl.contains("localhost") || dnsLlmUrl.contains("127.0.0.1"))) {
             logger.warn(
                     "⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: {}. "
                             + "Это может быть опасно в production",
@@ -189,9 +170,7 @@ public final class AppConfig {
         }
 
         String httpLlmUrl = getOptional("http.anomaly-detector.llm-studio.url");
-        if (httpLlmUrl != null
-                && (httpLlmUrl.contains("localhost")
-                || httpLlmUrl.contains("127.0.0.1"))) {
+        if (httpLlmUrl != null && (httpLlmUrl.contains("localhost") || httpLlmUrl.contains("127.0.0.1"))) {
             logger.warn(
                     "⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: {}. "
                             + "Это может быть опасно в production",
@@ -256,14 +235,12 @@ public final class AppConfig {
         try {
             int value = getInt(key);
             if (value < min || value > maxFromOtherKey) {
-                logger.warn(
-                        LocaleUtil.getString(errorKey, key, value, min, maxFromOtherKey));
+                logger.warn(LocaleUtil.getString(errorKey, key, value, min, maxFromOtherKey));
                 props.setProperty(key, String.valueOf(defaultValue));
                 clearCaches();
             }
         } catch (Exception e) {
-            logger.warn(
-                    LocaleUtil.getString(errorKey, key, "N/A", min, maxFromOtherKey));
+            logger.warn(LocaleUtil.getString(errorKey, key, "N/A", min, maxFromOtherKey));
             props.setProperty(key, String.valueOf(defaultValue));
             clearCaches();
         }
@@ -313,41 +290,27 @@ public final class AppConfig {
     }
 
     private String resolveValue(String value, Properties raw, Set<String> resolvingKeys) {
-        if (value == null || raw == null) {
-            return value;
-        }
+        if (value == null || raw == null) return value;
 
         int start = value.indexOf("${");
-        if (start < 0) {
-            return value;
-        }
+        if (start < 0) return value;
 
         int end = value.indexOf('}', start);
-        if (end < 0) {
-            throw new IllegalArgumentException(
-                    LocaleUtil.getString("unpaired_placeholder", value));
-        }
-
+        if (end < 0) throw new IllegalArgumentException(LocaleUtil.getString("unpaired_placeholder", value));
         String keyInside = value.substring(start + 2, end).trim();
 
-        if (!resolvingKeys.add(keyInside)) {
-            throw new IllegalStateException(
-                    "Cyclic config reference: " + resolvingKeys + " -> " + keyInside);
-        }
+        if (!resolvingKeys.add(keyInside))
+            throw new IllegalStateException("Cyclic config reference: " + resolvingKeys + " -> " + keyInside);
+
 
         try {
             String replacement = raw.getProperty(keyInside);
             if (replacement == null) {
-                throw new IllegalStateException(
-                        LocaleUtil.getString("value_not_found_for_key", keyInside));
+                throw new IllegalStateException(LocaleUtil.getString("value_not_found_for_key", keyInside));
             }
 
             String resolvedReplacement = resolveValue(replacement, raw, resolvingKeys);
-
-            String result = value.substring(0, start)
-                    + resolvedReplacement
-                    + value.substring(end + 1);
-
+            String result = value.substring(0, start) + resolvedReplacement + value.substring(end + 1);
             return resolveValue(result, raw, resolvingKeys);
         } finally {
             resolvingKeys.remove(keyInside);
@@ -363,28 +326,22 @@ public final class AppConfig {
     }
 
     public String get(String key) {
-        if (props == null) {
-            throw new IllegalStateException("Properties not loaded");
-        }
+        if (props == null) throw new IllegalStateException("Properties not loaded");
+
         String val = props.getProperty(key);
-        if (val == null) {
-            throw new IllegalStateException(LocaleUtil.getString("key_not_found", key));
-        }
+        if (val == null) throw new IllegalStateException(LocaleUtil.getString("key_not_found", key));
         return val;
     }
 
     public String getOptional(String key) {
-        if (props == null) {
-            return null;
-        }
+        if (props == null) return null;
         return props.getProperty(key);
     }
 
     public List<String> getList(String key) {
         List<String> cached = listCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
+        if (cached != null) return cached;
+
 
         String raw = getOptional(key);
         if (raw == null || raw.trim().isEmpty()) {
@@ -396,87 +353,50 @@ public final class AppConfig {
         Set<String> seen = new LinkedHashSet<>();
         for (String part : raw.split("\\s*,\\s*")) {
             String value = part.trim();
-            if (!value.isEmpty()) {
-                seen.add(value);
-            }
+            if (!value.isEmpty()) seen.add(value);
+
         }
         List<String> result = List.copyOf(seen);
 
-        if (listCache.size() < LIST_CACHE_MAX) {
-            listCache.put(key, result);
-        }
+        if (listCache.size() < LIST_CACHE_MAX) listCache.put(key, result);
+
         return result;
     }
 
     public int getInt(String key) {
         Integer cached = intCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
+        if (cached != null) return cached;
 
         String raw = get(key);
         String cleaned = trimComment(raw);
         int value = Integer.parseInt(cleaned);
-
-        if (intCache.size() < INT_CACHE_MAX) {
-            intCache.put(key, value);
-        }
+        if (intCache.size() < INT_CACHE_MAX) intCache.put(key, value);
         return value;
     }
 
     public long getLong(String key) {
         Long cached = longCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
-
+        if (cached != null) return cached;
         String raw = get(key);
         String cleaned = trimComment(raw);
         long value = Long.parseLong(cleaned);
-
-        if (longCache.size() < LONG_CACHE_MAX) {
-            longCache.put(key, value);
-        }
+        if (longCache.size() < LONG_CACHE_MAX) longCache.put(key, value);
         return value;
     }
 
     public boolean getBoolean(String key) {
         Boolean cached = booleanCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
-
+        if (cached != null) return cached;
         boolean value = Boolean.parseBoolean(get(key));
-        if (booleanCache.size() < BOOLEAN_CACHE_MAX) {
-            booleanCache.put(key, value);
-        }
-        return value;
-    }
-
-    public short getShort(String key) {
-        Short cached = shortCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
-
-        String raw = get(key);
-        String cleaned = trimComment(raw);
-        short value = Short.parseShort(cleaned);
-
-        if (shortCache.size() < SHORT_CACHE_MAX) {
-            shortCache.put(key, value);
-        }
+        if (booleanCache.size() < BOOLEAN_CACHE_MAX) booleanCache.put(key, value);
         return value;
     }
 
     private static String trimComment(String value) {
-        if (value == null) {
-            return null;
-        }
+        if (value == null) return null;
         int idx = value.indexOf('#');
-        if (idx >= 0) {
-            value = value.substring(0, idx);
-        }
+        if (idx >= 0) value = value.substring(0, idx);
+
         return value.trim();
     }
 

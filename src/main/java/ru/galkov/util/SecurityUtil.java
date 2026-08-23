@@ -27,9 +27,9 @@ public final class SecurityUtil {
         }
         byte[] bytes = address.getAddress();
         if (bytes.length == 4) return isBlockedAddressUncheckedIpv4(bytes);
-        if (address instanceof Inet6Address) {
+        if (address instanceof Inet6Address)
             return isUniqueLocalIpv6(bytes) || isIpv4MappedBlockedAddress(bytes);
-        }
+
         return false;
     }
 
