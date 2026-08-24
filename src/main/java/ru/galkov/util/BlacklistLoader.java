@@ -701,7 +701,9 @@ public final class BlacklistLoader implements AutoCloseable {
         logger.info("Blacklist reload scheduler stopped");
     }
 
+
     private static boolean isSubtreeRule(BlacklistSource source) {
-        return source instanceof RknBlacklistSource;
+        return source instanceof ru.galkov.blacklist_source.RknBlacklistSource ||
+                source instanceof ru.galkov.blacklist_source.RknRemoteBlacklistSource;
     }
 }

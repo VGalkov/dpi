@@ -2,10 +2,7 @@ package ru.galkov;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.blacklist_source.AdguardBlacklistSource;
-import ru.galkov.blacklist_source.BlacklistSource;
-import ru.galkov.blacklist_source.FileBlacklistSource;
-import ru.galkov.blacklist_source.RknBlacklistSource;
+import ru.galkov.blacklist_source.*;
 import ru.galkov.llm.DnsAnomalyDetector;
 import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.llm.LlmAnomalyDetector;
@@ -18,6 +15,7 @@ import ru.galkov.util.LocaleUtil;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -113,15 +111,87 @@ public final class Main {
     }
 
     private static void addRknSource(List<BlacklistSource> sources) {
-        if (config == null) { logger.error(LocaleUtil.getString("main_config_null")); return; }
+        if (config == null) {
+            logger.error(LocaleUtil.getString("main_config_null"));
+            return;
+        }
         try {
-            if (!config.getBoolean("blacklist.rkn.enabled")) return;
-            Path xmlPath = Path.of(config.get("blacklist.rkn.xml-file"));
-            RknBlacklistSource source = new RknBlacklistSource(xmlPath);
-            sources.add(source);
-            logger.info(LocaleUtil.getString("source_rkn_added"), source);
-        } catch (Exception e) { logger.error(LocaleUtil.getString("main_source_add_error"), "RKN", e); }
+            // --- 1. ЛОКАЛЬНЫЙ ИСТОЧНИК (RknBlacklistSource) ---
+            boolean isLocalEnabled = config.getBoolean("blacklist.rkn.local.enabled");
+            String xmlPathStr = config.get("blacklist.rkn.xml-file");
+
+            if (isLocalEnabled) {
+                if (!xmlPathStr.isBlank()) {
+                    Path xmlPath = Path.of(xmlPathStr);
+                    if (java.nio.file.Files.exists(xmlPath)) {
+                        RknBlacklistSource localSource = new RknBlacklistSource(xmlPath);
+                        sources.add(localSource);
+                        logger.info(LocaleUtil.getString("source_rkn_added"), localSource);
+                    } else {
+                        logger.warn(LocaleUtil.getString("rkn_local_file_not_found"), xmlPath);
+                    }
+                } else {
+                    logger.warn("RKN local path is not configured, but local.enabled is true.");
+                }
+            } else {
+                logger.debug(LocaleUtil.getString("rkn_local_disabled_in_config"));
+            }
+
+            // --- 2. УДАЛЕННЫЙ ИСТОЧНИК (RknRemoteBlacklistSource) ---
+            boolean isRemoteEnabled = config.getBoolean("blacklist.rkn.remote.enabled");
+
+            if (isRemoteEnabled) {
+                logger.info("Initializing RKN Remote source...");
+
+                String operatorName = config.get("blacklist.rkn.operator-name");
+                String inn = config.get("blacklist.rkn.inn");
+
+                // Получаем Base64 данные (могут быть null)
+                String reqBase64 = config.get("blacklist.rkn.request-base64");
+                String sigBase64 = config.get("blacklist.rkn.signature-base64");
+                String emchdBase64 = config.get("blacklist.rkn.emchd-base64");
+                String emchdName = config.get("blacklist.rkn.emchd-filename");
+                String emchdSigBase64 = config.get("blacklist.rkn.emchd-signature-base64");
+
+                byte[] requestBytes = decodeSafe(reqBase64);
+                byte[] signatureBytes = decodeSafe(sigBase64);
+                byte[] emchdBytes = decodeSafe(emchdBase64);
+                byte[] emchdSigBytes = decodeSafe(emchdSigBase64);
+
+                RknRemoteBlacklistSource remoteSource = new RknRemoteBlacklistSource(
+                        operatorName,
+                        inn,
+                        requestBytes,
+                        signatureBytes,
+                        emchdBytes,
+                        emchdName,
+                        emchdSigBytes
+                );
+
+                sources.add(remoteSource);
+                logger.info(LocaleUtil.getString("source_rkn_remote_added"), remoteSource);
+            } else {
+                logger.info(LocaleUtil.getString("rkn_remote_disabled"));
+            }
+
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("main_source_add_error"), "RKN_COMPOSITE", e);
+        }
     }
+
+    // Вспомогательный метод для безопасного декодирования Base64
+    private static byte[] decodeSafe(String base64String) {
+        if (base64String == null || base64String.isBlank()) {
+            return null;
+        }
+        try {
+            return Base64.getDecoder().decode(base64String);
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid Base64 data provided in config for RKN remote source.", e);
+            return null;
+        }
+    }
+
 
     private static void registerShutdownHook() {
         Runtime.getRuntime().addShutdownHook(new Thread(Main::stopApplication, "Dpi-Shutdown-Hook"));
