@@ -1,23 +1,63 @@
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+
+    <property name="LOG_DIR" value="logs"/>
+    <property name="LOG_FILE" value="${LOG_DIR}/app.log"/>
+    <property name="MAX_HISTORY" value="7"/>
+    <property name="TOTAL_SIZE_CAP" value="2GB"/>
+
+    <appender name="CONSOLE"
+              class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%.-20thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
         </encoder>
     </appender>
 
-    <root level="info">
-        <appender-ref ref="STDOUT"/>
+    <appender name="ROLLING_FILE"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+
+        <file>${LOG_FILE}</file>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/app.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%.-20thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="ASYNC_FILE"
+              class="ch.qos.logback.classic.AsyncAppender">
+
+        <!-- Ограниченная очередь не даёт логированию бесконечно расти в памяти. -->
+        <queueSize>8192</queueSize>
+
+        <!-- Не блокировать сетевые worker threads при заполнении очереди. -->
+        <neverBlock>true</neverBlock>
+
+        <!-- Не отбрасывать WARN и ERROR при перегрузке. -->
+        <discardingThreshold>0</discardingThreshold>
+
+        <appender-ref ref="ROLLING_FILE"/>
+    </appender>
+
+    <logger name="net.schmizz.sshj" level="ERROR"/>
+    <logger name="org.pcap4j" level="WARN"/>
+    <logger name="io.netty" level="WARN"/>
+    <logger name="org.xbill.DNS" level="WARN"/>
+
+    <!-- Рабочий режим: подробности подчиняются root level. -->
+    <logger name="ru.galkov" level="INFO"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
     </root>
 
-    <!-- Отключаем логи sshj полностью -->
-    <logger name="net.schmizz.sshj" level="ERROR"/>
-    <logger name="ru.galkov.servers" level="DEBUG"/>
-
-    <!-- <logger name="java.util.logging.ConsoleHandler.level" level="ALL"/>
-    <logger name="com.sun.net.httpserver.level" level="FINEST"/> -->
-
-
-    <!-- Или уменьшаем до уровня ERROR (будут только ошибки) -->
-    <!-- <logger name="net.schmizz.sshj" level="ERROR"/> -->
 </configuration>
-
