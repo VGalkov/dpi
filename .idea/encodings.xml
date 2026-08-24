@@ -3,6 +3,7 @@
   <component name="Encoding" native2AsciiForPropertiesFiles="true" addBOMForNewFiles="with BOM under Windows, with no BOM otherwise">
     <file url="file://$PROJECT_DIR$/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/blacklist_source/AbstractBlacklistSource.java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/blacklist_source/RknRemoteBlacklistSource.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/AbstractAnomalyDetector.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/AbstractQueryRecord.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/AnalysisResult.java" charset="UTF-8" />
