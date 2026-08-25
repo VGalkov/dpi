@@ -100,19 +100,19 @@ public final class LlmClient {
                     .header("Accept", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8));
 
-            if (!apiKey.isBlank()) {
-                requestBuilder.header("Authorization", "Bearer " + apiKey);
-            }
+            if (!apiKey.isBlank()) requestBuilder.header("Authorization", "Bearer " + apiKey);
 
             HttpResponse<String> response = httpClient.send(
                     requestBuilder.build(),
-                    responseInfo -> HttpResponse.BodySubscribers.limiting(
-                            HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8),
-                            MAX_RESPONSE_BYTES
-                    )
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
             );
 
             String responseBody = response.body();
+            if (responseBody != null && responseBody.getBytes(StandardCharsets.UTF_8).length > MAX_RESPONSE_BYTES) {
+                logger.warn("LLM response exceeded limit ({} bytes)", MAX_RESPONSE_BYTES);
+                return null;
+            }
+
 
             if (response.statusCode() != 200) {
                 logger.warn("LLM API returned error status={}: {}", response.statusCode(), llmUrl);
@@ -188,15 +188,19 @@ public final class LlmClient {
             JsonNode reasonNode = resultNode.get("reason");
             JsonNode actionsNode = resultNode.get("recommendedActions");
 
-            if (suspiciousNode == null && resultNode.has("__isSuspicious__")) suspiciousNode = resultNode.get("__isSuspicious__");
-            if (suspiciousNode == null && resultNode.has("is_suspicious")) suspiciousNode = resultNode.get("is_suspicious");
+            if (suspiciousNode == null && resultNode.has("__isSuspicious__"))
+                suspiciousNode = resultNode.get("__isSuspicious__");
+            if (suspiciousNode == null && resultNode.has("is_suspicious"))
+                suspiciousNode = resultNode.get("is_suspicious");
 
-            if (confidenceNode == null && resultNode.has("_confidence_")) confidenceNode = resultNode.get("_confidence_");
+            if (confidenceNode == null && resultNode.has("_confidence_"))
+                confidenceNode = resultNode.get("_confidence_");
             if (confidenceNode == null && resultNode.has("conf")) confidenceNode = resultNode.get("conf");
 
             if (reasonNode == null && resultNode.has("_reason_")) reasonNode = resultNode.get("_reason_");
 
-            if (actionsNode == null && resultNode.has("_recommendedActions_")) actionsNode = resultNode.get("_recommendedActions_");
+            if (actionsNode == null && resultNode.has("_recommendedActions_"))
+                actionsNode = resultNode.get("_recommendedActions_");
             if (actionsNode == null && resultNode.has("action")) actionsNode = resultNode.get("action");
 
             if (suspiciousNode == null || confidenceNode == null) {
@@ -215,9 +219,8 @@ public final class LlmClient {
             boolean isSuspicious = suspiciousNode.asBoolean();
             double confidence = confidenceNode.asDouble();
 
-            if (!Double.isFinite(confidence)) {
-                confidence = 0.0;
-            } else if (confidence < 0.0) confidence = 0.0;
+            if (!Double.isFinite(confidence)) confidence = 0.0;
+            else if (confidence < 0.0) confidence = 0.0;
             else if (confidence > 1.0) confidence = 1.0;
 
             String reason = "";
@@ -227,9 +230,8 @@ public final class LlmClient {
             List<String> actions = new ArrayList<>();
             if (actionsNode != null) {
                 if (actionsNode.isArray()) {
-                    for (JsonNode item : actionsNode) {
-                        if (item.isTextual()) actions.add(item.asText());
-                    }
+                    for (JsonNode item : actionsNode) if (item.isTextual()) actions.add(item.asText());
+
                 } else if (actionsNode.isTextual()) {
                     String singleAction = actionsNode.asText();
                     logger.info("Model returned string in 'recommendedActions' instead of array for domain={}. Value: '{}'. Converting to list.", domain, singleAction);
@@ -239,9 +241,7 @@ public final class LlmClient {
 
             if (actions.isEmpty()) {
                 JsonNode singleActionNode = resultNode.get("action");
-                if (singleActionNode != null && singleActionNode.isTextual()) {
-                    actions.add(singleActionNode.asText());
-                }
+                if (singleActionNode != null && singleActionNode.isTextual()) actions.add(singleActionNode.asText());
             }
 
             if (actions.isEmpty()) {
@@ -292,7 +292,8 @@ public final class LlmClient {
                         try {
                             objectMapper.readTree(candidate);
                             return candidate;
-                        } catch (IOException ignore) {}
+                        } catch (IOException ignore) {
+                        }
                     }
                 }
             }

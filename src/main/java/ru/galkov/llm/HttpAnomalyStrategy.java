@@ -18,7 +18,7 @@ public class HttpAnomalyStrategy implements AnomalyStrategy<HttpQueryRecord> {
         this.configPrefix = configPrefix;
         this.inspectBody = inspectBody;
         this.bodyPreviewLength = bodyPreviewLength;
-        this.promptTemplate = loadPromptTemplate("prompts/http_anomaly_prompt.txt");
+        this.promptTemplate = loadPromptTemplate();
     }
 
     @Override
@@ -26,8 +26,7 @@ public class HttpAnomalyStrategy implements AnomalyStrategy<HttpQueryRecord> {
         String bodyPreview = "";
         if (inspectBody && !record.getBody().isEmpty()) {
             bodyPreview = record.getBody();
-            if (bodyPreview.length() > bodyPreviewLength)
-                bodyPreview = bodyPreview.substring(0, bodyPreviewLength);
+            if (bodyPreview.length() > bodyPreviewLength) bodyPreview = bodyPreview.substring(0, bodyPreviewLength);
         }
         if (promptTemplate == null || promptTemplate.isBlank()) return "";
         return promptTemplate
@@ -66,15 +65,15 @@ public class HttpAnomalyStrategy implements AnomalyStrategy<HttpQueryRecord> {
         return sanitized.isEmpty() ? "unknown" : sanitized;
     }
 
-    private String loadPromptTemplate(String resourceName) {
-        try (var input = getClass().getClassLoader().getResourceAsStream(resourceName)) {
+    private String loadPromptTemplate() {
+        try (var input = getClass().getClassLoader().getResourceAsStream("prompts/http_anomaly_prompt.txt")) {
             if (input == null) {
-                logger.warn("Prompt template not found: {}", resourceName);
+                logger.warn("Prompt template not found: {}", "prompts/http_anomaly_prompt.txt");
                 return "";
             }
             return new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
-            logger.error("Prompt template loading failed: {}", resourceName, e);
+            logger.error("Prompt template loading failed: {}", "prompts/http_anomaly_prompt.txt", e);
             return "";
         }
     }

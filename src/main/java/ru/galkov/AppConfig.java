@@ -20,13 +20,11 @@ public final class AppConfig {
     private static final int LONG_CACHE_MAX = 512;
     private static final int BOOLEAN_CACHE_MAX = 256;
     private static final int LIST_CACHE_MAX = 128;
-    private static final int SHORT_CACHE_MAX = 128;
     private final Properties props;
     private final Map<String, Integer> intCache = new ConcurrentHashMap<>(256);
     private final Map<String, Long> longCache = new ConcurrentHashMap<>(256);
     private final Map<String, Boolean> booleanCache = new ConcurrentHashMap<>(256);
     private final Map<String, List<String>> listCache = new ConcurrentHashMap<>(64);
-    private final Map<String, Short> shortCache = new ConcurrentHashMap<>(64);
 
     private AppConfig(String path) throws IOException {
         this.props = load(path);
@@ -150,13 +148,11 @@ public final class AppConfig {
                 "config_validation_http_ttl_invalid");
 
         validateIntRange(
-                "blacklist.reload.interval-seconds", 300, 86400, 36000,
+                "blacklist.reload.interval-seconds", 20, 259200, 86400, //259200 - раз в 3е суток. 86400 - раз в сутки
                 "config_validation_blacklist_reload_invalid");
 
         validateSecuritySettings();
-
         clearCaches();
-
         logger.info(LocaleUtil.getString("config_validation_completed"));
     }
 
@@ -322,12 +318,10 @@ public final class AppConfig {
         longCache.clear();
         booleanCache.clear();
         listCache.clear();
-        shortCache.clear();
     }
 
     public String get(String key) {
         if (props == null) throw new IllegalStateException("Properties not loaded");
-
         String val = props.getProperty(key);
         if (val == null) throw new IllegalStateException(LocaleUtil.getString("key_not_found", key));
         return val;
@@ -341,7 +335,6 @@ public final class AppConfig {
     public List<String> getList(String key) {
         List<String> cached = listCache.get(key);
         if (cached != null) return cached;
-
 
         String raw = getOptional(key);
         if (raw == null || raw.trim().isEmpty()) {
@@ -357,9 +350,7 @@ public final class AppConfig {
 
         }
         List<String> result = List.copyOf(seen);
-
         if (listCache.size() < LIST_CACHE_MAX) listCache.put(key, result);
-
         return result;
     }
 

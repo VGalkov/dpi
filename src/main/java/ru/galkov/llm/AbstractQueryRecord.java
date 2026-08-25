@@ -54,11 +54,7 @@ public abstract class AbstractQueryRecord {
         if (value == null) return null;
         String result = value.trim();
         if (toLowerCase) result = result.toLowerCase(Locale.ROOT);
-        if (removeTrailingDots) {
-            while (result.endsWith(".")) {
-                result = result.substring(0, result.length() - 1);
-            }
-        }
+        if (removeTrailingDots) while (result.endsWith(".")) result = result.substring(0, result.length() - 1);
         return result.isEmpty() ? null : result;
     }
 
@@ -103,9 +99,7 @@ public abstract class AbstractQueryRecord {
     public static double calculateDigitRatio(String value) {
         if (value == null || value.isEmpty()) return 0.0;
         int count = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (Character.isDigit(value.charAt(i))) count++;
-        }
+        for (int i = 0; i < value.length(); i++) if (Character.isDigit(value.charAt(i))) count++;
         return (double) count / value.length();
     }
 
@@ -116,9 +110,7 @@ public abstract class AbstractQueryRecord {
     public static double calculateCharRatio(String value, char target) {
         if (value == null || value.isEmpty()) return 0.0;
         int count = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == target) count++;
-        }
+        for (int i = 0; i < value.length(); i++) if (value.charAt(i) == target) count++;
         return (double) count / value.length();
     }
 
@@ -151,9 +143,7 @@ public abstract class AbstractQueryRecord {
     public static int countDots(String value) {
         if (value == null || value.isEmpty()) return 0;
         int count = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (value.charAt(i) == '.') count++;
-        }
+        for (int i = 0; i < value.length(); i++) if (value.charAt(i) == '.') count++;
         return count;
     }
 
@@ -217,17 +207,13 @@ public abstract class AbstractQueryRecord {
     public static boolean isLikeEncoding(String value, java.util.function.Predicate<Character> validator, int minLength) {
         if (value == null || value.length() < minLength) return false;
         int valid = 0;
-        for (int i = 0; i < value.length(); i++) {
-            if (validator.test(value.charAt(i))) valid++;
-        }
+        for (int i = 0; i < value.length(); i++) if (validator.test(value.charAt(i))) valid++;
         return (double) valid / value.length() >= 0.95;
     }
 
     public static boolean containsPunycode(String value) {
         if (value == null || value.isEmpty()) return false;
-        for (String label : value.split("\\.")) {
-            if (label.startsWith("xn--")) return true;
-        }
+        for (String label : value.split("\\.")) if (label.startsWith("xn--")) return true;
         return false;
     }
 

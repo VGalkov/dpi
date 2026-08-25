@@ -13,7 +13,7 @@ public class DnsAnomalyStrategy implements AnomalyStrategy<DnsQueryRecord> {
 
     public DnsAnomalyStrategy(String configPrefix) {
         this.configPrefix = configPrefix;
-        this.promptTemplate = loadPromptTemplate("prompts/dns_anomaly_prompt.txt");
+        this.promptTemplate = loadPromptTemplate();
     }
 
     @Override
@@ -68,15 +68,15 @@ public class DnsAnomalyStrategy implements AnomalyStrategy<DnsQueryRecord> {
 
     private String formatDouble(double value) { return String.format("%.2f", value); }
 
-    private String loadPromptTemplate(String resourceName) {
-        try (var input = getClass().getClassLoader().getResourceAsStream(resourceName)) {
+    private String loadPromptTemplate() {
+        try (var input = getClass().getClassLoader().getResourceAsStream("prompts/dns_anomaly_prompt.txt")) {
             if (input == null) {
-                logger.warn("Prompt template not found: {}", resourceName);
+                logger.warn("Prompt template not found: {}", "prompts/dns_anomaly_prompt.txt");
                 return "";
             }
             return new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
-            logger.error("Prompt template loading failed: {}", resourceName, e);
+            logger.error("Prompt template loading failed: {}", "prompts/dns_anomaly_prompt.txt", e);
             return "";
         }
     }

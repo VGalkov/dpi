@@ -15,14 +15,11 @@ import ru.galkov.servers.WorkerPool;
 import ru.galkov.util.BlacklistLoader;
 import ru.galkov.util.LocaleUtil;
 
-import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
 public final class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
     private static volatile DnsServer dnsServer;
@@ -38,18 +35,29 @@ public final class Main {
     public static void main(String[] args) {
         try {
             config = AppConfig.getInstance();
-            if (config == null) { logger.error(LocaleUtil.getString("main_config_null")); return; }
+            if (config == null) {
+                logger.error(LocaleUtil.getString("main_config_null"));
+                return;
+            }
+
             List<BlacklistSource> sources = createBlacklistSources();
-            if (sources.isEmpty()) { logger.error("No blacklist sources configured"); return; }
+            if (sources.isEmpty()) {
+                logger.error(LocaleUtil.getString("no_blacklist_sources"));
+                return;
+            }
+
             blacklist = new BlacklistLoader(sources);
             blacklist.load();
+
             dnsAnomalyDetector = new DnsAnomalyDetector();
             httpAnomalyDetector = new HttpAnomalyDetector();
             LlmAnomalyDetector.initBlacklist(blacklist);
+
             registerShutdownHook();
             startDetectors();
             startProxyServer();
             startDnsServer();
+
             logger.info(LocaleUtil.getString("system_started"));
         } catch (Exception e) {
             logger.error(LocaleUtil.getString("system_not_started"), e);
@@ -76,18 +84,43 @@ public final class Main {
     }
 
     private static void addLocalFileSource(List<BlacklistSource> sources) {
-        if (config == null) { logger.error(LocaleUtil.getString("main_config_null")); return; }
+        if (config == null) {
+            logger.error(LocaleUtil.getString("main_config_null"));
+            return;
+        }
+
+        if (!config.getBoolean("blacklist.local.enabled")) {
+            logger.info(LocaleUtil.getString("local_file_disabled"));
+            return;
+        }
+
+        String pathStr = config.get("blacklist.local.file");
+
+        if (pathStr.isBlank()) {
+            logger.error(LocaleUtil.getString("local_file_path_not_set"));
+            return;
+        }
+
+        Path path = Path.of(pathStr);
+
+        if (!validateAndLogFile("blacklist.local.file", "blacklist.txt", path)) {
+            return;
+        }
+
         try {
-            if (!config.getBoolean("blacklist.local.enabled")) return;
-            String filePath = config.get("blacklist.local.file");
-            FileBlacklistSource source = new FileBlacklistSource(new File(filePath));
+            FileBlacklistSource source = new FileBlacklistSource(path.toFile());
             sources.add(source);
             logger.info(LocaleUtil.getString("source_local_file_added"), source);
-        } catch (Exception e) { logger.error(LocaleUtil.getString("main_source_add_error"), "LocalFile", e); }
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("main_source_add_error"), "LocalFile", e);
+        }
     }
 
     private static void addAdguardSource(List<BlacklistSource> sources) {
-        if (config == null) { logger.error(LocaleUtil.getString("main_config_null")); return; }
+        if (config == null) {
+            logger.error(LocaleUtil.getString("main_config_null"));
+            return;
+        }
         try {
             if (!config.getBoolean("blacklist.adguard.enabled")) return;
             AdguardBlacklistSource source = new AdguardBlacklistSource(
@@ -96,11 +129,16 @@ public final class Main {
                     config.getInt("blacklist.adguard.read-timeout"));
             sources.add(source);
             logger.info(LocaleUtil.getString("source_adguard_added"), source);
-        } catch (Exception e) { logger.error(LocaleUtil.getString("main_source_add_error"), "AdGuard", e); }
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("main_source_add_error"), "AdGuard", e);
+        }
     }
 
     private static void addMvpsSource(List<BlacklistSource> sources) {
-        if (config == null) { logger.error(LocaleUtil.getString("main_config_null")); return; }
+        if (config == null) {
+            logger.error(LocaleUtil.getString("main_config_null"));
+            return;
+        }
         try {
             if (!config.getBoolean("blacklist.mvps_hosts.enabled")) return;
             AdguardBlacklistSource source = new AdguardBlacklistSource(
@@ -109,18 +147,43 @@ public final class Main {
                     config.getInt("blacklist.mvps_hosts.read-timeout"));
             sources.add(source);
             logger.info(LocaleUtil.getString("source_mvps_hosts_added"), source);
-        } catch (Exception e) { logger.error(LocaleUtil.getString("main_source_add_error"), "MVPS", e); }
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("main_source_add_error"), "MVPS", e);
+        }
     }
 
     private static void addRknSource(List<BlacklistSource> sources) {
-        if (config == null) { logger.error(LocaleUtil.getString("main_config_null")); return; }
+        if (config == null) {
+            logger.error(LocaleUtil.getString("main_config_null"));
+            return;
+        }
+
+        if (!config.getBoolean("blacklist.rkn.enabled")) {
+            logger.info(LocaleUtil.getString("rkn_disabled"));
+            return;
+        }
+
+        String pathStr = config.get("blacklist.rkn.xml-file");
+
+        if (pathStr.isBlank()) {
+            logger.error(LocaleUtil.getString("rkn_path_not_set"));
+            return;
+        }
+
+        Path xmlPath = Path.of(pathStr);
+
+        if (!validateAndLogFile("blacklist.rkn.xml-file", "dump.xml", xmlPath)) {
+            return;
+        }
+
         try {
-            if (!config.getBoolean("blacklist.rkn.enabled")) return;
-            Path xmlPath = Path.of(config.get("blacklist.rkn.xml-file"));
             RknBlacklistSource source = new RknBlacklistSource(xmlPath);
             sources.add(source);
             logger.info(LocaleUtil.getString("source_rkn_added"), source);
-        } catch (Exception e) { logger.error(LocaleUtil.getString("main_source_add_error"), "RKN", e); }
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("main_source_add_error"), "RKN", e);
+            logger.warn("If the file exists but the error persists, check the XML format.");
+        }
     }
 
     private static void registerShutdownHook() {
@@ -143,15 +206,58 @@ public final class Main {
     private static void stopProxyServer() {
         HttpProxyServer server = proxyServer;
         if (server == null) return;
-        try { server.stop(); } catch (Exception e) { logger.error(LocaleUtil.getString("error_stop_http_proxy"), e); }
-        finally { proxyServer = null; }
+        try {
+            server.stop();
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("error_stop_http_proxy"), e);
+        } finally {
+            proxyServer = null;
+        }
+    }
+
+    private static boolean validateAndLogFile(String configKey, String fileNameHint, Path path) {
+        if (path == null) {
+            logger.error("Path object is null for config key '{}'", configKey);
+            return false;
+        }
+
+        Path absolutePath = path.toAbsolutePath();
+        Path parentDir = path.getParent();
+        String parentPathStr = (parentDir != null) ? parentDir.toAbsolutePath().toString() : "(Current folder)";
+
+        logger.debug(LocaleUtil.getString("diag_header"), fileNameHint);
+        logger.debug(LocaleUtil.getString("diag_config_path"), path);
+        logger.debug(LocaleUtil.getString("diag_absolute_path"), absolutePath);
+        logger.debug(LocaleUtil.getString("diag_parent_folder"), parentPathStr);
+
+        boolean exists = Files.exists(path);
+        boolean isFile = Files.isRegularFile(path);
+
+        logger.debug(LocaleUtil.getString("diag_exists"), exists);
+        logger.debug(LocaleUtil.getString("diag_is_file"), isFile);
+
+        if (!exists || !isFile) {
+            logger.error(LocaleUtil.getString("val_file_not_found"));
+            logger.error(LocaleUtil.getString("val_folder_info"), parentPathStr);
+            logger.error(LocaleUtil.getString("val_action_copy"), fileNameHint, parentPathStr);
+            logger.error(LocaleUtil.getString("val_init_failed"), path, absolutePath);
+            return false;
+        }
+
+        logger.debug(LocaleUtil.getString("diag_success"));
+        return true;
     }
 
     private static void stopDnsServer() {
         DnsServer server = dnsServer;
         if (server == null) return;
-        try { server.stop(); } catch (Exception e) { logger.error(LocaleUtil.getString("error_stop_dns_server"), e); }
-        finally { dnsServer = null; }
+        try {
+            server.stop();
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("error_stop_dns_server"), e);
+        } finally {
+            dnsServer = null;
+        }
     }
 
     private static void stopHttpAnomalyDetector() {
@@ -169,7 +275,7 @@ public final class Main {
     }
 
     private static void shutdownWorkerPool() {
-        try { WorkerPool.shutdown(); } catch (Exception e) { logger.error("Failed to stop worker pool", e); }
+        try { WorkerPool.shutdown(); } catch (Exception e) { logger.error(LocaleUtil.getString("failed_stop_worker_pool")); }
     }
 
     private static void closeBlacklist() {

@@ -40,7 +40,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         try {
             connection = openConnection(url);
             int status = connection.getResponseCode();
-            logger.info(LocaleUtil.getString("adguard_http_response"), status);
+            logger.debug(LocaleUtil.getString("adguard_http_response"), status);
             if (status != HttpURLConnection.HTTP_OK)
                 throw new IOException(LocaleUtil.getString("adguard_http_error") + status);
             long contentLength = connection.getContentLengthLong();
@@ -147,7 +147,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private static String parseAdguardDomain(String value) {
         value = value.substring(2);
         int separator = value.indexOf('^'), modifier = value.indexOf('$'), end = value.length();
-        if (separator >= 0) end = Math.min(end, separator);
+        if (separator >= 0) end = separator;
         if (modifier >= 0) end = Math.min(end, modifier);
         value = value.substring(0, end);
         int slash = value.indexOf('/');
