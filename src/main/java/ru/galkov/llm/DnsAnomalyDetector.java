@@ -75,7 +75,7 @@ public class DnsAnomalyDetector extends LlmAnomalyDetector<DnsQueryRecord> {
             return;
         }
         if (queue.size() >= maxQueueSize) {
-            logger.warn("DNS anomaly queue full (size={}), dropping record for domain={}", queue.size(), record.getDomain());
+            logger.debug("DNS anomaly queue full (size={}), dropping record for domain={}", queue.size(), record.getDomain());
             return;
         }
         DnsQueryRecord previousRecord = queue.putIfAbsent(record.getDomain(), record);

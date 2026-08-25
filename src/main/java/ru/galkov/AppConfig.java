@@ -104,7 +104,7 @@ public final class AppConfig {
                 "config_validation_dns_timeout_invalid");
 
         validateIntRange(
-                "proxy.local.port", 1, 65535, 8888,
+                "proxy.local.port", 1, 65535, 3128,
                 "config_validation_proxy_port_invalid");
         validateIntRange(
                 "proxy.max-header-bytes", 1024, 1048576, 32768,

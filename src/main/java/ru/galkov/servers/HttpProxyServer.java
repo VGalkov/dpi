@@ -162,9 +162,7 @@ public class HttpProxyServer {
         }
     }
 
-    private void handleAcceptedConnection(
-            Socket clientSocket
-    ) {
+    private void handleAcceptedConnection(Socket clientSocket) {
         String clientIp =
                 clientSocket.getInetAddress() == null ? "unknown" : clientSocket.getInetAddress().getHostAddress();
 
