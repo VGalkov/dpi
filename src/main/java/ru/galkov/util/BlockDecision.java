@@ -1,7 +1,7 @@
 package ru.galkov.util;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class BlockDecision {
     public enum BlockReason {
@@ -83,6 +83,18 @@ public final class BlockDecision {
 
     public BlockReason getReason() {
         return reason;
+    }
+
+    public String getMatchedRule() {
+        return matchedRule;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public BlockAction getAction() {
+        return action;
     }
 
     @Override

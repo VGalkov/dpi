@@ -199,7 +199,7 @@ public abstract class LlmAnomalyDetector<T extends AbstractQueryRecord> {
                 if (now - circuitBreakerOpenTime < timeoutMillis) return false;
                 circuitBreakerOpenTime = 0;
                 circuitBreakerFailureCount = 0;
-                logger.info("Circuit breaker closed after timeout");
+                logger.debug("Circuit breaker closed after timeout");
             }
             return true;
         }
@@ -223,7 +223,7 @@ public abstract class LlmAnomalyDetector<T extends AbstractQueryRecord> {
         synchronized (lifecycleLock) {
             if (stopped) throw new IllegalStateException("Detector cannot be restarted after stop()");
             if (!enabled) {
-                logger.info(LocaleUtil.getString(getConfigPrefix() + "_disabled"));
+                logger.debug(LocaleUtil.getString(getConfigPrefix() + "_disabled"));
                 return;
             }
             if (running) {
@@ -232,7 +232,7 @@ public abstract class LlmAnomalyDetector<T extends AbstractQueryRecord> {
             }
             running = true;
             executor.submit(this::processQueue);
-            logger.info(LocaleUtil.getString(getConfigPrefix() + "_started"), getConfigString(getConfigPrefix() + ".llm-studio.model"));
+            logger.debug(LocaleUtil.getString(getConfigPrefix() + "_started"), getConfigString(getConfigPrefix() + ".llm-studio.model"));
         }
     }
 

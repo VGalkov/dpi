@@ -64,7 +64,7 @@ public class DnsAnomalyDetector extends LlmAnomalyDetector<DnsQueryRecord> {
             } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
             catch (Exception e) { logger.error(LocaleUtil.getString("dns_anomaly_detector_processing_error"), e.getMessage()); }
         }
-        logger.info(LocaleUtil.getString("dns_anomaly_detector_queue_completed"));
+        logger.debug(LocaleUtil.getString("dns_anomaly_detector_queue_completed"));
     }
 
     @Override

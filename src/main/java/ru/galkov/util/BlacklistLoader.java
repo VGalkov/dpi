@@ -143,29 +143,16 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     private void ensureLoaded() {
-        if (loaded) {
-            return;
-        }
+        if (loaded) return;
 
         synchronized (reloadLock) {
-            if (loaded) {
-                return;
-            }
+            if (loaded) return;
 
             try {
                 snapshot.set(buildSnapshot());
-
-                logger.info(
-                        "Blacklist first load completed successfully"
-                );
+                logger.info("Blacklist first load completed successfully");
             } catch (Exception e) {
-                logger.error(
-                        LocaleUtil.getString(
-                                "blacklist_critical_load_error"
-                        ),
-                        e
-                );
-
+                logger.error(LocaleUtil.getString("blacklist_critical_load_error"), e);
                 snapshot.set(BlacklistSnapshot.empty());
             } finally {
                 loaded = true;
@@ -184,28 +171,20 @@ public final class BlacklistLoader implements AutoCloseable {
         int duplicateIps = 0;
         int duplicateDomains = 0;
 
-        LoadLogStats logStats =
-                new LoadLogStats(sources.size());
-
+        LoadLogStats logStats = new LoadLogStats(sources.size());
         long buildStartedAt = System.currentTimeMillis();
-
         ExecutorService loaderExecutor =
                 Executors.newFixedThreadPool(
                         LOADER_THREAD_POOL_SIZE,
                         r -> {
-                            Thread thread = new Thread(
-                                    r,
-                                    "Blacklist-Loader-Thread"
-                            );
+                            Thread thread = new Thread(r, "Blacklist-Loader-Thread");
                             thread.setDaemon(true);
                             return thread;
                         }
                 );
 
         logger.info(
-                LocaleUtil.getString(
-                        "blacklist_loader_thread_pool_size"
-                ),
+                LocaleUtil.getString("blacklist_loader_thread_pool_size"),
                 LOADER_THREAD_POOL_SIZE
         );
 
@@ -225,10 +204,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
                 if (result.error() != null) {
                     logStats.sourceLoadErrors++;
-                    addLogDetail(
-                            logStats.failedSources,
-                            result.source()
-                    );
+                    addLogDetail(logStats.failedSources, result.source());
                     continue;
                 }
 
@@ -236,35 +212,23 @@ public final class BlacklistLoader implements AutoCloseable {
 
                 if (rules == null) {
                     logStats.sourceLoadErrors++;
-                    addLogDetail(
-                            logStats.failedSources,
-                            result.source()
-                    );
+                    addLogDetail(logStats.failedSources, result.source());
                     continue;
                 }
 
                 logStats.sourceLoadTimeMillis += result.duration();
-                logStats.maxSourceDurationMillis = Math.max(
-                        logStats.maxSourceDurationMillis,
-                        result.duration()
-                );
+                logStats.maxSourceDurationMillis = Math.max(logStats.maxSourceDurationMillis, result.duration());
 
                 int originalSize = rules.size();
                 logStats.rulesRead += originalSize;
 
                 int maxRulesForSource =
                         result.source() instanceof RknBlacklistSource
-                                ? MAX_RULES_RKN
-                                : MAX_RULES_PER_SOURCE;
+                                ? MAX_RULES_RKN : MAX_RULES_PER_SOURCE;
 
                 if (originalSize > maxRulesForSource) {
-                    rules = rules.subList(
-                            0,
-                            maxRulesForSource
-                    );
-
+                    rules = rules.subList(0, maxRulesForSource);
                     logStats.truncatedSources++;
-
                     addLogDetail(
                             logStats.truncatedSourceDetails,
                             result.source()
@@ -285,8 +249,7 @@ public final class BlacklistLoader implements AutoCloseable {
                         continue;
                     }
 
-                    String value =
-                            normalizeRule(rule.value());
+                    String value = normalizeRule(rule.value());
 
                     if (value == null) {
                         invalid++;
@@ -301,8 +264,7 @@ public final class BlacklistLoader implements AutoCloseable {
                             invalid++;
                         }
                     } else if (HostNormalizer.isIpLiteralFast(value)) {
-                        String ip =
-                                HostNormalizer.normalizeIp(value);
+                        String ip = HostNormalizer.normalizeIp(value);
 
                         if (ip == null) {
                             invalid++;
@@ -314,8 +276,7 @@ public final class BlacklistLoader implements AutoCloseable {
                             accepted++;
                         }
                     } else {
-                        String domain =
-                                HostNormalizer.normalizeHost(value);
+                        String domain = HostNormalizer.normalizeHost(value);
 
                         if (domain == null) {
                             invalid++;
@@ -333,10 +294,7 @@ public final class BlacklistLoader implements AutoCloseable {
                                             : domain;
 
                             if (!domainTrie.contains(domainToAdd)) {
-                                domainTrie.addDomain(
-                                        domainToAdd,
-                                        type
-                                );
+                                domainTrie.addDomain(domainToAdd, type);
                                 accepted++;
                             } else {
                                 duplicateDomains++;
@@ -380,20 +338,13 @@ public final class BlacklistLoader implements AutoCloseable {
 
                 if (usedMemoryMB > MAX_MEMORY_MB) {
                     logger.error(
-                            LocaleUtil.getString(
-                                    "blacklist_max_memory_exceeded"
-                            ),
+                            LocaleUtil.getString("blacklist_max_memory_exceeded"),
                             usedMemoryMB,
                             MAX_MEMORY_MB
                     );
 
                     throw new IllegalStateException(
-                            "Превышен лимит памяти blacklist: "
-                                    + usedMemoryMB
-                                    + " MB > "
-                                    + MAX_MEMORY_MB
-                                    + " MB"
-                    );
+                            "Превышен лимит памяти blacklist: " + usedMemoryMB + " MB > " + MAX_MEMORY_MB + " MB");
                 }
             }
         } finally {
@@ -402,15 +353,10 @@ public final class BlacklistLoader implements AutoCloseable {
 
         if (!sources.isEmpty() && loadedSources == 0) {
             throw new IllegalStateException(
-                    LocaleUtil.getString(
-                            "blacklist_no_sources_loaded"
-                    )
+                    LocaleUtil.getString("blacklist_no_sources_loaded")
             );
         }
-
-        logStats.buildDurationMillis =
-                elapsedMillis(buildStartedAt);
-
+        logStats.buildDurationMillis = elapsedMillis(buildStartedAt);
         logSnapshotSummary(
                 logStats,
                 loadedSources,
@@ -437,8 +383,7 @@ public final class BlacklistLoader implements AutoCloseable {
             long startedAt = System.currentTimeMillis();
 
             try {
-                List<BlacklistRule> rules =
-                        source.loadRules();
+                List<BlacklistRule> rules = source.loadRules();
 
                 if (rules == null) {
                     return new SourceResult(
@@ -451,19 +396,9 @@ public final class BlacklistLoader implements AutoCloseable {
                     );
                 }
 
-                return new SourceResult(
-                        source,
-                        rules,
-                        elapsedMillis(startedAt),
-                        null
-                );
+                return new SourceResult(source, rules, elapsedMillis(startedAt), null);
             } catch (Exception e) {
-                return new SourceResult(
-                        source,
-                        null,
-                        elapsedMillis(startedAt),
-                        e
-                );
+                return new SourceResult(source, null, elapsedMillis(startedAt), e);
             }
         }, loaderExecutor);
     }
@@ -521,22 +456,12 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     private void logSourceErrors(LoadLogStats stats) {
-        if (stats.failedSources.isEmpty()) {
-            return;
-        }
-
-        logger.warn(
-                "Blacklist source errors: count={}, details={}",
-                stats.sourceLoadErrors,
-                stats.failedSources
-        );
+        if (stats.failedSources.isEmpty()) return;
+        logger.warn("Blacklist source errors: count={}, details={}", stats.sourceLoadErrors, stats.failedSources);
     }
 
     private void logTruncationDetails(LoadLogStats stats) {
-        if (stats.truncatedSourceDetails.isEmpty()) {
-            return;
-        }
-
+        if (stats.truncatedSourceDetails.isEmpty()) return;
         logger.warn(
                 "Blacklist source rule limits reached: "
                         + "count={}, details={}",
@@ -546,24 +471,13 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     private void logSourceDetails(LoadLogStats stats) {
-        if (!logger.isDebugEnabled()
-                || stats.sourceResults.isEmpty()) {
-            return;
-        }
-
-        logger.debug(
-                "Blacklist source statistics: {}",
-                stats.sourceResults
-        );
+        if (!logger.isDebugEnabled() || stats.sourceResults.isEmpty()) return;
+        logger.debug("Blacklist source statistics: {}", stats.sourceResults);
     }
 
-    private static void addLogDetail(
-            List<String> details,
-            Object value
-    ) {
-        if (details.size() < MAX_LOG_DETAILS) {
-            details.add(String.valueOf(value));
-        }
+    private static void addLogDetail(List<String> details, Object value) {
+        if (details.size() < MAX_LOG_DETAILS) details.add(String.valueOf(value));
+
     }
 
     private static long elapsedMillis(long startedAt) {
@@ -572,25 +486,14 @@ public final class BlacklistLoader implements AutoCloseable {
 
     private static long usedMemoryMb() {
         Runtime runtime = Runtime.getRuntime();
-
-        return (
-                runtime.totalMemory()
-                        - runtime.freeMemory()
-        ) / 1024 / 1024;
+        return (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024;
     }
 
-    private static void shutdownLoaderExecutor(
-            ExecutorService loaderExecutor
-    ) {
+    private static void shutdownLoaderExecutor(ExecutorService loaderExecutor) {
         loaderExecutor.shutdown();
-
         try {
-            if (!loaderExecutor.awaitTermination(
-                    30,
-                    TimeUnit.SECONDS
-            )) {
-                loaderExecutor.shutdownNow();
-            }
+            if (!loaderExecutor.awaitTermination(30, TimeUnit.SECONDS)) loaderExecutor.shutdownNow();
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             loaderExecutor.shutdownNow();
@@ -608,7 +511,6 @@ public final class BlacklistLoader implements AutoCloseable {
     private static final class LoadLogStats {
 
         private final int sourcesTotal;
-
         private int loadedSources;
         private int sourceLoadErrors;
         private int rulesRead;

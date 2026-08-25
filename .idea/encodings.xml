@@ -11,6 +11,7 @@
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/HttpAnomalyStrategy.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/LlmAnomalyDetector.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/llm/LlmClient.java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/servers/CheckApiHandler.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/servers/ConnectionLease.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/servers/WorkerPool.java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java/ru/galkov/util/ClientCounterMap.java" charset="UTF-8" />

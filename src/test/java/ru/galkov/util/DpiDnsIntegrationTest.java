@@ -137,7 +137,7 @@ public class DpiDnsIntegrationTest {
         logger.info("[RUNNING] {}", testName);
 
         int clients = 50;
-        int requestsPerClient = 20;
+        int requestsPerClient = 70;
         ExecutorService executor = Executors.newFixedThreadPool(clients);
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch endLatch = new CountDownLatch(clients);

@@ -9,12 +9,15 @@ import ru.galkov.blacklist_source.RknBlacklistSource;
 import ru.galkov.llm.DnsAnomalyDetector;
 import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.llm.LlmAnomalyDetector;
+import ru.galkov.servers.CheckApiHandler;
 import ru.galkov.servers.DnsServer;
 import ru.galkov.servers.HttpProxyServer;
 import ru.galkov.servers.WorkerPool;
 import ru.galkov.util.BlacklistLoader;
+import ru.galkov.util.BlacklistSnapshot;
 import ru.galkov.util.LocaleUtil;
 
+import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -58,11 +61,30 @@ public final class Main {
             startProxyServer();
             startDnsServer();
 
+            int checkApiPort = getConfig().getInt("check.api.port");
+            startCheckApiServer(blacklist.snapshot(), checkApiPort);
+            logger.info("Check API server started on port {}", checkApiPort);
+
             logger.info(LocaleUtil.getString("system_started"));
         } catch (Exception e) {
             logger.error(LocaleUtil.getString("system_not_started"), e);
             stopApplication();
             Runtime.getRuntime().exit(1);
+        }
+    }
+
+    private static void startCheckApiServer(BlacklistSnapshot snapshot, int port) {
+        try {
+            com.sun.net.httpserver.HttpServer server =
+                    com.sun.net.httpserver.HttpServer.create(new InetSocketAddress(port), 0);
+
+            server.createContext("/", new CheckApiHandler(snapshot, port));
+            server.setExecutor(null);
+            server.start();
+
+            logger.info("Check API HTTP server started on port {}", port);
+        } catch (Exception e) {
+            logger.error("Failed to start Check API server on port {}", port, e);
         }
     }
 

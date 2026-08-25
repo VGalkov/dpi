@@ -91,7 +91,7 @@ public final class LlmClient {
             root.set("messages", messages);
 
             String jsonBody = objectMapper.writeValueAsString(root);
-            logger.info(LocaleUtil.getString("llm_client_sending_request"), model, llmUrl);
+            logger.debug(LocaleUtil.getString("llm_client_sending_request"), model, llmUrl);
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(llmUrl))
@@ -234,7 +234,7 @@ public final class LlmClient {
 
                 } else if (actionsNode.isTextual()) {
                     String singleAction = actionsNode.asText();
-                    logger.info("Model returned string in 'recommendedActions' instead of array for domain={}. Value: '{}'. Converting to list.", domain, singleAction);
+                    logger.debug("Model returned string in 'recommendedActions' instead of array for domain={}. Value: '{}'. Converting to list.", domain, singleAction);
                     actions.add(singleAction);
                 }
             }

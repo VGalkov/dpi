@@ -46,7 +46,7 @@ public class HttpAnomalyDetector extends LlmAnomalyDetector<HttpQueryRecord> {
                 logger.error(LocaleUtil.getString("http_anomaly_detector_analysis_error"), e.getMessage(), e);
             }
         }
-        logger.info(LocaleUtil.getString("http_anomaly_detector_queue_completed"));
+        logger.debug(LocaleUtil.getString("http_anomaly_detector_queue_completed"));
     }
 
     @Override
