@@ -1,4 +1,7 @@
-<configuration>
+
+<configuration scan="true" scanPeriod="10 seconds">
+
+    <!-- Аппендер для файла (ротация по дням) -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/app.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
@@ -11,16 +14,21 @@
         </encoder>
     </appender>
 
+    <!-- Аппендер для консоли -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- Добавил миллисекунды для удобства чтения логов -->
         <encoder>
             <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
 
-    <logger name="ru.galkov" level="DEBUG"/>
+    <!-- УДАЛЕНО: <logger name="ru.galkov" level="DEBUG"/> -->
+    <!-- Теперь уровень для всех классов пакета ru.galkov берется из root (то есть INFO) -->
 
+    <!-- Корневой логгер: только INFO и выше (WARN, ERROR, FATAL) -->
     <root level="INFO">
         <appender-ref ref="FILE"/>
         <appender-ref ref="CONSOLE"/>
     </root>
+
 </configuration>
