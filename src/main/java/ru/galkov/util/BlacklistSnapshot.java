@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ * s0506777@yandex.ru Galkov V.A.
  */
 public final class BlacklistSnapshot {
     private static final Logger logger = LoggerFactory.getLogger(BlacklistSnapshot.class);
@@ -26,6 +26,9 @@ public final class BlacklistSnapshot {
     private final IpPrefixIndex ipPrefixIndex;
     private final long timestamp;
 
+    // Карта: domain -> source name
+    private final Map<String, String> domainSources;
+
     private final int maxIpCacheSize;
     private final int maxDomainCacheSize;
     private final long cacheTtlMillis;
@@ -34,11 +37,17 @@ public final class BlacklistSnapshot {
     private final Map<String, CacheEntry> domainCache;
 
     public BlacklistSnapshot(DomainTrie domainTrie, Set<String> ipSet, Set<IpCidr> cidrSet) {
+        this(domainTrie, ipSet, cidrSet, null);
+    }
+
+    public BlacklistSnapshot(DomainTrie domainTrie, Set<String> ipSet, Set<IpCidr> cidrSet, Map<String, String> domainSources) {
         this.domainTrie = domainTrie == null ? new DomainTrie() : domainTrie;
         this.exactIps = immutableIpSet(ipSet);
         this.cidrs = immutableCidrSet(cidrSet);
         this.ipPrefixIndex = IpPrefixIndex.build(this.cidrs);
         this.timestamp = System.currentTimeMillis();
+        this.domainSources = domainSources != null ? Collections.unmodifiableMap(domainSources) : Collections.emptyMap();
+
         AppConfig config = safeConfig();
 
         this.maxIpCacheSize =
@@ -104,9 +113,27 @@ public final class BlacklistSnapshot {
             domainCache.remove(normalized, cached);
         }
 
-        BlockDecision decision = domainTrie.matches(normalized)
-                        ? BlockDecision.blockDomain(DomainTrie.MatchType.SUBTREE, normalized, "blacklist"
-                ) : BlockDecision.allow();
+        BlockDecision decision;
+        if (domainTrie.matches(normalized)) {
+            // Получаем имя источника
+            String source = domainSources.get(normalized);
+            if (source == null) {
+                // Пробуем найти по суффиксу (для поддоменов)
+                for (Map.Entry<String, String> entry : domainSources.entrySet()) {
+                    if (normalized.endsWith("." + entry.getKey())) {
+                        source = entry.getValue();
+                        break;
+                    }
+                }
+            }
+            decision = BlockDecision.blockDomain(
+                    DomainTrie.MatchType.SUBTREE,
+                    normalized,
+                    source != null ? source : "blacklist"
+            );
+        } else {
+            decision = BlockDecision.allow();
+        }
 
         putCache(domainCache, normalized, decision, maxDomainCacheSize);
         return decision;

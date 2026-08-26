@@ -44,6 +44,6 @@ public final class FileBlacklistSource extends AbstractBlacklistSource {
 
     @Override
     public String toString() {
-        return "FileBlacklistSource{file=" + file.getAbsolutePath() + '}';
+        return "FileBlacklistSource{file=" + file.getParentFile() + '}';
     }
 }

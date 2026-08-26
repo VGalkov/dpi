@@ -15,74 +15,125 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
-
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 /**
- * Simple HTTP API to check if IP or hostname is blocked.
- *
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+  * Simple HTTP API to check if IP or hostname is blocked.
+  * Security:
+ *   - Rate limiting: 100 requests per second
+ *   - Input validation: max 253 chars
+ *   - XSS protection: proper JSON escaping
  * Usage:
  *   http://127.0.0.1:3129/?ip=10.0.0.1
  *   http://127.0.0.1:3129/?host=www.cofe.ru
- *   http://127.0.0.1:3129/?check=10.0.0.1
- *   http://127.0.0.1:3129/?check=www.cofe.ru
- *
- * Response:
- *   {"blocked":false,"type":"ip","value":"10.0.0.1","source":null}
- *   {"blocked":true,"type":"domain","value":"ads.example.com","source":"blacklist","reason":"SUBTREE"}
  */
 public final class CheckApiHandler implements HttpHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(CheckApiHandler.class);
 
+    private static final int MAX_INPUT_LENGTH = 253;
+    private static final int MAX_RESPONSE_LENGTH = 4096;
+    private static final int MAX_REQUESTS_PER_SECOND = 100;
     private final BlacklistSnapshot snapshot;
-    private final int port;
+
+    // Rate limiting
+    private final Map<String, AtomicLong> requestCounts = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> lastRequestTime = new ConcurrentHashMap<>();
 
     public CheckApiHandler(BlacklistSnapshot snapshot, int port) {
         this.snapshot = snapshot;
-        this.port = port;
     }
 
     @Override
     public void handle(HttpExchange exchange) throws IOException {
-        URI requestUri = exchange.getRequestURI();
-        String query = requestUri.getQuery();
+        String clientIp = exchange.getRemoteAddress().getAddress().getHostAddress();
 
-        if (query == null || query.isBlank()) {
-            sendResponse(exchange, 400, "{\"error\":\"Missing query parameter. Use ?ip=... or ?host=... or ?check=...\"}");
+        // Rate limiting check
+        if (!checkRateLimit(clientIp)) {
+            sendResponse(exchange, 429, "{\"error\":\"Rate limit exceeded. Max 100 requests per second.\"}");
             return;
         }
 
-        Map<String, String> params = parseQuery(query);
-        String ip = params.get("ip");
-        String host = params.get("host");
-        String check = params.get("check");
+        try {
+            URI requestUri = exchange.getRequestURI();
+            String query = requestUri.getQuery();
 
-        String valueToCheck = ip != null ? ip : host != null ? host : check;
+            if (query == null || query.isBlank()) {
+                sendResponse(exchange, 400, "{\"error\":\"Missing query parameter. Use ?ip=... or ?host=... or ?check=...\"}");
+                return;
+            }
 
-        if (valueToCheck == null || valueToCheck.isBlank()) {
-            sendResponse(exchange, 400, "{\"error\":\"Missing value. Use ?ip=... or ?host=... or ?check=...\"}");
-            return;
+            Map<String, String> params = parseQuery(query);
+            String ip = params.get("ip");
+            String host = params.get("host");
+            String check = params.get("check");
+
+            String valueToCheck = ip != null ? ip : host != null ? host : check;
+
+            if (valueToCheck == null || valueToCheck.isBlank()) {
+                sendResponse(exchange, 400, "{\"error\":\"Missing value. Use ?ip=... or ?host=... or ?check=...\"}");
+                return;
+            }
+
+            // Input validation
+            if (valueToCheck.length() > MAX_INPUT_LENGTH) {
+                sendResponse(exchange, 400, "{\"error\":\"Input too long. Max " + MAX_INPUT_LENGTH + " characters.\"}");
+                return;
+            }
+
+            valueToCheck = URLDecoder.decode(valueToCheck, StandardCharsets.UTF_8);
+
+            logger.debug("Check API request from {}: {}", clientIp, valueToCheck);
+
+            // Determine if it's IP or domain
+            boolean isIp = HostNormalizer.isIpLiteralFast(valueToCheck);
+
+            BlockDecision decision;
+            String type;
+
+            if (isIp) {
+                decision = snapshot.checkIp(valueToCheck);
+                type = "ip";
+            } else {
+                decision = snapshot.checkDomain(valueToCheck);
+                type = "domain";
+            }
+
+            // Null safety
+            if (decision == null) {
+                decision = BlockDecision.allow();
+            }
+
+            String jsonResponse = buildJsonResponse(type, valueToCheck, decision);
+
+            // Response size limit
+            if (jsonResponse.length() > MAX_RESPONSE_LENGTH) {
+                jsonResponse = jsonResponse.substring(0, MAX_RESPONSE_LENGTH) + "\"}";
+            }
+
+            sendResponse(exchange, 200, jsonResponse);
+
+        } catch (Exception e) {
+            logger.error("Check API error from {}: {}", clientIp, e.getMessage(), e);
+            sendResponse(exchange, 500, "{\"error\":\"Internal server error\"}");
+        }
+    }
+
+    private boolean checkRateLimit(String clientIp) {
+        long now = System.currentTimeMillis();
+        AtomicLong count = requestCounts.computeIfAbsent(clientIp, k -> new AtomicLong(0));
+        AtomicLong lastTime = lastRequestTime.computeIfAbsent(clientIp, k -> new AtomicLong(now));
+
+        long last = lastTime.get();
+        if (now - last > 1000) {
+            // Новая секунда - сброс счётчика
+            count.set(0);
+            lastTime.set(now);
         }
 
-        valueToCheck = URLDecoder.decode(valueToCheck, StandardCharsets.UTF_8);
-
-        logger.debug("Check API request: {}", valueToCheck);
-
-        // Determine if it's IP or domain
-        boolean isIp = HostNormalizer.isIpLiteralFast(valueToCheck);
-
-        BlockDecision decision;
-        String type;
-
-        if (isIp) {
-            decision = snapshot.checkIp(valueToCheck);
-            type = "ip";
-        } else {
-            decision = snapshot.checkDomain(valueToCheck);
-            type = "domain";
-        }
-
-        String jsonResponse = buildJsonResponse(type, valueToCheck, decision);
-        sendResponse(exchange, 200, jsonResponse);
+        long currentCount = count.incrementAndGet();
+        return currentCount <= MAX_REQUESTS_PER_SECOND;
     }
 
     private Map<String, String> parseQuery(String query) {
@@ -123,7 +174,10 @@ public final class CheckApiHandler implements HttpHandler {
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
-                .replace("\t", "\\t");
+                .replace("\t", "\\t")
+                .replace("<", "\\u003c")
+                .replace(">", "\\u003e")
+                .replace("&", "\\u0026");
     }
 
     private void sendResponse(HttpExchange exchange, int statusCode, String response) throws IOException {

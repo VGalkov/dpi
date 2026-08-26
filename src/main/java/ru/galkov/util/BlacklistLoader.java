@@ -164,6 +164,7 @@ public final class BlacklistLoader implements AutoCloseable {
         DomainTrie domainTrie = new DomainTrie();
         Set<String> ips = new HashSet<>();
         Set<IpCidr> cidrs = new HashSet<>();
+        Map<String, String> domainSources = new ConcurrentHashMap<>();
 
         int loadedSources = 0;
         int totalRules = 0;
@@ -183,10 +184,7 @@ public final class BlacklistLoader implements AutoCloseable {
                         }
                 );
 
-        logger.info(
-                LocaleUtil.getString("blacklist_loader_thread_pool_size"),
-                LOADER_THREAD_POOL_SIZE
-        );
+        logger.info(LocaleUtil.getString("blacklist_loader_thread_pool_size"), LOADER_THREAD_POOL_SIZE);
 
         try {
             List<CompletableFuture<SourceResult>> futures =
@@ -269,10 +267,7 @@ public final class BlacklistLoader implements AutoCloseable {
                         if (ip == null) {
                             invalid++;
                         } else {
-                            if (!ips.add(ip)) {
-                                duplicateIps++;
-                            }
-
+                            if (!ips.add(ip)) duplicateIps++;
                             accepted++;
                         }
                     } else {
@@ -290,11 +285,14 @@ public final class BlacklistLoader implements AutoCloseable {
 
                             String domainToAdd =
                                     type == DomainTrie.MatchType.WILDCARD
-                                            ? domain.substring(2)
-                                            : domain;
+                                            ? domain.substring(2) : domain;
 
                             if (!domainTrie.contains(domainToAdd)) {
                                 domainTrie.addDomain(domainToAdd, type);
+
+                                String sourceName = result.source().toString();
+                                domainSources.put(domainToAdd, sourceName);
+
                                 accepted++;
                             } else {
                                 duplicateDomains++;
@@ -371,7 +369,8 @@ public final class BlacklistLoader implements AutoCloseable {
         return new BlacklistSnapshot(
                 domainTrie,
                 Collections.unmodifiableSet(ips),
-                Collections.unmodifiableSet(cidrs)
+                Collections.unmodifiableSet(cidrs),
+                domainSources
         );
     }
 

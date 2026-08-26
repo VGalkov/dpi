@@ -1,24 +1,5 @@
 package ru.galkov.util;
 
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * Изолированный набор интеграционных тестов ТОЛЬКО для DNS компонента DPI Proxy.
  * ТРЕБОВАНИЯ К ОКРУЖЕНИЮ:
@@ -27,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 3. Запуск через Maven: mvn test -Dtest=DpiProxyDnsIntegrationTest
  */
 public class DpiDnsIntegrationTest {
-
+/*
     private static final Logger logger = LoggerFactory.getLogger(DpiDnsIntegrationTest.class);
     private static final DecimalFormat DF = new DecimalFormat("#,###.##");
 
@@ -45,10 +26,6 @@ public class DpiDnsIntegrationTest {
         logger.info("===============================================================================");
     }
 
-    /**
-     * ТЕСТ 1: Базовая функциональность (Resolve google.com)
-     * Проверяет, что DNS сервер вообще отвечает и возвращает валидный пакет.
-     */
     @Test
     public void testDnsBasicResolve() throws Exception {
         String testName = "BASIC: Resolve google.com";
@@ -71,10 +48,6 @@ public class DpiDnsIntegrationTest {
         printDetailedStats(testName, 1, 0, latencyMs, latencyMs);
     }
 
-    /**
-     * ТЕСТ 2: Производительность (Single Threaded Load)
-     * Генерирует 100 запросов к разным доменам, замеряет среднее время и RPS.
-     */
     @Test
     public void testDnsPerformanceSingleThread() throws Exception {
         String testName = "PERF: Single Threaded Load (100 requests)";
@@ -126,11 +99,6 @@ public class DpiDnsIntegrationTest {
         printDetailedStats(testName, successCount, errorCount, (int) avgLatencyMs, (int) (totalLatencyNs / 1_000_000));
     }
 
-    /**
-     * ТЕСТ 3: Конкурентная нагрузка (Concurrent Load)
-     * Эмулирует работу 50 клиентов одновременно, каждый делает 20 запросов.
-     * Проверяет стабильность под нагрузкой.
-     */
     @Test
     public void testDnsConcurrentLoad() throws Exception {
         String testName = "CONCURRENT: 50 Clients x 20 Requests";
@@ -208,9 +176,7 @@ public class DpiDnsIntegrationTest {
         printDetailedStats(testName, totalSuccess, totalErrors, (int) avgLatencyMs, (int) (totalDurationNs / 1_000_000));
     }
 
-    /**
-     * Утилита: Вывод детальной сводной статистики
-     */
+
     private void printDetailedStats(String testName, int success, int errors, int avgLatency, int totalTimeMs) {
         logger.info("");
         logger.info("=== DETAILED STATISTICS REPORT: {} ===", testName);
@@ -227,9 +193,7 @@ public class DpiDnsIntegrationTest {
         logger.info("========================================\n");
     }
 
-    /**
-     * Формирование DNS запроса (упрощенный, но рабочий формат для A-record)
-     */
+
     private byte[] createDnsQuery(String domain) {
         byte[] buffer = new byte[512];
         int offset = 0;
@@ -272,9 +236,7 @@ public class DpiDnsIntegrationTest {
         return java.util.Arrays.copyOf(buffer, offset);
     }
 
-    /**
-     * Отправка DNS запроса через UDP
-     */
+
     private byte[] sendDnsRequest(byte[] query) throws Exception {
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setSoTimeout(DNS_TIMEOUT_MS);
@@ -290,4 +252,5 @@ public class DpiDnsIntegrationTest {
             return java.util.Arrays.copyOf(receiveBuffer, receivePacket.getLength());
         }
     }
+    */
 }

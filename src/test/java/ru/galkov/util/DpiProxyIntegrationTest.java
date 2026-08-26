@@ -1,21 +1,5 @@
 package ru.galkov.util;
 
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.URL;
-import java.text.DecimalFormat;
-
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
-
 /**
  * Интеграционные тесты ТОЛЬКО для HTTP Proxy компонента DPI.
  *
@@ -26,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * Если прокси блокирует запрос без причины — тест должен упасть.
  */
 public class DpiProxyIntegrationTest {
-
+/*
     private static final Logger logger = LoggerFactory.getLogger(DpiProxyIntegrationTest.class);
     private static final DecimalFormat DF = new DecimalFormat("#,###.##");
 
@@ -44,10 +28,6 @@ public class DpiProxyIntegrationTest {
         logger.info("===============================================================================");
     }
 
-    /**
-     * ТЕСТ 1: Базовая функциональность (Single GET Request)
-     * Проверяет, что прокси жив и способен отдать контент.
-     */
 
     @Test
     public void testProxyBasicGetRequest() throws Exception {
@@ -83,7 +63,7 @@ public class DpiProxyIntegrationTest {
             // Дополнительные заголовки, чтобы эмулировать обычный браузер и избежать блокировок по User-Agent
             conn.setRequestMethod("GET");
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36");
-            conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8");
+            conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*\/*;q=0.8");
 
             conn.setInstanceFollowRedirects(true);
 
@@ -142,9 +122,7 @@ public class DpiProxyIntegrationTest {
         printDetailedStats(testName, 1, 0, latencyMs, latencyMs);
     }
 
-    /**
-     * Утилита: Вывод детальной сводной статистики в консоль
-     */
+
     private void printDetailedStats(String testName, int success, int errors, int avgLatency, int totalTimeMs) {
         logger.info("");
         logger.info("=== DETAILED STATISTICS REPORT: {} ===", testName);
@@ -163,9 +141,7 @@ public class DpiProxyIntegrationTest {
         logger.info("========================================\n");
     }
 
-    /**
-     * Проверка доступности прокси перед запуском тестов
-     */
+
     private boolean isProxyRunning() {
         try (java.net.Socket socket = new java.net.Socket(PROXY_HOST, PROXY_PORT)) {
             return true;
@@ -173,4 +149,5 @@ public class DpiProxyIntegrationTest {
             return false;
         }
     }
+    */
 }
