@@ -88,3 +88,24 @@ maxActiveSockets	20,000 (multiplier=2)
 maxHeaderBytes	32,768 (32 KB)
 maxBodyBytes	52,428,800 (50 MB)
 
+--------
+1. Блокировать DoH/DoT серверы по IP
+   bash
+# В blacklist добавить:
+8.8.8.8
+8.8.4.4
+1.1.1.1
+1.0.0.1
+9.9.9.9
+2. Блокировать QUIC
+   bash
+   iptables -A OUTPUT -p udp --dport 443 -j DROP
+3. Блокировать VPN протоколы
+   bash
+   iptables -A OUTPUT -p udp --dport 51820 -j DROP  # WireGuard
+   iptables -A OUTPUT -p udp --dport 1194 -j DROP   # OpenVPN
+4. Блокировать Tor
+   bash
+   iptables -A OUTPUT -p tcp --dport 9001 -j DROP
+   iptables -A OUTPUT -p tcp --dport 9030 -j DROP
+   iptables -A OUTPUT -p tcp --dport 9050 -j DROP

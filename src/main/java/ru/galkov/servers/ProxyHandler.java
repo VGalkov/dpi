@@ -36,7 +36,6 @@ public class ProxyHandler implements Runnable {
     private final boolean blockOnSniMismatch;
     private final boolean limitResponseBody;
     private final long maxResponseBytes;
-
     private final LongAdder emptyRequestCounter = new LongAdder();
     private final LongAdder invalidTargetCounter = new LongAdder();
     private final LongAdder unsupportedMethodCounter = new LongAdder();
@@ -125,12 +124,24 @@ public class ProxyHandler implements Runnable {
 
     private void handleConnect(InputStream in, OutputStream out, String target) throws IOException {
         if (released()) return;
+
         ProxyHandlerHelper.readHeaders(in, maxHeaderBytes, true, "", this::released);
         if (released()) return;
+
         HostNormalizer.HostAndPort hp = HostNormalizer.parseHostPort(target);
-        if (hp == null || hp.host() == null) { invalidTargetCounter.increment(); sendError(out, 400, "Bad Request (invalid host and port)"); return; }
+        if (hp == null || hp.host() == null) {
+            invalidTargetCounter.increment();
+            sendError(out, 400, "Bad Request (invalid host and port)");
+            return;
+        }
+
         BlockDecision decision = checkBlockedHostOrIp(hp.host());
-        if (decision.isBlocked()) { logger.info(LocaleUtil.getString("proxy_handler_connect_blocked"), clientIp, hp.host(), hp.port(), decision.getReason()); sendError(out, 403, "Forbidden"); return; }
+        if (decision.isBlocked()) {
+            logger.info(LocaleUtil.getString("proxy_handler_connect_blocked"), clientIp, hp.host(), hp.port(), decision.getReason());
+            sendError(out, 403, "Forbidden");
+            return;
+        }
+
         Socket remote = null;
         try {
             remote = new Socket();
@@ -144,20 +155,52 @@ public class ProxyHandler implements Runnable {
             byte[] hello = ProxyHandlerHelper.readInitialTlsHandshake(in, clientSocket, clientReadTimeout);
             if (hello == null || released()) { closeQuietly(remote); return; }
             String sni = ProxyHandlerHelper.extractSniFromTlsHandshake(hello);
-            if (sni == null || sni.isEmpty()) { closeQuietly(remote); return; }
+            boolean targetIsIp = isIpAddress(hp.host());
+
+            if (sni == null || sni.isEmpty()) {
+                if (!targetIsIp) {
+                    logger.warn("Blocked CONNECT: Domain '{}' requested without SNI", hp.host());
+                    closeQuietly(remote);
+                    return;
+                } else {
+                    logger.debug("CONNECT to IP '{}' without SNI is allowed", hp.host());
+                }
+            }
+
             if (released()) { closeQuietly(remote); return; }
             BlacklistSnapshot snapshot = blacklist.snapshot();
-            BlockDecision sniDecision = snapshot.checkDomain(sni);
-            if (sniDecision.isBlocked()) { closeQuietly(remote); return; }
+            String domainToCheck = (sni != null && !sni.isEmpty()) ? sni : hp.host();
+            BlockDecision sniDecision = snapshot.checkDomain(domainToCheck);
+
+            if (sniDecision.isBlocked()) {
+                logger.info(LocaleUtil.getString("proxy_handler_connect_blocked"), clientIp, domainToCheck, hp.port(), sniDecision.getReason());
+                closeQuietly(remote);
+                return;
+            }
+
             String normalizedHost = HostNormalizer.normalizeHost(hp.host());
-            String normalizedSni = HostNormalizer.normalizeHost(sni);
-            boolean mismatch = normalizedHost != null && normalizedSni != null && !normalizedHost.equals(normalizedSni);
-            if (mismatch && blockOnSniMismatch) { closeQuietly(remote); return; }
-            if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) httpAnomalyDetector.recordRequest(clientIp, "CONNECT", sni, hp.port(), "/", "", null);
+            String normalizedSni = (sni != null) ? HostNormalizer.normalizeHost(sni) : null;
+
+            boolean mismatch = false;
+            if (!targetIsIp && normalizedHost != null && normalizedSni != null && !normalizedHost.equals(normalizedSni)) {
+                mismatch = true;
+            }
+
+            if (mismatch && blockOnSniMismatch) {
+                closeQuietly(remote);
+                return;
+            }
+
+            if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) {
+                String logHost = (sni != null && !sni.isEmpty()) ? sni : hp.host();
+                httpAnomalyDetector.recordRequest(clientIp, "CONNECT", logHost, hp.port(), "/", "", null);
+            }
+
             remote.getOutputStream().write(hello);
             remote.getOutputStream().flush();
             ProxyHandlerHelper.runTunnel(clientSocket, remote);
             remote = null;
+
         } catch (SocketTimeoutException e) {
             closeQuietly(remote);
             if (!released()) sendError(out, 504, "Gateway Timeout");
@@ -165,6 +208,11 @@ public class ProxyHandler implements Runnable {
             closeQuietly(remote);
             if (!released()) sendError(out, 502, "Bad Gateway");
         }
+    }
+
+    private static boolean isIpAddress(String host) {
+        if (host == null) return false;
+        return host.matches("^\\d{1,3}(\\.\\d{1,3}){3}$");
     }
 
     private void handleHttp(InputStream in, OutputStream out, String firstLine, String target, String method) throws IOException {
