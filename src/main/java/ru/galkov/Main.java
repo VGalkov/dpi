@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
@@ -56,10 +57,10 @@ public final class Main {
             httpAnomalyDetector = new HttpAnomalyDetector();
             LlmAnomalyDetector.initBlacklist(blacklist);
 
-            registerShutdownHook();
-            startDetectors();
-            startProxyServer();
             startDnsServer();
+            startProxyServer();
+            startDetectors();
+            registerShutdownHook();
 
             int checkApiPort = getConfig().getInt("check.api.port");
             startCheckApiServer(blacklist.snapshot(), checkApiPort);
@@ -314,11 +315,10 @@ public final class Main {
         if (blacklist == null) { logger.error(LocaleUtil.getString("main_blacklist_null"), "DNS"); return; }
         if (dnsAnomalyDetector == null) { logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "DnsAnomalyDetector"); return; }
         try {
-            DnsServer server = new DnsServer(blacklist, dnsAnomalyDetector);
-            Thread dnsThread = new Thread(server::run, "DnsServer-Main-Thread");
+            dnsServer = new DnsServer(blacklist, dnsAnomalyDetector);
+            Thread dnsThread = new Thread(dnsServer::run, "DnsServer-Main-Thread");
             dnsThread.setDaemon(false);
             dnsThread.start();
-            dnsServer = server;
             logger.info(LocaleUtil.getString("dns_server_started"), config.getInt("dns.local.port"));
         } catch (Exception e) {
             dnsServer = null;
@@ -327,22 +327,46 @@ public final class Main {
     }
 
     public static synchronized void startProxyServer() {
-        if (proxyServer != null) { logger.info(LocaleUtil.getString("http_proxy_already_initialized")); return; }
-        if (config == null) { logger.error(LocaleUtil.getString("main_config_null")); return; }
-        if (!config.getBoolean("proxy.start")) { logger.info(LocaleUtil.getString("http_proxy_disabled")); return; }
-        if (blacklist == null) { logger.error(LocaleUtil.getString("main_blacklist_null"), "HTTP Proxy"); return; }
-        if (httpAnomalyDetector == null) { logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "HttpAnomalyDetector"); return; }
+        if (proxyServer != null) {
+            logger.info(LocaleUtil.getString("http_proxy_already_initialized"));
+            return;
+        }
+        if (config == null) {
+            logger.error(LocaleUtil.getString("main_config_null"));
+            return;
+        }
+        if (!config.getBoolean("proxy.start")) {
+            logger.info(LocaleUtil.getString("http_proxy_disabled"));
+            return;
+        }
+        if (blacklist == null) {
+            logger.error(LocaleUtil.getString("main_blacklist_null"), "HTTP Proxy");
+            return;
+        }
+        if (httpAnomalyDetector == null) {
+            logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "HttpAnomalyDetector");
+            return;
+        }
         try {
-            int port = config.getInt("proxy.local.port");
-            logger.info(LocaleUtil.getString("http_proxy_init_start"), port);
-            HttpProxyServer server = new HttpProxyServer(port, blacklist, httpAnomalyDetector);
-            server.start();
-            proxyServer = server;
+            logger.info(LocaleUtil.getString("http_proxy_init_start"), config.getIntList("proxy.local.port.list"));
+
+            Set<Integer> transparentPortSet = config.getIntList("proxy.transparent.port.list");
+
+            logger.info("Transparent proxy ports: {}", transparentPortSet);
+
+            proxyServer = new HttpProxyServer(
+                    config.getIntList("proxy.local.port.list"),
+                    transparentPortSet,
+                    blacklist,
+                    httpAnomalyDetector
+            );
+            proxyServer.start();
         } catch (Exception e) {
             proxyServer = null;
             logger.error(LocaleUtil.getString("main_proxy_server_start_error"), e);
         }
     }
+
 
     public static AppConfig getConfig() {
         AppConfig localConfig = config;

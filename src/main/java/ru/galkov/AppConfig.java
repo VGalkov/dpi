@@ -102,10 +102,6 @@ public final class AppConfig {
         validateIntRange(
                 "dns.timeout", 1, 300, 3,
                 "config_validation_dns_timeout_invalid");
-
-        validateIntRange(
-                "proxy.local.port", 1, 65535, 3128,
-                "config_validation_proxy_port_invalid");
         validateIntRange(
                 "proxy.max-header-bytes", 1024, 1048576, 32768,
                 "config_validation_proxy_max_header_invalid");
@@ -391,4 +387,17 @@ public final class AppConfig {
         return value.trim();
     }
 
+    public Set<Integer> getIntList(String key) {
+        return new HashSet<>(getPortList(key));
+    }
+
+
+    public List<Integer> getPortList(String key) {
+        String raw = get(key);
+        if (raw.trim().isEmpty()) return Collections.emptyList();
+        String[] parts = raw.split("\\s*,\\s*");
+        Integer[] intParts = new Integer[parts.length];
+        for (int i = 0; i < parts.length; i++) intParts[i] = Integer.parseInt(parts[i]);
+        return Arrays.asList(intParts);
+    }
 }

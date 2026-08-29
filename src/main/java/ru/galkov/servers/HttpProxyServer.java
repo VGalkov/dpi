@@ -8,11 +8,9 @@ import ru.galkov.util.*;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketAddress;
 import java.net.SocketException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -21,15 +19,13 @@ import java.util.concurrent.atomic.LongAdder;
 import static ru.galkov.Main.getConfig;
 import static ru.galkov.util.IoUtil.closeQuietly;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
 public class HttpProxyServer {
 
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
+    private final Set<Integer> ports;
+    private final Set<Integer> transparentPorts;
     private final BlacklistLoader blacklist;
     private final HttpAnomalyDetector httpAnomalyDetector;
-    private final int port;
     private final int maxConnections;
     private final int maxConnectionsPerClient;
     private final int maxActiveSockets;
@@ -39,10 +35,9 @@ public class HttpProxyServer {
     private final ConcurrentHashMap<Socket, ConnectionLease> leasesBySocket = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Socket, Long> socketActivity = new ConcurrentHashMap<>();
     private final long idleCleanupThresholdMillis;
-    private final Object lifecycleLock = new Object();
     private volatile boolean running;
-    private volatile ServerSocket serverSocket;
-    private volatile Thread serverThread;
+    private final Map<Integer, ServerSocket> serverSockets = new ConcurrentHashMap<>();
+    private final List<Thread> serverThreads = new ArrayList<>();
     private final LongAdder maxSocketsRejectedCount = new LongAdder();
     private final LongAdder maxConnectionsRejectedCount = new LongAdder();
     private final LongAdder maxClientConnectionsRejectedCount = new LongAdder();
@@ -51,9 +46,14 @@ public class HttpProxyServer {
     private final LongAdder workerPoolRejectedCount = new LongAdder();
     private final LongAdder duplicateSocketCount = new LongAdder();
     private final LongAdder cleanedSocketsCount = new LongAdder();
+    private final Object lifecycleLock = new Object();
 
-    public HttpProxyServer(int port, BlacklistLoader blacklist, HttpAnomalyDetector httpAnomalyDetector) {
-        this.port = port;
+    public HttpProxyServer(Set<Integer> ports, Set<Integer> transparentPorts, BlacklistLoader blacklist, HttpAnomalyDetector httpAnomalyDetector) {
+        this.ports = Objects.requireNonNull(ports);
+        if (this.ports.isEmpty()) {
+            throw new IllegalArgumentException("Ports list cannot be empty");
+        }
+        this.transparentPorts = transparentPorts != null ? transparentPorts : Collections.emptySet();
         this.blacklist = Objects.requireNonNull(blacklist);
         this.httpAnomalyDetector = httpAnomalyDetector;
         this.maxConnections = getConfig().getInt("proxy.max-connections");
@@ -74,40 +74,34 @@ public class HttpProxyServer {
     public void start() {
         synchronized (lifecycleLock) {
             if (running) {
-                logger.warn("Прокси сервер уже запущен на порту {}", port);
+                logger.warn("Прокси сервер уже запущен на портах {}", ports);
                 return;
             }
 
             running = true;
 
-            logger.info(
-                    "Инициализация HTTP proxy: " +
-                            "port={}, maxConnections={}, " +
-                            "maxConnectionsPerClient={}, " +
-                            "maxActiveSockets={}",
-                    port,
-                    maxConnections,
-                    maxConnectionsPerClient,
-                    maxActiveSockets
-            );
+            logger.info("Инициализация HTTP proxy на портах: {}", ports);
 
-            serverThread =
-                    new NamedThreadFactory(
-                            "HttpProxy-Server-Thread-" + port,
-                            false
-                    ).newThread(this::runServer);
+            for (int port : ports) {
+                Thread thread = new NamedThreadFactory(
+                        "HttpProxy-Server-Thread-" + port,
+                        false
+                ).newThread(() -> runServer(port));
 
-            serverThread.start();
+                serverThreads.add(thread);
+                thread.start();
+            }
         }
-        waitForSocketReady();
+        waitForSocketsReady();
     }
 
     public void stop() {
         synchronized (lifecycleLock) {
             if (!running) return;
-            logger.info("Остановка HTTP proxy: port={}", port);
+            logger.info("Остановка HTTP proxy на портах: {}", ports);
             running = false;
-            closeQuietly(serverSocket);
+            serverSockets.values().forEach(IoUtil::closeQuietly);
+            serverSockets.clear();
             leasesBySocket.values().forEach(ConnectionLease::release);
             leasesBySocket.clear();
             activeClientSockets.forEach(IoUtil::closeQuietly);
@@ -115,15 +109,17 @@ public class HttpProxyServer {
             socketActivity.clear();
         }
 
-        joinServerThread();
+        joinServerThreads();
         logAggregatedStatistics();
-        logger.info("Остановка HTTP proxy завершена: port={}", port);
+        logger.info("Остановка HTTP proxy завершена на портах: {}", ports);
     }
 
-    private void runServer() {
-        try (ServerSocket localServerSocket = new ServerSocket(port)) {
-            serverSocket = localServerSocket;
-            logger.info("HTTP Proxy слушает порт {}", port);
+    private void runServer(int port) {
+        ServerSocket localServerSocket = null;
+        try {
+            localServerSocket = new ServerSocket(port);
+            serverSockets.put(port, localServerSocket);
+            logger.info("HTTP Proxy слушает порт {} {}", port, transparentPorts.contains(port) ? "(transparent)" : "(explicit)");
             while (running) {
                 Socket clientSocket;
                 try {
@@ -142,7 +138,7 @@ public class HttpProxyServer {
                     closeQuietly(clientSocket);
                     break;
                 }
-                handleAcceptedConnection(clientSocket);
+                handleAcceptedConnection(clientSocket, port);
             }
         } catch (IOException e) {
             if (running) {
@@ -151,18 +147,15 @@ public class HttpProxyServer {
                 logger.info("HTTP Proxy остановлен на порту {}", port);
             }
         } finally {
-            serverSocket = null;
-            running = false;
-            leasesBySocket.values().forEach(ConnectionLease::release);
-            leasesBySocket.clear();
-            activeClientSockets.clear();
-            socketActivity.clear();
-            logAggregatedStatistics();
-            logger.info("HTTP Proxy server thread завершён");
+            if (localServerSocket != null) {
+                serverSockets.remove(port);
+                closeQuietly(localServerSocket);
+            }
+            logger.info("HTTP Proxy server thread для порта {} завершён", port);
         }
     }
 
-    private void handleAcceptedConnection(Socket clientSocket) {
+    private void handleAcceptedConnection(Socket clientSocket, int listenedPort) {
         String clientIp =
                 clientSocket.getInetAddress() == null ? "unknown" : clientSocket.getInetAddress().getHostAddress();
 
@@ -204,14 +197,23 @@ public class HttpProxyServer {
                 return;
             }
 
-            lease =
-                    ConnectionLease.fromReserved(
-                            clientSocket,
-                            clientIp,
-                            connectionsByClient,
-                            clientCounter,
-                            connectionSlots
-                    );
+            SocketAddress originalDestination = null;
+            if (transparentPorts.contains(listenedPort)) {
+                originalDestination = OriginalDestination.getOriginalDestination(clientSocket);
+                if (originalDestination == null) {
+                    logger.warn("Cannot determine original destination for transparent proxy on port {}, client={}", listenedPort, clientIp);
+                }
+            }
+
+            lease = ConnectionLease.fromReserved(
+                    clientSocket,
+                    clientIp,
+                    connectionsByClient,
+                    clientCounter,
+                    connectionSlots,
+                    originalDestination,
+                    listenedPort
+            );
 
             if (leasesBySocket.putIfAbsent(clientSocket, lease) != null) {
                 duplicateSocketCount.increment();
@@ -301,21 +303,30 @@ public class HttpProxyServer {
         }
     }
 
-    private void joinServerThread() {
-        Thread thread = serverThread;
-        if (thread == null || thread == Thread.currentThread()) return;
-        try {
-            thread.join(5000L);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+    private void joinServerThreads() {
+        for (Thread thread : serverThreads) {
+            if (thread == null || thread == Thread.currentThread()) continue;
+            try {
+                thread.join(5000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
-    private void waitForSocketReady() {
+    private void waitForSocketsReady() {
         long timeout = System.currentTimeMillis() + 5000L;
 
         while (System.currentTimeMillis() < timeout) {
-            if (serverSocket != null && serverSocket.isBound() && !serverSocket.isClosed()) return;
+            boolean allBound = true;
+            for (int port : ports) {
+                ServerSocket ss = serverSockets.get(port);
+                if (ss == null || ss.isClosed() || !ss.isBound()) {
+                    allBound = false;
+                    break;
+                }
+            }
+            if (allBound) return;
 
             try {
                 Thread.sleep(50L);
@@ -325,7 +336,7 @@ public class HttpProxyServer {
             }
         }
 
-        logger.warn("HTTP Proxy не открыл порт {} за 5 секунд", port);
+        logger.warn("HTTP Proxy не открыл все порты {} за 5 секунд", ports);
     }
 
     private void logAggregatedStatistics() {

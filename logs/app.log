@@ -1,393 +1,593 @@
-2026-08-22 00:18:49.463 [main] ERROR ru.galkov.Main - Main: AppConfig is null, cannot proceed
-2026-08-22 00:18:49.471 [main] ERROR ru.galkov.Main - Main: AppConfig is null, cannot proceed
-2026-08-22 00:18:49.477 [main] ERROR ru.galkov.Main - Main: AppConfig is null, cannot proceed
-2026-08-22 00:19:22.042 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 00:19:22.044 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 00:19:22.044 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 00:19:22.045 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 00:19:22.046 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 00:19:22.046 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 00:19:22.046 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 00:19:22.046 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 00:19:22.047 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 00:19:22.101 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 00:19:22.349 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 00:19:22.359 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 00:19:22.367 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 00:19:22.367 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 00:19:22.367 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 00:19:22.369 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 00:19:25.742 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 00:19:27.400 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 00:19:27.428 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 42531
-2026-08-22 00:19:28.305 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
-2026-08-22 00:19:28.320 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/3, sourceLoadErrors=0, rulesRead=51266, rulesTotal=51266, rulesAccepted=49928, rulesInvalid=17, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=1321, truncatedSources=0, totalLimitReached=false, maxMemoryMb=131, totalSourceLoadTimeMs=11003, maxSourceDurationMs=5939, buildDurationMs=5961
-2026-08-22 00:19:28.323 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 00:19:28.334 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 00:19:28.337 [main] INFO  ru.galkov.llm.SharedLlmDispatcher - Shared LLM dispatcher started: capacity=128
-2026-08-22 00:19:28.495 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - HttpAnomalyDetector инициализирован: enabled=true, model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions, ttl=7200s, inspectBody=false
-2026-08-22 00:19:28.496 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector detector started
-2026-08-22 00:19:28.496 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector detector started
-2026-08-22 00:19:28.496 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 00:19:28.496 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 00:19:28.497 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 00:19:28.499 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 00:19:28.583 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 00:19:28.583 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 00:19:28.589 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 00:21:13.992 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
-2026-08-22 00:21:13.993 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=8888
-2026-08-22 00:21:13.995 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
-2026-08-22 00:21:13.995 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=8888
-2026-08-22 00:21:13.996 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector detector stopped
-2026-08-22 00:21:13.996 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector detector stopped
-2026-08-22 00:21:13.996 [Shared-Llm-Dispatche] INFO  ru.galkov.llm.SharedLlmDispatcher - Shared LLM dispatcher worker stopped
-2026-08-22 00:21:13.996 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
-2026-08-22 00:21:13.996 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.SharedLlmDispatcher - Shared LLM dispatcher stopped: submitted=0, completed=0, duplicate=0, full=0, expired=0, failed=0
-2026-08-22 00:21:13.998 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
-2026-08-22 00:21:13.998 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
-2026-08-22 00:21:13.998 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
-2026-08-22 00:21:13.998 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
-2026-08-22 00:21:17.207 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 00:21:17.209 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 00:21:17.209 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 00:21:17.210 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 00:21:17.212 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 00:21:17.212 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 00:21:17.212 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 00:21:17.212 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 00:21:17.214 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 00:21:17.248 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 00:21:17.496 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 00:21:17.510 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 00:21:17.519 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 00:21:17.519 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 00:21:17.520 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 00:21:17.521 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 00:21:20.313 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=1/3, sourceLoadErrors=2, rulesRead=3, rulesTotal=3, rulesAccepted=3, rulesInvalid=0, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=0, truncatedSources=0, totalLimitReached=false, maxMemoryMb=41, totalSourceLoadTimeMs=2, maxSourceDurationMs=2, buildDurationMs=2803
-2026-08-22 00:21:20.314 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=2, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}]
-2026-08-22 00:21:20.317 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 00:21:20.320 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 00:21:20.324 [main] INFO  ru.galkov.llm.SharedLlmDispatcher - Shared LLM dispatcher started: capacity=128
-2026-08-22 00:21:20.454 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - HttpAnomalyDetector инициализирован: enabled=true, model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions, ttl=7200s, inspectBody=false
-2026-08-22 00:21:20.455 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector detector started
-2026-08-22 00:21:20.455 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector detector started
-2026-08-22 00:21:20.455 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 00:21:20.455 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 00:21:20.457 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 00:21:20.460 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 00:21:20.548 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 00:21:20.548 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 00:21:20.554 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 00:22:18.508 [Worker-Pool-Thread-1] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: CONNECT заблокирован client=192.168.1.2, host=www.cofe.ru, port=443, reason=DOMAIN_SUBTREE
-2026-08-22 00:23:43.034 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
-2026-08-22 00:23:43.034 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=8888
-2026-08-22 00:23:43.034 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
-2026-08-22 00:23:43.035 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=8888
-2026-08-22 00:23:43.035 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector detector stopped
-2026-08-22 00:23:43.035 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector detector stopped
-2026-08-22 00:23:43.035 [Shared-Llm-Dispatche] INFO  ru.galkov.llm.SharedLlmDispatcher - Shared LLM dispatcher worker stopped
-2026-08-22 00:23:43.035 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.SharedLlmDispatcher - Shared LLM dispatcher stopped: submitted=0, completed=0, duplicate=0, full=0, expired=0, failed=0
-2026-08-22 00:23:43.035 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server aggregated statistics: packetPoolEmpty=0, maxPacketSizeExceeded=0, activeUdpSocketsOverflow=0, maxQueriesByClientExceeded=0, maxClientsExceeded=0, rateLimitExceeded=0, udpWorkerRejected=0, tcpWorkerRejected=0, tcpSessionLimitExceeded=0, tcpClientLimitExceeded=0, upstreamErrors=80, udpSendErrors=0, tcpSessionErrors=0, tcpSocketErrors=0
-2026-08-22 00:23:43.035 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
-2026-08-22 00:23:43.035 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
-2026-08-22 00:23:43.040 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
-2026-08-22 00:23:43.040 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
-2026-08-22 00:23:43.040 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
-2026-08-22 00:25:18.548 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 00:25:18.549 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 00:25:18.549 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 00:25:18.550 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 00:25:18.551 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 00:25:18.551 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 00:25:18.551 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 00:25:18.551 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 00:25:18.552 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 00:25:18.591 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 00:25:18.799 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 00:25:18.805 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 00:25:18.809 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 00:25:18.810 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 00:25:18.810 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 00:25:18.811 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 00:25:21.815 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=1/3, sourceLoadErrors=2, rulesRead=3, rulesTotal=3, rulesAccepted=3, rulesInvalid=0, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=0, truncatedSources=0, totalLimitReached=false, maxMemoryMb=39, totalSourceLoadTimeMs=2, maxSourceDurationMs=2, buildDurationMs=3010
-2026-08-22 00:25:21.816 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=2, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}]
-2026-08-22 00:25:21.821 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 00:25:21.823 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 00:25:21.951 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 00:25:21.953 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 00:25:21.953 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - HttpAnomalyDetector инициализирован: enabled=true, model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions, ttl=7200s, inspectBody=false
-2026-08-22 00:25:21.955 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector_started
-2026-08-22 00:25:21.955 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector_started
-2026-08-22 00:25:21.955 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 00:25:21.955 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 00:25:21.956 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 00:25:21.959 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 00:25:22.040 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 00:25:22.040 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 00:25:22.045 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 00:27:01.495 [Worker-Pool-Thread-1] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: CONNECT заблокирован client=192.168.1.2, host=www.cofe.ru, port=443, reason=DOMAIN_SUBTREE
-2026-08-22 00:27:16.985 [DnsAnomalyDetector-T] WARN  r.galkov.llm.AbstractAnomalyDetector - Prompt is empty for target=2.1.168.192.in-addr.arpa
-2026-08-22 00:27:17.003 [DnsAnomalyDetector-T] INFO  ru.galkov.llm.LlmClient - LLM Client: отправка запроса model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions
-2026-08-22 00:27:55.841 [DnsAnomalyDetector-T] INFO  ru.galkov.llm.LlmClient - Successfully parsed LLM result: domain=www.ru.home, suspicious=false, confidence=0.55, actions=[NONE]
-2026-08-22 00:27:55.847 [DnsAnomalyDetector-T] INFO  ru.galkov.llm.LlmClient - LLM Client: отправка запроса model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions
-2026-08-22 00:28:27.582 [Worker-Pool-Thread-1] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: CONNECT заблокирован client=192.168.1.2, host=www.cofe.ru, port=443, reason=DOMAIN_SUBTREE
-2026-08-22 00:28:28.228 [DnsAnomalyDetector-T] ERROR ru.galkov.llm.LlmClient - Failed to extract valid JSON from raw content for domain=www.ru. Raw: {"_isSuspicious_: false, _confidence_: 0.55, _reason_: _Легитимный домен, нет признаков DGA_, _recommendedActions_: __NONE__}
-2026-08-22 00:30:39.424 [Worker-Pool-Thread-3] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: HTTP заблокирован client=192.168.1.2, host=www.cofe.ru, port=80, reason=DOMAIN_SUBTREE
-2026-08-22 00:31:46.395 [Worker-Pool-Thread-3] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: HTTP заблокирован client=192.168.1.2, host=www.cofe.ru, port=80, reason=DOMAIN_SUBTREE
-2026-08-22 00:31:51.566 [Worker-Pool-Thread-3] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: CONNECT заблокирован client=192.168.1.2, host=www.cofe.ru, port=443, reason=DOMAIN_SUBTREE
-2026-08-22 00:31:55.091 [Worker-Pool-Thread-3] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: HTTP заблокирован client=192.168.1.2, host=www.cofe.ru, port=80, reason=DOMAIN_SUBTREE
-2026-08-22 00:32:24.416 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmClient - LLM Client: отправка запроса model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions
-2026-08-22 00:32:50.078 [HttpAnomalyDetector-] ERROR ru.galkov.llm.LlmClient - Failed to extract valid JSON from raw content for domain=www.google.com. Raw: {"_isSuspicious_: false, "_confidence_: 0.0}
-2026-08-22 00:32:50.080 [HttpAnomalyDetector-] WARN  r.galkov.llm.AbstractAnomalyDetector - Превышен лимит запросов к LLM, пропускаем анализ
-2026-08-22 20:48:29.370 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 20:48:29.371 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 20:48:29.372 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 20:48:29.372 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 20:48:29.374 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 20:48:29.374 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 20:48:29.374 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 20:48:29.374 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 20:48:29.376 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 20:48:29.430 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 20:48:29.687 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 20:48:29.695 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 20:48:29.701 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 20:48:29.701 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 20:48:29.701 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 20:48:29.702 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 20:48:33.379 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 20:48:33.591 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 20:48:34.285 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
-2026-08-22 20:48:36.696 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 42531
-2026-08-22 20:48:36.766 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/3, sourceLoadErrors=0, rulesRead=51266, rulesTotal=51266, rulesAccepted=49928, rulesInvalid=17, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=1321, truncatedSources=0, totalLimitReached=false, maxMemoryMb=132, totalSourceLoadTimeMs=11580, maxSourceDurationMs=6995, buildDurationMs=7071
-2026-08-22 20:48:36.770 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 20:48:36.773 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 20:48:36.932 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 20:48:36.935 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 20:48:36.936 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - HttpAnomalyDetector инициализирован: enabled=true, model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions, ttl=7200s, inspectBody=false
-2026-08-22 20:48:36.937 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector_started
-2026-08-22 20:48:36.937 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector_started
-2026-08-22 20:48:36.937 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 20:48:36.937 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 20:48:36.939 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 20:48:36.942 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 20:48:37.024 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 20:48:37.024 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 20:48:37.030 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 20:53:56.174 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
-2026-08-22 20:53:56.175 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=8888
-2026-08-22 20:53:56.176 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
-2026-08-22 20:53:56.177 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=8888
-2026-08-22 20:53:56.177 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
-2026-08-22 20:53:56.583 [HttpAnomalyDetector-] INFO  r.galkov.llm.AbstractAnomalyDetector - HttpAnomalyDetector завершил обработку очереди
-2026-08-22 20:53:56.583 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector_stopped
-2026-08-22 20:53:56.593 [DnsAnomalyDetector-T] INFO  r.galkov.llm.AbstractAnomalyDetector - DnsAnomalyDetector завершил обработку очереди
-2026-08-22 20:53:56.593 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector_stopped
-2026-08-22 20:53:56.594 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
-2026-08-22 20:53:56.595 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
-2026-08-22 20:53:56.595 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
-2026-08-22 20:53:56.595 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
-2026-08-22 21:06:17.969 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 21:06:17.971 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 21:06:17.971 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 21:06:17.971 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 21:06:17.973 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 21:06:17.973 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 21:06:17.973 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 21:06:17.974 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 21:06:17.975 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 21:06:18.032 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 21:06:18.278 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 21:06:18.289 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 21:06:18.295 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 21:06:18.296 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 21:06:18.296 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 21:06:18.297 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 21:06:27.717 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 21:06:28.647 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 42531
-2026-08-22 21:06:28.918 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 21:06:29.658 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
-2026-08-22 21:06:29.675 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/3, sourceLoadErrors=0, rulesRead=51266, rulesTotal=51266, rulesAccepted=49928, rulesInvalid=17, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=1321, truncatedSources=0, totalLimitReached=false, maxMemoryMb=133, totalSourceLoadTimeMs=21718, maxSourceDurationMs=11363, buildDurationMs=11387
-2026-08-22 21:06:29.679 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 21:06:29.683 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 21:06:29.846 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 21:06:29.849 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 21:06:29.850 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - HttpAnomalyDetector инициализирован: enabled=true, model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions, ttl=7200s, inspectBody=false
-2026-08-22 21:06:29.851 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector_started
-2026-08-22 21:06:29.851 [main] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector_started
-2026-08-22 21:06:29.851 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 21:06:29.851 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 21:06:29.854 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 21:06:29.857 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 21:06:29.945 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 21:06:29.945 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 21:06:29.952 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 21:06:50.678 [DnsAnomalyDetector-T] WARN  r.galkov.llm.AbstractAnomalyDetector - Prompt is empty for target=1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa
-2026-08-22 21:06:50.695 [DnsAnomalyDetector-T] INFO  ru.galkov.llm.LlmClient - LLM Client: отправка запроса model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions
-2026-08-22 21:06:53.550 [Worker-Pool-Thread-6] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: CONNECT заблокирован client=192.168.1.2, host=www.cofe.ru, port=443, reason=DOMAIN_SUBTREE
-2026-08-22 21:07:02.056 [Worker-Pool-Thread-1] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: CONNECT заблокирован client=192.168.1.2, host=www.cofe.ru, port=443, reason=DOMAIN_SUBTREE
-2026-08-22 21:07:06.152 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmClient - LLM Client: отправка запроса model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions
-2026-08-22 21:07:41.346 [DnsAnomalyDetector-T] ERROR ru.galkov.llm.LlmClient - Failed to extract valid JSON from raw content for domain=www.ru.home. Raw: {"_isSuspicious_: false, _confidence_: 0.55, _reason_: _Легитимный домен, нет признаков DGA_, _recommendedActions_: __NONE__}
-2026-08-22 21:07:45.807 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmClient - Model returned string in 'recommendedActions' instead of array for domain=www.google.com. Value: 'NONE'. Converting to list.
-2026-08-22 21:07:45.807 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmClient - Successfully parsed LLM result: domain=www.google.com, suspicious=false, confidence=0.10, actions=[NONE]
-2026-08-22 21:17:16.491 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
-2026-08-22 21:17:16.492 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=8888
-2026-08-22 21:17:16.493 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
-2026-08-22 21:17:16.493 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=8888
-2026-08-22 21:17:16.494 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server aggregated statistics: packetPoolEmpty=0, maxPacketSizeExceeded=0, activeUdpSocketsOverflow=0, maxQueriesByClientExceeded=0, maxClientsExceeded=0, rateLimitExceeded=0, udpWorkerRejected=0, tcpWorkerRejected=0, tcpSessionLimitExceeded=0, tcpClientLimitExceeded=0, upstreamErrors=1, udpSendErrors=0, tcpSessionErrors=0, tcpSocketErrors=0
-2026-08-22 21:17:16.494 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
-2026-08-22 21:17:16.911 [HttpAnomalyDetector-] INFO  r.galkov.llm.AbstractAnomalyDetector - HttpAnomalyDetector завершил обработку очереди
-2026-08-22 21:17:16.912 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - http.anomaly-detector_stopped
-2026-08-22 21:17:16.994 [DnsAnomalyDetector-T] INFO  r.galkov.llm.AbstractAnomalyDetector - DnsAnomalyDetector завершил обработку очереди
-2026-08-22 21:17:16.994 [Dpi-Shutdown-Hook] INFO  r.galkov.llm.AbstractAnomalyDetector - dns.anomaly-detector_stopped
-2026-08-22 21:17:16.994 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
-2026-08-22 21:17:16.996 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
-2026-08-22 21:17:16.996 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
-2026-08-22 21:17:16.996 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
-2026-08-22 21:19:38.311 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 21:19:38.312 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 21:19:38.312 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 21:19:38.313 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 21:19:38.315 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 21:19:38.315 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 21:19:38.315 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 21:19:38.315 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 21:19:38.316 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 21:19:38.362 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 21:19:41.413 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 21:19:41.428 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 21:19:41.434 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 21:19:41.434 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 21:19:41.435 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 21:19:41.436 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 21:19:42.146 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 21:19:42.931 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 21:19:43.728 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
-2026-08-22 21:20:30.409 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 42531
-2026-08-22 21:20:30.613 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/3, sourceLoadErrors=0, rulesRead=51266, rulesTotal=51266, rulesAccepted=49928, rulesInvalid=17, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=1321, truncatedSources=0, totalLimitReached=false, maxMemoryMb=132, totalSourceLoadTimeMs=51272, maxSourceDurationMs=48975, buildDurationMs=49184
-2026-08-22 21:20:30.620 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 21:20:30.641 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 21:20:30.890 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 21:20:30.896 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 21:20:30.899 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_started
-2026-08-22 21:20:30.899 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_started
-2026-08-22 21:20:30.899 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 21:20:30.899 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 21:20:30.903 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 21:20:30.905 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 21:20:31.023 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 21:20:31.024 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 21:20:31.037 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 21:34:41.328 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
-2026-08-22 21:34:41.329 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=8888
-2026-08-22 21:34:41.333 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
-2026-08-22 21:34:41.333 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=8888
-2026-08-22 21:34:41.334 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
-2026-08-22 21:34:41.879 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmAnomalyDetector - HttpAnomalyDetector завершил обработку очереди
-2026-08-22 21:34:41.879 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
-2026-08-22 21:34:41.912 [DnsAnomalyDetector-T] INFO  ru.galkov.llm.LlmAnomalyDetector - DnsAnomalyDetector завершил обработку очереди
-2026-08-22 21:34:41.912 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
-2026-08-22 21:34:41.914 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
-2026-08-22 21:34:41.914 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
-2026-08-22 21:34:41.914 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
-2026-08-22 21:34:41.914 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
-2026-08-22 22:16:19.124 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 22:16:19.125 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 22:16:19.125 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 22:16:19.126 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 22:16:19.127 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 22:16:19.127 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 22:16:19.127 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 22:16:19.127 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 22:16:19.128 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 22:16:19.161 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 22:16:19.356 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 22:16:19.363 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 22:16:19.368 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 22:16:19.369 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 22:16:19.369 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 22:16:19.370 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 22:16:19.845 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 22:16:22.199 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 22:16:27.456 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 42531
-2026-08-22 22:16:30.256 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
-2026-08-22 22:16:30.277 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/3, sourceLoadErrors=0, rulesRead=51266, rulesTotal=51266, rulesAccepted=49928, rulesInvalid=17, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=1321, truncatedSources=0, totalLimitReached=false, maxMemoryMb=131, totalSourceLoadTimeMs=18979, maxSourceDurationMs=10887, buildDurationMs=10914
-2026-08-22 22:16:30.290 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 22:16:30.293 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 22:16:30.494 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 22:16:30.497 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 22:16:30.499 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_started
-2026-08-22 22:16:30.499 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_started
-2026-08-22 22:16:30.499 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 22:16:30.499 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 22:16:30.502 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 22:16:30.505 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 22:16:30.595 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 22:16:30.595 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 22:16:30.601 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 22:16:32.357 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmClient - LLM Client: отправка запроса model=google/gemma-4-e2b, url=http://localhost:1234/v1/chat/completions
-2026-08-22 22:16:38.455 [Worker-Pool-Thread-4] INFO  ru.galkov.servers.ProxyHandler - ProxyHandler: CONNECT заблокирован client=192.168.1.2, host=www.cofe.ru, port=443, reason=DOMAIN_SUBTREE
-2026-08-22 22:16:41.190 [DnsAnomalyDetector-T] WARN  ru.galkov.llm.LlmAnomalyDetector - Prompt is empty for target=2.1.168.192.in-addr.arpa
-2026-08-22 22:17:04.297 [HttpAnomalyDetector-] ERROR ru.galkov.llm.LlmClient - Failed to extract valid JSON from raw content for domain=www.nic.ru. Raw: {"_isSuspicious_: false, "_confidence_: 0.1, "_reason_: На основе предоставленных данных не было обнаружено явных признаков SQL-инъекции, XSS или Path traversal. Запрос выглядит как стандартная попытк...
-2026-08-22 22:17:04.302 [HttpAnomalyDetector-] WARN  ru.galkov.llm.LlmAnomalyDetector - Превышен лимит запросов к LLM, пропускаем анализ
-2026-08-22 22:26:10.883 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
-2026-08-22 22:26:10.884 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=8888
-2026-08-22 22:26:10.884 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
-2026-08-22 22:26:10.885 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=8888
-2026-08-22 22:26:10.885 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
-2026-08-22 22:26:11.254 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmAnomalyDetector - HttpAnomalyDetector завершил обработку очереди
-2026-08-22 22:26:11.254 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
-2026-08-22 22:26:11.303 [DnsAnomalyDetector-T] INFO  ru.galkov.llm.LlmAnomalyDetector - DnsAnomalyDetector завершил обработку очереди
-2026-08-22 22:26:11.303 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
-2026-08-22 22:26:11.303 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
-2026-08-22 22:26:11.304 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
-2026-08-22 22:26:11.305 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
-2026-08-22 22:26:11.305 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
-2026-08-22 22:26:16.218 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
-2026-08-22 22:26:16.220 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
-2026-08-22 22:26:16.220 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
-2026-08-22 22:26:16.221 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
-2026-08-22 22:26:16.223 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 22:26:16.223 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
-2026-08-22 22:26:16.223 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
-2026-08-22 22:26:16.223 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
-2026-08-22 22:26:16.225 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=D:\IdeaProjects\dpi\blacklist.txt}
-2026-08-22 22:26:16.259 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
-2026-08-22 22:26:16.466 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
-2026-08-22 22:26:16.476 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 4
-2026-08-22 22:26:16.482 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
-2026-08-22 22:26:16.482 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Blacklist найден в classpath: file:/D:/IdeaProjects/dpi/target/classes/blacklist.txt
-2026-08-22 22:26:16.482 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
-2026-08-22 22:26:16.484 [Blacklist-Loader-Thr] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 3
-2026-08-22 22:26:17.240 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 22:26:18.084 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
-2026-08-22 22:26:18.918 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
-2026-08-22 22:26:21.305 [Blacklist-Loader-Thr] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 42531
-2026-08-22 22:26:21.449 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/3, sourceLoadErrors=0, rulesRead=51266, rulesTotal=51266, rulesAccepted=49928, rulesInvalid=17, ipsUnique=0, ipsCidr=2, ipsDuplicate=0, domainsDuplicate=1321, truncatedSources=0, totalLimitReached=false, maxMemoryMb=129, totalSourceLoadTimeMs=7263, maxSourceDurationMs=4824, buildDurationMs=4974
-2026-08-22 22:26:21.452 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
-2026-08-22 22:26:21.454 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 21600 секунд
-2026-08-22 22:26:21.577 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 22:26:21.579 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=true, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
-2026-08-22 22:26:21.580 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_started
-2026-08-22 22:26:21.580 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_started
-2026-08-22 22:26:21.580 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=true, http=true
-2026-08-22 22:26:21.580 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 8888
-2026-08-22 22:26:21.581 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=8888, maxConnections=10000, maxConnectionsPerClient=100, maxActiveSockets=20000
-2026-08-22 22:26:21.583 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 8888
-2026-08-22 22:26:21.670 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
-2026-08-22 22:26:21.670 [main] INFO  ru.galkov.Main - Система запущена
-2026-08-22 22:26:21.675 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=6000, maxQueriesPerClient=300, maxActiveSockets=18000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=5
-2026-08-22 22:30:57.959 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
-2026-08-22 22:30:57.959 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=8888
-2026-08-22 22:30:57.961 [HttpProxy-Server-Thr] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
-2026-08-22 22:30:57.961 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=8888
-2026-08-22 22:30:57.962 [DnsServer-Main-Threa] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
-2026-08-22 22:30:58.863 [HttpAnomalyDetector-] INFO  ru.galkov.llm.LlmAnomalyDetector - HttpAnomalyDetector завершил обработку очереди
-2026-08-22 22:30:58.863 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
-2026-08-22 22:30:58.934 [DnsAnomalyDetector-T] INFO  ru.galkov.llm.LlmAnomalyDetector - DnsAnomalyDetector завершил обработку очереди
-2026-08-22 22:30:58.934 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
-2026-08-22 22:30:58.935 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
-2026-08-22 22:30:58.935 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
-2026-08-22 22:30:58.936 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
-2026-08-22 22:30:58.936 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 12:24:03 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 12:24:03 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 12:24:03 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 12:24:03 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 12:24:03 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 12:24:03 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 12:24:03 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 12:24:03 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 512 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 12:24:03 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 12:24:03 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 12:24:03 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 12:24:03 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 12:24:04 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 12:24:04 [main] ERROR ru.galkov.Main - ❌ КРИТИЧЕСКАЯ ОШИБКА: Файл не найден!
+2026-08-29 12:24:04 [main] ERROR ru.galkov.Main - ПОЛОЖЕНИЕ ДЕЛ: Программа ищет файл в папке: (Current folder)
+2026-08-29 12:24:04 [main] ERROR ru.galkov.Main - 👉 ДЕЙСТВИЕ: Скопируйте ваш 'dump.xml' именно в эту папку.
+2026-08-29 12:24:04 [main] ERROR ru.galkov.Main - Инициализация источника failed: Файл не найден по пути 'dump.xml'. Абсолютный путь: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 12:24:04 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 12:24:04 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 12:24:04 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 12:24:04 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 12:24:04 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 12:24:06 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 12:24:14 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 12:24:14 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 12:24:14 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 12:24:14 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 12:24:14 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 12:24:14 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 12:24:14 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту 3128
+2026-08-29 12:24:14 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy: port=3128, maxConnections=500, maxConnectionsPerClient=200, maxActiveSockets=50000
+2026-08-29 12:24:14 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 3128
+2026-08-29 12:24:14 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 12:24:14 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=50000, maxQueriesPerClient=1000, maxActiveSockets=500000, maxTcpSessions=500, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 12:24:14 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 12:24:14 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 12:24:14 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy: port=3128
+2026-08-29 12:24:26 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread завершён
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена: port=3128
+2026-08-29 12:24:26 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 12:24:26 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 12:26:05 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 12:26:05 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 12:26:05 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 12:26:05 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 12:26:05 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 12:26:05 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 12:26:05 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 12:26:05 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 12:26:05 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 12:26:05 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: blacklist.txt ===
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Путь из конфига:          blacklist.txt
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 12:26:05 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 12:26:05 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 12:26:05 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: dump.xml ===
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Путь из конфига:          dump.xml
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\dump.xml
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 12:26:05 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 12:26:05 [main] INFO  ru.galkov.Main - Источник РКН добавлен: RknBlacklistSource{xmlFile=dump.xml}
+2026-08-29 12:26:05 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 12:26:05 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 12:26:05 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 12:26:05 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 12:26:05 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - чтение реестра РКН из файла: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 12:26:05 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 12:26:07 [Blacklist-Loader-Thread] DEBUG r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
+2026-08-29 12:26:10 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - Из файла РКН извлечено правил: 6985950
+2026-08-29 12:26:11 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/4, sourceLoadErrors=1, rulesRead=6994707, rulesTotal=6994707, rulesAccepted=6714392, rulesInvalid=10297, ipsUnique=377543, ipsCidr=2, ipsDuplicate=4757542, domainsDuplicate=270018, truncatedSources=0, totalLimitReached=false, maxMemoryMb=1604, totalSourceLoadTimeMs=11061, maxSourceDurationMs=6184, buildDurationMs=16389
+2026-08-29 12:26:22 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist source statistics: [FileBlacklistSource{file=null}{read=25, accepted=22, invalid=3, durationMs=2}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}{read=8732, accepted=8729, invalid=2, durationMs=6184}, RknBlacklistSource{xmlFile=dump.xml}{read=6985950, accepted=6705641, invalid=10292, durationMs=4875}]
+2026-08-29 12:26:22 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 12:26:22 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 12:26:22 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 12:26:22 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_disabled
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_disabled
+2026-08-29 12:26:22 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 12:26:22 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту [80, 3128, 443]
+2026-08-29 12:26:22 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 12:26:22 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 80
+2026-08-29 12:26:22 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 3128
+2026-08-29 12:26:22 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 443
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 12:26:22 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 12:26:22 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=150000, maxQueriesPerClient=3000, maxActiveSockets=1500000, maxTcpSessions=512, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 12:26:22 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 12:26:22 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 12:26:22 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 12:37:22 [DnsServer-Cache-Cleanup-Thread-1] DEBUG ru.galkov.servers.DnsServer - DNS cache cleanup completed: removed=8
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 13:10:54 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 80 завершён
+2026-08-29 13:10:54 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 443 завершён
+2026-08-29 13:10:54 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 3128 завершён
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена на портах: [80, 3128, 443]
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 13:10:54 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 13:10:54 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 18:02:15 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 18:02:15 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 18:02:15 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 18:02:15 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 18:02:15 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 18:02:15 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:02:15 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:02:15 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 18:02:15 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 18:02:15 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: blacklist.txt ===
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Путь из конфига:          blacklist.txt
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:02:15 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 18:02:15 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 18:02:15 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: dump.xml ===
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Путь из конфига:          dump.xml
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:02:15 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:02:15 [main] INFO  ru.galkov.Main - Источник РКН добавлен: RknBlacklistSource{xmlFile=dump.xml}
+2026-08-29 18:02:15 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 18:02:15 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:02:15 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 18:02:15 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 18:02:15 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - чтение реестра РКН из файла: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:02:15 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 18:02:17 [Blacklist-Loader-Thread] DEBUG r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
+2026-08-29 18:02:18 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 18:02:20 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - Из файла РКН извлечено правил: 6985950
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/4, sourceLoadErrors=1, rulesRead=6994707, rulesTotal=6994707, rulesAccepted=6714392, rulesInvalid=10297, ipsUnique=377543, ipsCidr=2, ipsDuplicate=4757542, domainsDuplicate=270018, truncatedSources=0, totalLimitReached=false, maxMemoryMb=1604, totalSourceLoadTimeMs=7371, maxSourceDurationMs=4851, buildDurationMs=16902
+2026-08-29 18:02:32 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist source statistics: [FileBlacklistSource{file=null}{read=25, accepted=22, invalid=3, durationMs=1}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}{read=8732, accepted=8729, invalid=2, durationMs=2519}, RknBlacklistSource{xmlFile=dump.xml}{read=6985950, accepted=6705641, invalid=10292, durationMs=4851}]
+2026-08-29 18:02:32 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 18:02:32 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 18:02:32 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:02:32 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_disabled
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_disabled
+2026-08-29 18:02:32 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 18:02:32 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту [80, 3128, 443]
+2026-08-29 18:02:32 [main] ERROR ru.galkov.Main - Main: ошибка запуска HTTP proxy: {}
+java.lang.IllegalStateException: Ключ 'proxy.transparent.port.list' не найден в application.properties
+	at ru.galkov.AppConfig.get(AppConfig.java:322)
+	at ru.galkov.AppConfig.getPortList(AppConfig.java:396)
+	at ru.galkov.Main.startProxyServer(Main.java:354)
+	at ru.galkov.Main.main(Main.java:62)
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:02:32 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 18:02:32 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=150000, maxQueriesPerClient=3000, maxActiveSockets=1500000, maxTcpSessions=512, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 18:02:32 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 18:02:32 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 18:02:32 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 18:03:23 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 18:03:23 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 18:03:23 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 18:03:23 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 18:03:23 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 18:03:23 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 18:03:23 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 18:03:23 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 18:05:18 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 18:05:18 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 18:05:18 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 18:05:18 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 18:05:18 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 18:05:18 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:05:18 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:05:18 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 18:05:18 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 18:05:18 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 18:05:18 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: blacklist.txt ===
+2026-08-29 18:05:18 [main] DEBUG ru.galkov.Main - Путь из конфига:          blacklist.txt
+2026-08-29 18:05:18 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:05:18 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:05:18 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:05:18 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:05:18 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:05:18 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 18:05:18 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 18:05:19 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 18:05:19 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: dump.xml ===
+2026-08-29 18:05:19 [main] DEBUG ru.galkov.Main - Путь из конфига:          dump.xml
+2026-08-29 18:05:19 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:05:19 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:05:19 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:05:19 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:05:19 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:05:19 [main] INFO  ru.galkov.Main - Источник РКН добавлен: RknBlacklistSource{xmlFile=dump.xml}
+2026-08-29 18:05:19 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 18:05:19 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:05:19 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 18:05:19 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - чтение реестра РКН из файла: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:05:19 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 18:05:19 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 18:05:20 [Blacklist-Loader-Thread] DEBUG r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
+2026-08-29 18:05:21 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 18:05:23 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - Из файла РКН извлечено правил: 6985950
+2026-08-29 18:05:34 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/4, sourceLoadErrors=1, rulesRead=6994707, rulesTotal=6994707, rulesAccepted=6714392, rulesInvalid=10297, ipsUnique=377543, ipsCidr=2, ipsDuplicate=4757542, domainsDuplicate=270018, truncatedSources=0, totalLimitReached=false, maxMemoryMb=2069, totalSourceLoadTimeMs=7088, maxSourceDurationMs=4378, buildDurationMs=15698
+2026-08-29 18:05:34 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 18:05:34 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist source statistics: [FileBlacklistSource{file=null}{read=25, accepted=22, invalid=3, durationMs=1}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}{read=8732, accepted=8729, invalid=2, durationMs=2709}, RknBlacklistSource{xmlFile=dump.xml}{read=6985950, accepted=6705641, invalid=10292, durationMs=4378}]
+2026-08-29 18:05:35 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 18:05:35 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 18:05:35 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:05:35 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_disabled
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_disabled
+2026-08-29 18:05:35 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 18:05:35 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту [80, 3128, 443]
+2026-08-29 18:05:35 [main] ERROR ru.galkov.Main - Main: ошибка запуска HTTP proxy: {}
+java.lang.NumberFormatException: For input string: "[80"
+	at java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:67)
+	at java.base/java.lang.Integer.parseInt(Integer.java:565)
+	at java.base/java.lang.Integer.parseInt(Integer.java:662)
+	at ru.galkov.AppConfig.getPortList(AppConfig.java:403)
+	at ru.galkov.Main.startProxyServer(Main.java:354)
+	at ru.galkov.Main.main(Main.java:62)
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:05:35 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 18:05:35 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=150000, maxQueriesPerClient=3000, maxActiveSockets=1500000, maxTcpSessions=512, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 18:05:35 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 18:05:35 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 18:05:35 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 18:06:07 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 18:06:07 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 18:06:07 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 18:06:07 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 18:06:07 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 18:06:07 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 18:06:07 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 18:06:07 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 18:06:13 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 18:06:13 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 18:06:13 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 18:06:13 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 18:06:13 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 18:06:13 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:06:13 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:06:13 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 18:06:13 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 18:06:13 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: blacklist.txt ===
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Путь из конфига:          blacklist.txt
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:06:13 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 18:06:13 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 18:06:13 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: dump.xml ===
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Путь из конфига:          dump.xml
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:06:13 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:06:13 [main] INFO  ru.galkov.Main - Источник РКН добавлен: RknBlacklistSource{xmlFile=dump.xml}
+2026-08-29 18:06:13 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 18:06:13 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - чтение реестра РКН из файла: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:06:13 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 18:06:13 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:06:13 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 18:06:13 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 18:06:15 [Blacklist-Loader-Thread] DEBUG r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
+2026-08-29 18:06:16 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 18:06:17 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - Из файла РКН извлечено правил: 6985950
+2026-08-29 18:06:29 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/4, sourceLoadErrors=1, rulesRead=6994707, rulesTotal=6994707, rulesAccepted=6714392, rulesInvalid=10297, ipsUnique=377543, ipsCidr=2, ipsDuplicate=4757542, domainsDuplicate=270018, truncatedSources=0, totalLimitReached=false, maxMemoryMb=1521, totalSourceLoadTimeMs=7984, maxSourceDurationMs=4644, buildDurationMs=16530
+2026-08-29 18:06:29 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 18:06:29 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist source statistics: [FileBlacklistSource{file=null}{read=25, accepted=22, invalid=3, durationMs=2}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}{read=8732, accepted=8729, invalid=2, durationMs=3338}, RknBlacklistSource{xmlFile=dump.xml}{read=6985950, accepted=6705641, invalid=10292, durationMs=4644}]
+2026-08-29 18:06:30 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 18:06:30 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 18:06:30 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:06:30 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_disabled
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_disabled
+2026-08-29 18:06:30 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 18:06:30 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту [80, 3128, 443]
+2026-08-29 18:06:30 [main] ERROR ru.galkov.Main - Main: ошибка запуска HTTP proxy: {}
+java.lang.NumberFormatException: For input string: "[80"
+	at java.base/java.lang.NumberFormatException.forInputString(NumberFormatException.java:67)
+	at java.base/java.lang.Integer.parseInt(Integer.java:565)
+	at java.base/java.lang.Integer.parseInt(Integer.java:662)
+	at ru.galkov.AppConfig.getPortList(AppConfig.java:403)
+	at ru.galkov.Main.startProxyServer(Main.java:354)
+	at ru.galkov.Main.main(Main.java:62)
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:06:30 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 18:06:30 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=150000, maxQueriesPerClient=3000, maxActiveSockets=1500000, maxTcpSessions=512, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 18:06:30 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 18:06:30 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 18:06:30 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 18:14:42 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 18:14:42 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 18:14:42 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 18:14:42 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 18:14:42 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 18:14:42 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 18:14:42 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 18:14:42 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 18:14:46 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 18:14:46 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 18:14:46 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 18:14:46 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 18:14:46 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 18:14:46 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:14:46 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:14:46 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 18:14:46 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 18:14:46 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: blacklist.txt ===
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Путь из конфига:          blacklist.txt
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:14:46 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 18:14:46 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 18:14:46 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: dump.xml ===
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Путь из конфига:          dump.xml
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:14:46 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:14:46 [main] INFO  ru.galkov.Main - Источник РКН добавлен: RknBlacklistSource{xmlFile=dump.xml}
+2026-08-29 18:14:46 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 18:14:46 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 18:14:46 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - чтение реестра РКН из файла: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:14:46 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 18:14:46 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:14:46 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 18:14:48 [Blacklist-Loader-Thread] DEBUG r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
+2026-08-29 18:14:51 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - Из файла РКН извлечено правил: 6985950
+2026-08-29 18:14:53 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 18:15:02 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/4, sourceLoadErrors=1, rulesRead=6994707, rulesTotal=6994707, rulesAccepted=6714392, rulesInvalid=10297, ipsUnique=377543, ipsCidr=2, ipsDuplicate=4757542, domainsDuplicate=270018, truncatedSources=0, totalLimitReached=false, maxMemoryMb=1579, totalSourceLoadTimeMs=11674, maxSourceDurationMs=7066, buildDurationMs=16015
+2026-08-29 18:15:02 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 18:15:02 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist source statistics: [FileBlacklistSource{file=null}{read=25, accepted=22, invalid=3, durationMs=2}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}{read=8732, accepted=8729, invalid=2, durationMs=7066}, RknBlacklistSource{xmlFile=dump.xml}{read=6985950, accepted=6705641, invalid=10292, durationMs=4606}]
+2026-08-29 18:15:02 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 18:15:02 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 18:15:02 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:15:02 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:15:02 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_disabled
+2026-08-29 18:15:02 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_disabled
+2026-08-29 18:15:02 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 18:15:02 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту [80, 3128, 443]
+2026-08-29 18:15:06 [main] INFO  ru.galkov.Main - Transparent proxy ports: [80, 443]
+2026-08-29 18:15:06 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 18:15:06 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 80 (transparent)
+2026-08-29 18:15:06 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 443 (transparent)
+2026-08-29 18:15:06 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 3128 (explicit)
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:15:06 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 18:15:06 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=150000, maxQueriesPerClient=3000, maxActiveSockets=1500000, maxTcpSessions=512, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 18:15:06 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 18:15:06 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 18:15:06 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 18:16:11 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 80 завершён
+2026-08-29 18:16:11 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 443 завершён
+2026-08-29 18:16:11 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 3128 завершён
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена на портах: [80, 3128, 443]
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 18:16:11 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 18:16:11 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 18:17:02 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 18:17:02 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 18:17:02 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 18:17:02 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 18:17:02 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 18:17:02 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:17:02 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:17:02 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 18:17:02 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 18:17:02 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: blacklist.txt ===
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Путь из конфига:          blacklist.txt
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:17:02 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 18:17:02 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 18:17:02 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: dump.xml ===
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Путь из конфига:          dump.xml
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:17:02 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:17:02 [main] INFO  ru.galkov.Main - Источник РКН добавлен: RknBlacklistSource{xmlFile=dump.xml}
+2026-08-29 18:17:02 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 18:17:02 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - чтение реестра РКН из файла: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:17:02 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:17:02 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 18:17:02 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 18:17:02 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 18:17:03 [Blacklist-Loader-Thread] DEBUG r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
+2026-08-29 18:17:05 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 18:17:06 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - Из файла РКН извлечено правил: 6985950
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/4, sourceLoadErrors=1, rulesRead=6994707, rulesTotal=6994707, rulesAccepted=6714392, rulesInvalid=10297, ipsUnique=377543, ipsCidr=2, ipsDuplicate=4757542, domainsDuplicate=270018, truncatedSources=0, totalLimitReached=false, maxMemoryMb=1714, totalSourceLoadTimeMs=7502, maxSourceDurationMs=4324, buildDurationMs=15950
+2026-08-29 18:17:18 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist source statistics: [FileBlacklistSource{file=null}{read=25, accepted=22, invalid=3, durationMs=3}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}{read=8732, accepted=8729, invalid=2, durationMs=3175}, RknBlacklistSource{xmlFile=dump.xml}{read=6985950, accepted=6705641, invalid=10292, durationMs=4324}]
+2026-08-29 18:17:18 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 18:17:18 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 18:17:18 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:17:18 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_disabled
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_disabled
+2026-08-29 18:17:18 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 18:17:18 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту [80, 3128, 443]
+2026-08-29 18:17:18 [main] INFO  ru.galkov.Main - Transparent proxy ports: [80, 443]
+2026-08-29 18:17:18 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 18:17:18 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 80 (transparent)
+2026-08-29 18:17:18 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 443 (transparent)
+2026-08-29 18:17:18 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 3128 (explicit)
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:17:18 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 18:17:18 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=150000, maxQueriesPerClient=3000, maxActiveSockets=1500000, maxTcpSessions=512, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 18:17:18 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 18:17:18 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 18:17:18 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 18:18:33 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 80 завершён
+2026-08-29 18:18:33 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 443 завершён
+2026-08-29 18:18:33 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 3128 завершён
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена на портах: [80, 3128, 443]
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 18:18:33 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 18:18:33 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена
+2026-08-29 18:19:41 [main] INFO  ru.galkov.AppConfig - Попытка загрузки конфигурации из: application.properties
+2026-08-29 18:19:41 [main] WARN  ru.galkov.AppConfig - ⚠️ Файл 'application.properties' не найден на диске. Пытаемся найти внутри JAR...
+2026-08-29 18:19:41 [main] INFO  ru.galkov.AppConfig - ✅ Конфиг найден внутри JAR.
+2026-08-29 18:19:41 [main] INFO  ru.galkov.AppConfig - Конфигурация загружена, начата валидация
+2026-08-29 18:19:41 [main] WARN  ru.galkov.AppConfig - Некорректное значение proxy.max-connections (должен быть 1-10000), используем 500
+2026-08-29 18:19:41 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: DNS LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:19:41 [main] WARN  ru.galkov.AppConfig - ⚠️ SECURITY WARNING: HTTP LLM URL указывает на localhost: http://localhost:1234/v1/chat/completions. Это может быть опасно в production
+2026-08-29 18:19:41 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: dns.thread.num = 256 может быть слишком высоким. Рекомендуется 50-150
+2026-08-29 18:19:41 [main] WARN  ru.galkov.AppConfig - ⚠️ PERFORMANCE WARNING: proxy.max-connections-per-client (200) слишком высок относительно max-connections (500). Рекомендуется <= 10% от max-connections
+2026-08-29 18:19:41 [main] INFO  ru.galkov.AppConfig - Конфигурация прошла валидацию
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: blacklist.txt ===
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Путь из конфига:          blacklist.txt
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:19:41 [main] INFO  ru.galkov.Main - Источник LocalFile добавлен: FileBlacklistSource{file=null}
+2026-08-29 18:19:41 [main] INFO  ru.galkov.Main - Источник AdGuard добавлен: AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}
+2026-08-29 18:19:41 [main] INFO  ru.galkov.Main - Источник MVPS Hosts добавлен: AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - == ДИАГНОСТИКА ФАЙЛА: dump.xml ===
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Путь из конфига:          dump.xml
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Абсолютный путь поиска:    D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Родительская папка:       (Current folder)
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Файл существует?          true
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - Это обычный файл?         true
+2026-08-29 18:19:41 [main] DEBUG ru.galkov.Main - ✅ Файл найден! Инициализация источника...
+2026-08-29 18:19:41 [main] INFO  ru.galkov.Main - Источник РКН добавлен: RknBlacklistSource{xmlFile=dump.xml}
+2026-08-29 18:19:41 [main] INFO  ru.galkov.util.BlacklistLoader - Размер пула потоков загрузки blacklist: 8
+2026-08-29 18:19:41 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - чтение реестра РКН из файла: D:\IdeaProjects\dpi\dump.xml
+2026-08-29 18:19:41 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt
+2026-08-29 18:19:41 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - File source found: file=D:\IdeaProjects\dpi\blacklist.txt
+2026-08-29 18:19:41 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - Начинается загрузка AdGuard blacklist: https://winhelp2002.mvps.org/hosts.txt
+2026-08-29 18:19:41 [Blacklist-Loader-Thread] INFO  r.g.b.FileBlacklistSource - Локальный blacklist загружен: blacklist.txt, правил 25
+2026-08-29 18:19:43 [Blacklist-Loader-Thread] DEBUG r.g.b.AdguardBlacklistSource - Ответ AdGuard: HTTP 200
+2026-08-29 18:19:45 [Blacklist-Loader-Thread] INFO  r.g.b.AdguardBlacklistSource - AdGuard blacklist загружен: правил 8732
+2026-08-29 18:19:46 [Blacklist-Loader-Thread] INFO  r.g.b.RknBlacklistSource - Из файла РКН извлечено правил: 6985950
+2026-08-29 18:19:57 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist snapshot built: sourcesLoaded=3/4, sourceLoadErrors=1, rulesRead=6994707, rulesTotal=6994707, rulesAccepted=6714392, rulesInvalid=10297, ipsUnique=377543, ipsCidr=2, ipsDuplicate=4757542, domainsDuplicate=270018, truncatedSources=0, totalLimitReached=false, maxMemoryMb=1601, totalSourceLoadTimeMs=8495, maxSourceDurationMs=4529, buildDurationMs=16007
+2026-08-29 18:19:57 [main] WARN  ru.galkov.util.BlacklistLoader - Blacklist source errors: count=1, details=[AdguardBlacklistSource{url='https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt'}]
+2026-08-29 18:19:57 [main] DEBUG ru.galkov.util.BlacklistLoader - Blacklist source statistics: [FileBlacklistSource{file=null}{read=25, accepted=22, invalid=3, durationMs=1}, AdguardBlacklistSource{url='https://winhelp2002.mvps.org/hosts.txt'}{read=8732, accepted=8729, invalid=2, durationMs=3965}, RknBlacklistSource{xmlFile=dump.xml}{read=6985950, accepted=6705641, invalid=10292, durationMs=4529}]
+2026-08-29 18:19:57 [main] INFO  ru.galkov.util.BlacklistLoader - Blacklist first load completed successfully
+2026-08-29 18:19:57 [main] INFO  ru.galkov.util.BlacklistLoader - Периодическое обновление blacklist включено: каждые 3600 секунд
+2026-08-29 18:19:58 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=2, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:19:58 [main] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector initialized: enabled=false, maxRequestsPerMinute=1, circuitBreakerFailureThreshold=5, circuitBreakerTimeoutSeconds=900
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.servers.DnsServer - dns_resolver_cache_refreshed
+2026-08-29 18:19:58 [main] INFO  ru.galkov.Main - DNS server запущен в отдельном потоке на порту 53
+2026-08-29 18:19:58 [main] INFO  ru.galkov.Main - Инициализация и запуск HTTP Proxy на порту [80, 3128, 443]
+2026-08-29 18:19:58 [main] INFO  ru.galkov.Main - Transparent proxy ports: [80, 443]
+2026-08-29 18:19:58 [main] INFO  ru.galkov.servers.HttpProxyServer - Инициализация HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 18:19:58 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 80 (transparent)
+2026-08-29 18:19:58 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 3128 (explicit)
+2026-08-29 18:19:58 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy слушает порт 443 (transparent)
+2026-08-29 18:19:58 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server started: port=53, maxPacketSize=4096, packetPoolSize=1024, packetPoolMemory=4096 KB, maxClients=150000, maxQueriesPerClient=3000, maxActiveSockets=1500000, maxTcpSessions=512, tcpTimeout=30000ms, resolverCacheRefreshes=8
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_disabled
+2026-08-29 18:19:58 [main] DEBUG ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_disabled
+2026-08-29 18:19:58 [main] INFO  ru.galkov.Main - Anomaly detectors started: dns=false, http=false
+2026-08-29 18:19:58 [main] INFO  ru.galkov.Main - Check API HTTP server started on port 3129
+2026-08-29 18:19:58 [main] INFO  ru.galkov.Main - Check API server started on port 3129
+2026-08-29 18:19:58 [main] INFO  ru.galkov.Main - Система запущена
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Начата штатная остановка системы
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy на портах: [80, 3128, 443]
+2026-08-29 18:23:59 [HttpProxy-Server-Thread-80-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 80 завершён
+2026-08-29 18:23:59 [HttpProxy-Server-Thread-3128-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 3128 завершён
+2026-08-29 18:23:59 [HttpProxy-Server-Thread-443-1] INFO  ru.galkov.servers.HttpProxyServer - HTTP Proxy server thread для порта 443 завершён
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.HttpProxyServer - Остановка HTTP proxy завершена на портах: [80, 3128, 443]
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - http.anomaly-detector_stopped
+2026-08-29 18:23:59 [DnsServer-Main-Thread] INFO  ru.galkov.servers.DnsServer - DNS server завершил работу
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.llm.LlmAnomalyDetector - dns.anomaly-detector_stopped
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Начата остановка WorkerPool
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.servers.WorkerPool - Остановка WorkerPool завершена
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.util.BlacklistLoader - Blacklist reload scheduler stopped
+2026-08-29 18:23:59 [Dpi-Shutdown-Hook] INFO  ru.galkov.Main - Штатная остановка системы завершена

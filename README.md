@@ -109,3 +109,6 @@ maxBodyBytes	52,428,800 (50 MB)
    iptables -A OUTPUT -p tcp --dport 9001 -j DROP
    iptables -A OUTPUT -p tcp --dport 9030 -j DROP
    iptables -A OUTPUT -p tcp --dport 9050 -j DROP
+
+
+sudo setcap 'cap_net_bind_service=+ep' /usr/lib/jvm/java-21-openjdk/bin/java
