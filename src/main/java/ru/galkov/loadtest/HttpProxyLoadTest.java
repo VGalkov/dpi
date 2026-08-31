@@ -29,12 +29,12 @@ public class HttpProxyLoadTest {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyLoadTest.class);
     private static final DecimalFormat DF = new DecimalFormat("#,###.##");
 
-    private static final String PROXY_HOST = "10.0.3.10";
+    private static final String PROXY_HOST = "10.0.1.235";
     private static final int PROXY_PORT = 3128;
     private static final int TIMEOUT_MS = 10000;
     private static final int SLEEP_TIMEOUT = 3000;
-    private static final int CLIENTS = 95;
-    private static final int REQUESTS = 1000;
+    private static final int CLIENTS = 50;
+    private static final int REQUESTS = 50;
 
     // Список URL для тестирования (чтобы избежать блокировки за частые запросы к одному)
     private static final List<String> TEST_URLS = Arrays.asList(
@@ -160,7 +160,6 @@ public class HttpProxyLoadTest {
         double errorRate = (totalRequests.get() > 0) ? (failedRequests.get() * 100.0 / totalRequests.get()) : 0;
         double throughputMbps = (totalBytes.get() / durationSeconds) / 1_048_576.0;
 
-        // Print report
         logger.info("");
         logger.info("========================================");
         logger.info("           SUMMARY RESULTS");
@@ -259,14 +258,10 @@ public class HttpProxyLoadTest {
             try (InputStream is = conn.getInputStream()) {
                 byte[] buffer = new byte[8192];
                 int read;
-                while ((read = is.read(buffer)) != -1) {
-                    bytesTransferred += read;
-                }
+                while ((read = is.read(buffer)) != -1) bytesTransferred += read;
             }
 
             responseCode = conn.getResponseCode();
-
-            // Считаем успехом 2xx и 3xx коды
             success = responseCode >= 200 && responseCode < 400;
 
             conn.disconnect();

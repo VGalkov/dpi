@@ -174,7 +174,7 @@ public final class ProxyHandlerHelper {
         }
     }
 
-    private static HostNormalizer.HostAndPort parseHttpHostHeader(String h) {
+    public static HostNormalizer.HostAndPort parseHttpHostHeader(String h) {
         if (h == null || h.isEmpty()) return null;
         if (h.startsWith("[")) {
             int close = h.indexOf(']');

@@ -56,10 +56,10 @@ public final class Main {
             httpAnomalyDetector = new HttpAnomalyDetector();
             LlmAnomalyDetector.initBlacklist(blacklist);
 
-            registerShutdownHook();
-            startDetectors();
-            startProxyServer();
             startDnsServer();
+            startProxyServer();
+            startDetectors();
+            registerShutdownHook();
 
             int checkApiPort = getConfig().getInt("check.api.port");
             startCheckApiServer(blacklist.snapshot(), checkApiPort);
@@ -333,9 +333,22 @@ public final class Main {
         if (blacklist == null) { logger.error(LocaleUtil.getString("main_blacklist_null"), "HTTP Proxy"); return; }
         if (httpAnomalyDetector == null) { logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "HttpAnomalyDetector"); return; }
         try {
-            int port = config.getInt("proxy.local.port");
-            logger.info(LocaleUtil.getString("http_proxy_init_start"), port);
-            HttpProxyServer server = new HttpProxyServer(port, blacklist, httpAnomalyDetector);
+            String portsStr = config.get("proxy.local.ports");
+            if (portsStr == null || portsStr.isBlank()) {
+                int singlePort = config.getInt("proxy.local.port");
+                portsStr = String.valueOf(singlePort);
+            }
+            List<Integer> ports = new ArrayList<>();
+            for (String p : portsStr.split(",")) {
+                p = p.trim();
+                if (p.isEmpty()) continue;
+                int port = Integer.parseInt(p);
+                if (port < 1 || port > 65535) throw new IllegalArgumentException("Invalid port: " + port);
+                ports.add(port);
+            }
+            if (ports.isEmpty()) throw new IllegalArgumentException("No valid ports specified");
+            logger.info(getConfig().getIntList("proxy.local.ports").toString(), ports);
+            HttpProxyServer server = new HttpProxyServer(getConfig().getIntList("proxy.local.ports"), blacklist, httpAnomalyDetector);
             server.start();
             proxyServer = server;
         } catch (Exception e) {
@@ -349,14 +362,4 @@ public final class Main {
         if (localConfig == null) { logger.error(LocaleUtil.getString("main_config_null")); throw new IllegalStateException("AppConfig not initialized"); }
         return localConfig;
     }
-
-
-
-
-
-
-
-
-
-
 }

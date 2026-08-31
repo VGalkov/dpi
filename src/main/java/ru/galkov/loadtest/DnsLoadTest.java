@@ -25,17 +25,19 @@ public class DnsLoadTest {
 
     private static final Logger logger = LoggerFactory.getLogger(DnsLoadTest.class);
     private static final DecimalFormat DF = new DecimalFormat("#,###.##");
-    private static final String DNS_HOST = "10.0.3.10";
+    private static final String DNS_HOST = "10.0.1.235";
     private static final int DNS_PORT = 53;
     private static final int TIMEOUT_MS = 2000;
+    private static final int CLIENTS = 200;
+    private static final int REQUESTS = 90;
 
     public static void main(String[] args) throws Exception {
-        int concurrentClients = 1000;
+        int concurrentClients = CLIENTS;
         int requestsPerClient;
 
         if (args.length >= 1) concurrentClients = Integer.parseInt(args[0]);
         if (args.length >= 2) requestsPerClient = Integer.parseInt(args[1]);
-        else requestsPerClient = 100;
+        else requestsPerClient = REQUESTS;
 
 
         logger.info("========================================");
