@@ -221,8 +221,7 @@ public class DnsServer {
                 }
             }
         } catch (IOException e) {
-            if (running.get())
-                logger.error("Критическая ошибка запуска DNS-сервера", e);
+            if (running.get()) logger.error("Критическая ошибка запуска DNS-сервера", e);
 
         } finally {
             running.set(false);
@@ -246,10 +245,8 @@ public class DnsServer {
 
     private void startTcpAcceptor(ServerSocket serverSocket) {
         tcpThread =
-                new NamedThreadFactory(
-                        "DnsServer-TCP-Acceptor",
-                        false
-                ).newThread(() -> handleTcpConnections(serverSocket));
+                new NamedThreadFactory("DnsServer-TCP-Acceptor", false)
+                        .newThread(() -> handleTcpConnections(serverSocket));
 
         tcpThread.start();
     }
@@ -293,7 +290,6 @@ public class DnsServer {
                 if (submitResult != WorkerPool.SubmitResult.ACCEPTED) {
                     tcpWorkerRejectedCount.increment();
                     tcpConnectionsByClient.decrementAndRemoveIfZero(clientIp, tcpCount);
-
                     activeTcpSessions.decrementAndGet();
                     closeQuietly(socket);
                 }
@@ -312,10 +308,7 @@ public class DnsServer {
         int rps = getConfig().getInt("dns.rate-limit.requests-per-second");
         int burst = getConfig().getInt("dns.rate-limit.burst");
         int idle = getConfig().getInt("dns.rate-limit.client-idle-seconds");
-        if (rps <= 0 || burst <= 0 || idle <= 0) {
-            throw new IllegalArgumentException("Rate limit params must be > 0");
-        }
-
+        if (rps <= 0 || burst <= 0 || idle <= 0) throw new IllegalArgumentException("Rate limit params must be > 0");
         return new DnsRateLimiter(rps, burst, TimeUnit.SECONDS.toNanos(idle));
     }
 
@@ -383,8 +376,7 @@ public class DnsServer {
         int removed = 0;
 
         Iterator<Map.Entry<String, CachedInetAddress>> it = dnsCache.entrySet().iterator();
-        while (it.hasNext())
-            if (it.next().getValue().isExpired()) {it.remove();removed++;}
+        while (it.hasNext()) if (it.next().getValue().isExpired()) {it.remove();removed++;}
 
 
         while (dnsCache.size() > maxDnsCacheSize && !dnsCache.isEmpty()) {
@@ -405,13 +397,11 @@ public class DnsServer {
             return null;
         }
 
-        if (DnsServerHelper.checkQueryBlacklist(query, snapshot).isPresent())
-            return null;
+        if (DnsServerHelper.checkQueryBlacklist(query, snapshot).isPresent()) return null;
 
         Message response = forwardToResolver(query);
         if (response == null) return null;
-        if (DnsServerHelper.checkResponseBlacklist(response, qname, blacklist) != null)
-            return null;
+        if (DnsServerHelper.checkResponseBlacklist(response, qname, blacklist) != null) return null;
 
         if (dnsAnomalyDetector != null && dnsAnomalyDetector.isEnabled()) {
             int queryType = query.getQuestion().getType();
@@ -442,8 +432,7 @@ public class DnsServer {
             DatagramPacket packet,
             String clientIp,
             AtomicInteger clientQueries,
-            AtomicInteger activeSockets
-    ) {
+            AtomicInteger activeSockets) {
         try {
             int length = packet.getLength();
             if (length == 0 || length > maxPacketSize) {
@@ -495,11 +484,7 @@ public class DnsServer {
         }
     }
 
-    private void handleSingleTcpSession(
-            Socket socket,
-            String clientIp,
-            AtomicInteger tcpCount
-    ) {
+    private void handleSingleTcpSession(Socket socket, String clientIp, AtomicInteger tcpCount) {
         AtomicInteger clientQueries = null;
 
         try {
@@ -538,9 +523,7 @@ public class DnsServer {
                     }
 
                     byte[] requestData = new byte[length];
-
                     dataInput.readFully(requestData);
-
                     Message query;
                     try {
                         query = new Message(requestData);
@@ -565,9 +548,7 @@ public class DnsServer {
                     byte[] responseBytes = response.toWire();
                     if (responseBytes.length > 65535) break;
                     output.write(DnsServerHelper.shortToBytes(responseBytes.length));
-
                     output.write(responseBytes);
-
                     output.flush();
                 }
             } catch (SocketTimeoutException e) {
@@ -584,8 +565,7 @@ public class DnsServer {
         } catch (Throwable t) {
             logger.error("Unexpected error in handleSingleTcpSession", t);
         } finally {
-            if (clientQueries != null)
-                queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
+            if (clientQueries != null) queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
             tcpConnectionsByClient.decrementAndRemoveIfZero(clientIp, tcpCount);
             activeTcpSessions.decrementAndGet();
         }
@@ -607,8 +587,6 @@ public class DnsServer {
                 }
 
                 if (response.getHeader().getFlag(Flags.TC)) response = forwardToResolverTcp(query, resolver);
-
-
                 return response;
             } catch (Exception e) {
                 upstreamErrorCount.increment();
@@ -689,8 +667,7 @@ public class DnsServer {
         queriesByClient.removeZeroCounters();
         activeUdpSockets.removeZeroCounters();
         tcpConnectionsByClient.removeZeroCounters();
-        if (removedDns > 0)
-            logger.debug("DNS cache cleanup completed: removed={}", removedDns);
+        if (removedDns > 0) logger.debug("DNS cache cleanup completed: removed={}", removedDns);
 
     }
 
