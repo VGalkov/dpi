@@ -8,6 +8,7 @@ import ru.galkov.util.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PushbackInputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -62,31 +63,72 @@ public class ProxyHandler implements Runnable {
 
     @Override
     public void run() {
-        if (!lease.tryStart()) { lease.release(); return; }
+        if (!lease.tryStart()) {
+            lease.release();
+            return;
+        }
         try {
-            if (lease.isReleased()) return;
+            if (leased()) return;
             clientSocket.setSoTimeout(clientReadTimeout);
-            InputStream in = clientSocket.getInputStream();
+            PushbackInputStream in = new PushbackInputStream(clientSocket.getInputStream(), 5);
             OutputStream out = clientSocket.getOutputStream();
-            in.mark(5);
-            int b1 = in.read();
-            if (b1 == -1) { emptyRequestCounter.increment(); return; }
-            in.reset();
-            if (b1 == 22) { handleTransparentHttps(in, out); return; }
+            int firstByte = in.read();
+            if (firstByte == -1) {
+                emptyRequestCounter.increment();
+                return;
+            }
+            in.unread(firstByte);
+
+            if (transparentMode && firstByte == 22) {
+                handleTransparentHttps(in, out);
+                return;
+            }
+
             String firstLine = ProxyHandlerHelper.readLine(in, maxHeaderBytes);
-            if (lease.isReleased()) return;
-            if (firstLine == null || firstLine.isEmpty()) { emptyRequestCounter.increment(); return; }
-            if (logger.isTraceEnabled()) logger.trace("{} -> {}", clientIp, firstLine);
+            if (leased()) return;
+            if (firstLine == null || firstLine.isEmpty()) {
+                emptyRequestCounter.increment();
+                return;
+            }
+
+            if (logger.isTraceEnabled()) {
+                logger.trace("{} -> {}", clientIp, firstLine);
+            }
+
             StringTokenizer t = new StringTokenizer(firstLine);
-            if (!t.hasMoreTokens()) { invalidTargetCounter.increment(); sendError(out, 400, "Bad Request"); return; }
+            if (!t.hasMoreTokens()) {
+                invalidTargetCounter.increment();
+                sendError(out, 400, "Bad Request");
+                return;
+            }
+
             String method = t.nextToken().toUpperCase(Locale.ROOT);
-            if (!t.hasMoreTokens()) { invalidTargetCounter.increment(); sendError(out, 400, "Bad Request (no target)"); return; }
+
+            if (!t.hasMoreTokens()) {
+                invalidTargetCounter.increment();
+                sendError(out, 400, "Bad Request (no target)");
+                return;
+            }
+
             String target = t.nextToken();
-            if ("CONNECT".equals(method)) { handleConnect(in, out, target); return; }
-            if ("GET".equals(method) || "POST".equals(method) || "HEAD".equals(method) || "PUT".equals(method) || "DELETE".equals(method)) {
+
+            if ("CONNECT".equals(method)) {
+                if (transparentMode) {
+                    invalidTargetCounter.increment();
+                    sendError(out, 400, "CONNECT is not valid for transparent proxy port");
+                    return;
+                }
+                handleConnect(in, out, target);
+                return;
+            }
+
+            if ("GET".equals(method) || "POST".equals(method) || "HEAD".equals(method)
+                    || "PUT".equals(method) || "DELETE".equals(method)
+                    || "OPTIONS".equals(method) || "PATCH".equals(method)) {
                 handleHttp(in, out, firstLine, target, method);
                 return;
             }
+
             unsupportedMethodCounter.increment();
             sendError(out, 501, "Not Implemented");
         } catch (ProxyHandlerHelper.RequestTooLargeException e) {
@@ -96,8 +138,12 @@ public class ProxyHandler implements Runnable {
             timeoutCounter.increment();
             sendErrorQuietly(408, "Request Timeout");
         } catch (IOException e) {
-            if (e instanceof java.net.SocketException) socketErrorCounter.increment();
-            else ioErrorCounter.increment();
+            if (e instanceof java.net.SocketException) {
+                socketErrorCounter.increment();
+            } else {
+                ioErrorCounter.increment();
+            }
+            logger.debug("Proxy I/O error: client={}, transparent={}, message={}", clientIp, transparentMode, e.getMessage());
         } catch (Throwable t) {
             logger.error(LocaleUtil.getString("proxy_handler_unexpected_error"), clientIp, t);
         } finally {
@@ -106,50 +152,88 @@ public class ProxyHandler implements Runnable {
         }
     }
 
+    private boolean leased() {
+        return lease.isReleased() || clientSocket.isClosed();
+    }
+
     private void handleTransparentHttps(InputStream in, OutputStream out) throws IOException {
-        if (released()) return;
+        if (leased()) return;
+
         byte[] hello = ProxyHandlerHelper.readInitialTlsHandshake(in, clientSocket, clientReadTimeout);
-        if (hello == null || released()) { closeQuietly(clientSocket); return; }
+        if (hello == null || leased()) {
+            closeQuietly(clientSocket);
+            return;
+        }
+
         String sni = ProxyHandlerHelper.extractSniFromTlsHandshake(hello);
         if (sni == null || sni.isEmpty()) {
             logger.warn("Transparent HTTPS: No SNI from {}", clientIp);
             closeQuietly(clientSocket);
             return;
         }
+
         BlockDecision decision = checkBlockedHostOrIp(sni);
         if (decision.isBlocked()) {
             logger.info("Transparent HTTPS blocked: client={}, host={}, reason={}", clientIp, sni, decision.getReason());
             closeQuietly(clientSocket);
             return;
         }
+
+        if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) {
+            httpAnomalyDetector.recordRequest(clientIp, "TLS", sni, 443, "/", "", null);
+        }
+
         try (Socket remote = new Socket()) {
             remote.connect(new InetSocketAddress(sni, 443), connectTimeout);
-            if (released()) { closeQuietly(remote); return; }
+
+            if (leased()) return;
+
             remote.setSoTimeout(remoteReadTimeout);
+            remote.setTcpNoDelay(true);
+            clientSocket.setTcpNoDelay(true);
+
             remote.getOutputStream().write(hello);
             remote.getOutputStream().flush();
+
             ProxyHandlerHelper.runTunnel(clientSocket, remote);
         } catch (SocketTimeoutException e) {
-            if (!released()) sendError(out, 504, "Gateway Timeout");
+            if (!leased()) {
+                closeQuietly(clientSocket);
+            }
         } catch (IOException e) {
-            if (!released()) sendError(out, 502, "Bad Gateway");
+            logger.debug("Transparent HTTPS upstream connection failed: client={}, host={}, message={}", clientIp, sni, e.getMessage());
+
+            if (!leased()) {
+                closeQuietly(clientSocket);
+            }
         }
     }
 
-    private boolean released() { return lease.isReleased() || clientSocket.isClosed(); }
     private void validateLimits() {
-        if (connectTimeout <= 0 || clientReadTimeout <= 0 || remoteReadTimeout <= 0) throw new IllegalArgumentException("Timeouts must be > 0");
-        if (maxHeaderBytes < 1024) throw new IllegalArgumentException("max-header-bytes >= 1024");
-        if (maxBodyBytes < 0) throw new IllegalArgumentException("max-body-bytes >= 0");
-        if (maxResponseBytes < 0) throw new IllegalArgumentException("max-response-bytes >= 0");
+        if (connectTimeout <= 0 || clientReadTimeout <= 0 || remoteReadTimeout <= 0) {
+            throw new IllegalArgumentException("Timeouts must be > 0");
+        }
+        if (maxHeaderBytes < 1024) {
+            throw new IllegalArgumentException("max-header-bytes >= 1024");
+        }
+        if (maxBodyBytes < 0) {
+            throw new IllegalArgumentException("max-body-bytes >= 0");
+        }
+        if (maxResponseBytes < 0) {
+            throw new IllegalArgumentException("max-response-bytes >= 0");
+        }
     }
 
     private void handleConnect(InputStream in, OutputStream out, String target) throws IOException {
-        if (released()) return;
-        ProxyHandlerHelper.readHeaders(in, maxHeaderBytes, true, "", this::released);
-        if (released()) return;
+        if (leased()) return;
+        ProxyHandlerHelper.readHeaders(in, maxHeaderBytes, true, "", this::leased);
+        if (leased()) return;
         HostNormalizer.HostAndPort hp = HostNormalizer.parseHostPort(target);
-        if (hp == null || hp.host() == null) { invalidTargetCounter.increment(); sendError(out, 400, "Bad Request (invalid host and port)"); return; }
+        if (hp == null || hp.host() == null) {
+            invalidTargetCounter.increment();
+            sendError(out, 400, "Bad Request (invalid host and port)");
+            return;
+        }
         BlockDecision decision = checkBlockedHostOrIp(hp.host());
         if (decision.isBlocked()) {
             logger.info(LocaleUtil.getString("proxy_handler_connect_blocked"), clientIp, hp.host(), hp.port(), decision.getReason());
@@ -160,14 +244,20 @@ public class ProxyHandler implements Runnable {
         try {
             remote = new Socket();
             remote.connect(new InetSocketAddress(hp.host(), hp.port()), connectTimeout);
-            if (released()) { closeQuietly(remote); return; }
+            if (leased()) {
+                closeQuietly(remote);
+                return;
+            }
             remote.setSoTimeout(remoteReadTimeout);
             remote.setTcpNoDelay(true);
             clientSocket.setTcpNoDelay(true);
             out.write("HTTP/1.1 200 Connection established\r\nProxy-Agent: MyProxy\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
             out.flush();
             byte[] hello = ProxyHandlerHelper.readInitialTlsHandshake(in, clientSocket, clientReadTimeout);
-            if (hello == null || released()) { closeQuietly(remote); return; }
+            if (hello == null || leased()) {
+                closeQuietly(remote);
+                return;
+            }
             String sni = ProxyHandlerHelper.extractSniFromTlsHandshake(hello);
             boolean targetIsIp = isIpAddress(hp.host());
             if (sni == null || sni.isEmpty()) {
@@ -179,7 +269,10 @@ public class ProxyHandler implements Runnable {
                     logger.debug("CONNECT to IP '{}' without SNI is allowed", hp.host());
                 }
             }
-            if (released()) { closeQuietly(remote); return; }
+            if (leased()) {
+                closeQuietly(remote);
+                return;
+            }
             BlacklistSnapshot snapshot = blacklist.snapshot();
             String domainToCheck = (sni != null && !sni.isEmpty()) ? sni : hp.host();
             BlockDecision sniDecision = snapshot.checkDomain(domainToCheck);
@@ -191,7 +284,10 @@ public class ProxyHandler implements Runnable {
             String normalizedHost = HostNormalizer.normalizeHost(hp.host());
             String normalizedSni = (sni != null) ? HostNormalizer.normalizeHost(sni) : null;
             boolean mismatch = !targetIsIp && normalizedHost != null && normalizedSni != null && !normalizedHost.equals(normalizedSni);
-            if (mismatch && blockOnSniMismatch) { closeQuietly(remote); return; }
+            if (mismatch && blockOnSniMismatch) {
+                closeQuietly(remote);
+                return;
+            }
             if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) {
                 String logHost = (sni != null && !sni.isEmpty()) ? sni : hp.host();
                 httpAnomalyDetector.recordRequest(clientIp, "CONNECT", logHost, hp.port(), "/", "", null);
@@ -202,10 +298,10 @@ public class ProxyHandler implements Runnable {
             remote = null;
         } catch (SocketTimeoutException e) {
             closeQuietly(remote);
-            if (!released()) sendError(out, 504, "Gateway Timeout");
+            if (!leased()) sendError(out, 504, "Gateway Timeout");
         } catch (IOException e) {
             closeQuietly(remote);
-            if (!released()) sendError(out, 502, "Bad Gateway");
+            if (!leased()) sendError(out, 502, "Bad Gateway");
         }
     }
 
@@ -215,44 +311,125 @@ public class ProxyHandler implements Runnable {
     }
 
     private void handleHttp(InputStream in, OutputStream out, String firstLine, String target, String method) throws IOException {
-        if (released()) return;
-        StringBuilder sb = ProxyHandlerHelper.readHeaders(in, maxHeaderBytes, false, firstLine, this::released);
-        if (released()) return;
-        HttpHeaders hdrs = parseHttpHeaders(sb.toString());
-        if (released()) return;
-        HostNormalizer.HostAndPort hp = transparentMode && (target.startsWith("/") || target.isEmpty()) ? parseHostFromHeader(hdrs.hostHeader) : ProxyHandlerHelper.resolveHttpTarget(hdrs.hostHeader, target);
-        if (hp == null || hp.host() == null) { invalidTargetCounter.increment(); sendError(out, 400, "Cannot determine target host"); return; }
-        BlockDecision dec = checkBlockedHostOrIp(hp.host());
-        if (dec.isBlocked()) { logger.info(LocaleUtil.getString("proxy_handler_http_blocked"), clientIp, hp.host(), hp.port(), dec.getReason()); sendError(out, 403, "Forbidden"); return; }
-        if (hdrs.contentLength > maxBodyBytes) { sendError(out, 413, "Payload Too Large"); return; }
-        if (hdrs.expectContinuePresent) { out.write("HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1)); out.flush(); }
+        if (leased()) return;
+
+        StringBuilder request = ProxyHandlerHelper.readHeaders(in, maxHeaderBytes, false, firstLine, this::leased);
+
+        if (leased()) return;
+
+        HttpHeaders headers = parseHttpHeaders(request.toString());
+
+        HostNormalizer.HostAndPort hostAndPort;
+
+        if (transparentMode) {
+            hostAndPort = parseHostFromHeader(headers.hostHeader);
+
+            if (hostAndPort == null || hostAndPort.host() == null) {
+                invalidTargetCounter.increment();
+                sendError(out, 400, "Missing Host header");
+                return;
+            }
+        } else {
+            hostAndPort = ProxyHandlerHelper.resolveHttpTarget(headers.hostHeader, target);
+
+            if (hostAndPort == null || hostAndPort.host() == null) {
+                invalidTargetCounter.increment();
+                sendError(out, 400, "Cannot determine target host");
+                return;
+            }
+        }
+
+        BlockDecision hostDecision = checkBlockedHostOrIp(hostAndPort.host());
+
+        if (hostDecision.isBlocked()) {
+            logger.info(LocaleUtil.getString("proxy_handler_http_blocked"), clientIp, hostAndPort.host(), hostAndPort.port(), hostDecision.getReason());
+            sendError(out, 403, "Forbidden");
+            return;
+        }
+
+        InetSocketAddress upstream = new InetSocketAddress(hostAndPort.host(), hostAndPort.port());
+
+        if (headers.contentLength > maxBodyBytes) {
+            sendError(out, 413, "Payload Too Large");
+            return;
+        }
+
+        if (headers.expectContinuePresent) {
+            out.write("HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+            out.flush();
+        }
+
         byte[] smallBody = null;
         boolean streamLargeBody = false;
-        if (hdrs.contentLength > 0) {
-            if (hdrs.contentLength <= streamBodyThreshold) {
-                smallBody = new byte[(int) hdrs.contentLength];
+
+        if (headers.contentLength > 0) {
+            if (headers.contentLength <= streamBodyThreshold) {
+                smallBody = new byte[(int) headers.contentLength];
                 int total = 0;
-                while (total < smallBody.length) { int r = in.read(smallBody, total, smallBody.length - total); if (r == -1) break; total += r; }
-                if (total < smallBody.length) { sendError(out, 400, "Bad Request (incomplete body)"); return; }
-            } else streamLargeBody = true;
+
+                while (total < smallBody.length) {
+                    int count = in.read(smallBody, total, smallBody.length - total);
+
+                    if (count == -1) break;
+
+                    total += count;
+                }
+
+                if (total < smallBody.length) {
+                    sendError(out, 400, "Bad Request (incomplete body)");
+                    return;
+                }
+            } else {
+                streamLargeBody = true;
+            }
         }
-        if (released()) return;
-        String bodyForAnalyzer = smallBody != null && httpAnomalyDetector != null && httpAnomalyDetector.isEnabled() ? new String(smallBody, StandardCharsets.UTF_8) : null;
-        if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) httpAnomalyDetector.recordRequest(clientIp, method, hp.host(), hp.port(), ProxyHandlerHelper.extractHttpPath(target), hdrs.rawHeaders, bodyForAnalyzer);
+
+        if (leased()) return;
+
+        String bodyForAnalyzer = smallBody != null && httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()
+                ? new String(smallBody, StandardCharsets.UTF_8) : null;
+
+        if (httpAnomalyDetector != null && httpAnomalyDetector.isEnabled()) {
+            httpAnomalyDetector.recordRequest(clientIp, method, hostAndPort.host(), upstream.getPort(),
+                    ProxyHandlerHelper.extractHttpPath(target), headers.rawHeaders, bodyForAnalyzer);
+        }
+
         try (Socket remote = new Socket()) {
-            remote.connect(new InetSocketAddress(hp.host(), hp.port()), connectTimeout);
-            if (released()) return;
+            remote.connect(upstream, connectTimeout);
+
+            if (leased()) return;
+
             remote.setSoTimeout(remoteReadTimeout);
-            OutputStream rOut = remote.getOutputStream();
-            InputStream rIn = remote.getInputStream();
-            String path = transparentMode && (target.startsWith("/") || target.isEmpty()) ? ProxyHandlerHelper.extractHttpPath(target) : ProxyHandlerHelper.extractHttpPath(target);
-            rOut.write((method + " " + path + " HTTP/1.1\r\n" + hdrs.rawHeaders).getBytes(StandardCharsets.ISO_8859_1));
-            if (smallBody != null && smallBody.length > 0) rOut.write(smallBody);
-            else if (streamLargeBody) { if (hdrs.chunked) ProxyHandlerHelper.relayChunked(in, rOut, maxBodyBytes); else ProxyHandlerHelper.relayFixed(in, rOut, hdrs.contentLength); }
-            rOut.flush();
-            relayResponse(rIn, out);
+            remote.setTcpNoDelay(true);
+            clientSocket.setTcpNoDelay(true);
+
+            OutputStream remoteOut = remote.getOutputStream();
+            InputStream remoteIn = remote.getInputStream();
+            String path = ProxyHandlerHelper.extractHttpPath(target);
+
+            remoteOut.write((method + " " + path + " HTTP/1.1\r\n" + headers.rawHeaders)
+                    .getBytes(StandardCharsets.ISO_8859_1));
+
+            if (smallBody != null && smallBody.length > 0) {
+                remoteOut.write(smallBody);
+            } else if (streamLargeBody) {
+                if (headers.chunked) {
+                    ProxyHandlerHelper.relayChunked(in, remoteOut, maxBodyBytes);
+                } else {
+                    ProxyHandlerHelper.relayFixed(in, remoteOut, headers.contentLength);
+                }
+            }
+
+            remoteOut.flush();
+            relayResponse(remoteIn, out);
         } catch (SocketTimeoutException e) {
-            if (!released()) sendError(out, 504, "Gateway Timeout");
+            if (!leased()) {
+                sendError(out, 504, "Gateway Timeout");
+            }
+        } catch (IOException e) {
+            if (!leased()) {
+                sendError(out, 502, "Bad Gateway");
+            }
         }
     }
 
@@ -303,7 +480,7 @@ public class ProxyHandler implements Runnable {
     }
 
     private void relayResponse(InputStream in, OutputStream out) throws IOException {
-        if (released()) return;
+        if (leased()) return;
         String status = ProxyHandlerHelper.readLine(in, maxHeaderBytes);
         if (status == null) return;
         ProxyHandlerHelper.writeLine(out, status);
@@ -314,7 +491,7 @@ public class ProxyHandler implements Runnable {
             ProxyHandlerHelper.writeLine(out, line);
             if (regionMatches(line, "content-length:")) { Long v = parseContentLength(line.substring(15).trim()); if (v != null) contentLen = v; }
             else if (regionMatches(line, "transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked")) chunked = true;
-            if (released()) return;
+            if (leased()) return;
         }
         if (line == null) return;
         ProxyHandlerHelper.writeLine(out, "");
@@ -329,12 +506,12 @@ public class ProxyHandler implements Runnable {
         byte[] buf = new byte[8192];
         long total = 0;
         int len;
-        while ((len = in.read(buf)) != -1) { if (released()) return; if (total + len > max) throw new ProxyHandlerHelper.RequestTooLargeException("Response body exceeds " + max + " bytes"); out.write(buf, 0, len); total += len; }
+        while ((len = in.read(buf)) != -1) { if (leased()) return; if (total + len > max) throw new ProxyHandlerHelper.RequestTooLargeException("Response body exceeds " + max + " bytes"); out.write(buf, 0, len); total += len; }
     }
 
-    private void sendErrorQuietly(int code, String message) { try { if (!released()) sendError(clientSocket.getOutputStream(), code, message); } catch (IOException ignored) { } }
+    private void sendErrorQuietly(int code, String message) { try { if (!leased()) sendError(clientSocket.getOutputStream(), code, message); } catch (IOException ignored) { } }
     private void sendError(OutputStream out, int code, String message) throws IOException {
-        if (released()) return;
+        if (leased()) return;
         String body = "<h1>" + code + " " + message + "</h1>";
         String response = "HTTP/1.1 " + code + " " + message + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: " + body.getBytes(StandardCharsets.UTF_8).length + "\r\nConnection: close\r\n\r\n" + body;
         out.write(response.getBytes(StandardCharsets.UTF_8));
