@@ -475,6 +475,7 @@ public class DnsServer {
             }
 
             String qname = DnsServerHelper.getQuestionName(query);
+            logger.debug("[DNS-DEBUG] UDP Request from: {} | Domain: {}", clientIp, qname);
             Message response = processQuery(query, clientIp, qname);
 
             if (response == null) {
@@ -563,6 +564,7 @@ public class DnsServer {
 
                     String qname = DnsServerHelper.getQuestionName(query);
                     Message response = processQuery(query, clientIp, qname);
+                    logger.debug("[DNS-DEBUG] TCP Request from: {} | Domain: {}", clientIp, qname);
 
                     if (response == null) {
                         try {
