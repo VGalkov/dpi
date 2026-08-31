@@ -365,8 +365,7 @@ public class DnsServer {
                     logger.debug(LocaleUtil.getString("dns_resolver_cache_refreshed"), dns, addr);
                 }
 
-                if (addr == null)
-                    throw new IllegalArgumentException("Некорректный DNS upstream: " + dns);
+                if (addr == null) throw new IllegalArgumentException("Некорректный DNS upstream: " + dns);
 
                 SimpleResolver resolver = new SimpleResolver(addr);
                 resolver.setTimeout(Duration.ofSeconds(timeout));
@@ -376,8 +375,7 @@ public class DnsServer {
             }
         }
 
-        if (result.isEmpty())
-            throw new IllegalStateException("Список DNS upstream пуст");
+        if (result.isEmpty()) throw new IllegalStateException("Список DNS upstream пуст");
         return Collections.unmodifiableMap(result);
     }
 
@@ -385,26 +383,21 @@ public class DnsServer {
         int removed = 0;
 
         Iterator<Map.Entry<String, CachedInetAddress>> it = dnsCache.entrySet().iterator();
-        while (it.hasNext()) {
+        while (it.hasNext())
             if (it.next().getValue().isExpired()) {it.remove();removed++;}
-        }
+
 
         while (dnsCache.size() > maxDnsCacheSize && !dnsCache.isEmpty()) {
             dnsCache.remove(dnsCache.keySet().iterator().next());
             removed++;
         }
 
-        if (removed > 0) {
-            logger.debug(
-                    LocaleUtil.getString("dns_cache_size_eviction"), removed, dnsCache.size(), maxDnsCacheSize);
-        }
+        if (removed > 0)
+            logger.debug(LocaleUtil.getString("dns_cache_size_eviction"), removed, dnsCache.size(), maxDnsCacheSize);
+
     }
 
-    private Message processQuery(
-            Message query,
-            String clientIp,
-            String qname
-    ) {
+    private Message processQuery(Message query, String clientIp, String qname) {
         BlacklistSnapshot snapshot = blacklist.snapshot();
 
         if (!rateLimiter.tryAcquire(clientIp)) {
@@ -461,9 +454,7 @@ public class DnsServer {
             byte[] queryData =
                     queryDataBufferEnabled
                             && queryDataBuffer != null
-                            && length <= queryDataBufferSize
-                            ? queryDataBuffer.get()
-                            : new byte[length];
+                            && length <= queryDataBufferSize ? queryDataBuffer.get() : new byte[length];
 
             System.arraycopy(packet.getData(), packet.getOffset(), queryData, 0, length);
             Message query;
@@ -490,12 +481,7 @@ public class DnsServer {
 
             byte[] wire = response.toWire();
             try {
-                socket.send(
-                        new DatagramPacket(
-                                wire,
-                                wire.length, packet.getAddress(),
-                                packet.getPort())
-                );
+                socket.send(new DatagramPacket(wire, wire.length, packet.getAddress(), packet.getPort()));
             } catch (IOException e) {
                 if (running.get()) udpSendErrorCount.increment();
             }
