@@ -1,0 +1,33 @@
+[Unit]
+Description=My Java Application (RKN Blacklist Loader)
+After=network.target
+
+[Service]
+Type=simple
+User=dpi
+Group=dpi
+# Рабочая директория важна, так как путь к конфигу относительный (./)
+WorkingDirectory=/opt/dpi
+
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+
+# ИЗМЕНЕННАЯ СТРОКА ЗАПУСКА:
+# Добавлен аргумент -Dlogback.configurationFile=./logback.xml
+ExecStart=/usr/bin/java -Xms2G -Xmx6G -Dlogback.configurationFile=./logback.xml -jar /opt/dpi/dpi.jar
+
+# Перезапуск при падении
+Restart=on-failure
+RestartSec=30s
+
+# Лимит памяти на уровне cgroup (опционально, но полезно)
+MemoryMax=6000M
+
+# Таймаут остановки (чтобы systemd не убил процесс слишком рано)
+TimeoutStopSec=30
+
+# Код выхода 143 (SIGTERM) считаем нормальным завершением
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
