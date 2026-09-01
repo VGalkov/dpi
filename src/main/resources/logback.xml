@@ -20,6 +20,11 @@
         </encoder>
     </appender>
 
+    <logger name="ru.galkov.servers.ProxyHandler" level="WARN"/>
+    <logger name="ru.galkov.servers.IptablesIpBlocker" level="INFO"/>
+    <logger name="ru.galkov.AppConfig" level="INFO"/>
+    <logger name="ru.galkov.servers.DnsServer" level="INFO"/>
+
     <root level="DEBUG">
         <appender-ref ref="FILE"/>
         <appender-ref ref="CONSOLE"/>
