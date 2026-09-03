@@ -22,7 +22,7 @@ public class HttpProxyServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpProxyServer.class);
     private final BlacklistLoader blacklist;
     private final HttpAnomalyDetector httpAnomalyDetector;
-    private final List<Integer> ports;
+    private final Collection<Integer> ports;
     private final int maxConnectionsPerClient;
     private final int maxActiveSockets;
     private final Semaphore connectionSlots;
@@ -44,7 +44,7 @@ public class HttpProxyServer {
     private final LongAdder duplicateSocketCount = new LongAdder();
     private final LongAdder cleanedSocketsCount = new LongAdder();
 
-    public HttpProxyServer(Set<Integer> ports, BlacklistLoader blacklist, HttpAnomalyDetector httpAnomalyDetector) {
+    public HttpProxyServer(Collection<Integer> ports, BlacklistLoader blacklist, HttpAnomalyDetector httpAnomalyDetector) {
         this.ports = new ArrayList<>(Objects.requireNonNull(ports));
         if (this.ports.isEmpty()) throw new IllegalArgumentException(LocaleUtil.getString("http_proxy_ports_empty"));
         this.blacklist = Objects.requireNonNull(blacklist);

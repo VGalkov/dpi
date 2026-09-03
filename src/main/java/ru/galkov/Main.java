@@ -333,24 +333,9 @@ public final class Main {
         if (blacklist == null) { logger.error(LocaleUtil.getString("main_blacklist_null"), "HTTP Proxy"); return; }
         if (httpAnomalyDetector == null) { logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "HttpAnomalyDetector"); return; }
         try {
-            String portsStr = config.get("proxy.local.ports");
-            if (portsStr == null || portsStr.isBlank()) {
-                int singlePort = config.getInt("proxy.local.port");
-                portsStr = String.valueOf(singlePort);
-            }
-            List<Integer> ports = new ArrayList<>();
-            for (String p : portsStr.split(",")) {
-                p = p.trim();
-                if (p.isEmpty()) continue;
-                int port = Integer.parseInt(p);
-                if (port < 1 || port > 65535) throw new IllegalArgumentException("Invalid port: " + port);
-                ports.add(port);
-            }
-            if (ports.isEmpty()) throw new IllegalArgumentException("No valid ports specified");
-            logger.info(getConfig().getIntList("proxy.local.ports").toString(), ports);
-            HttpProxyServer server = new HttpProxyServer(getConfig().getIntList("proxy.local.ports"), blacklist, httpAnomalyDetector);
-            server.start();
-            proxyServer = server;
+            logger.info(getConfig().getIntList("proxy.local.ports").toString(), getConfig().getIntList("proxy.local.ports"));
+            proxyServer = new HttpProxyServer(getConfig().getIntList("proxy.local.ports"), blacklist, httpAnomalyDetector);
+            proxyServer.start();
         } catch (Exception e) {
             proxyServer = null;
             logger.error(LocaleUtil.getString("main_proxy_server_start_error"), e);
