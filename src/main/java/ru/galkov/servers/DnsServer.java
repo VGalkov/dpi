@@ -125,7 +125,7 @@ public class DnsServer {
 
     public void run() {
         if (!running.compareAndSet(false, true)) {
-            logger.warn("DNS server уже запущен");
+            logger.warn(LocaleUtil.getString("dns_server_already_running"));
             return;
         }
 
@@ -221,7 +221,8 @@ public class DnsServer {
                 }
             }
         } catch (IOException e) {
-            if (running.get()) logger.error("Критическая ошибка запуска DNS-сервера", e);
+            if (running.get())
+                logger.error(LocaleUtil.getString("dns_server_critical_start_error"), e);
 
         } finally {
             running.set(false);
@@ -229,7 +230,7 @@ public class DnsServer {
             tcpListener = null;
             stopCacheCleanup();
             logAggregatedRuntimeStatistics();
-            logger.info("DNS server завершил работу");
+            logger.info(LocaleUtil.getString("dns_server_stopped"));
         }
     }
 
@@ -358,7 +359,8 @@ public class DnsServer {
                     logger.debug(LocaleUtil.getString("dns_resolver_cache_refreshed"), dns, addr);
                 }
 
-                if (addr == null) throw new IllegalArgumentException("Некорректный DNS upstream: " + dns);
+                if (addr == null)
+                    throw new IllegalArgumentException(LocaleUtil.getString("dns_upstream_invalid", dns));
 
                 SimpleResolver resolver = new SimpleResolver(addr);
                 resolver.setTimeout(Duration.ofSeconds(timeout));
@@ -368,7 +370,7 @@ public class DnsServer {
             }
         }
 
-        if (result.isEmpty()) throw new IllegalStateException("Список DNS upstream пуст");
+        if (result.isEmpty()) throw new IllegalStateException(LocaleUtil.getString("dns_upstream_list_empty"));
         return Collections.unmodifiableMap(result);
     }
 
@@ -455,14 +457,14 @@ public class DnsServer {
             }
 
             String qname = DnsServerHelper.getQuestionName(query);
-            logger.debug("[DNS-DEBUG] UDP Request from: {} | Domain: {}", clientIp, qname);
+            logger.debug(LocaleUtil.getString("dns_udp_request"), clientIp, qname);
             Message response = processQuery(query, clientIp, qname);
 
             if (response == null) {
                 try {
                     DnsServerHelper.sendRefusedResponse(socket, packet, query);
-                } catch (IOException ignored) {
-                    // Client may have disconnected.
+                } catch (IOException e) {
+                    logger.trace(e.getMessage());
                 }
 
                 return;
@@ -475,7 +477,7 @@ public class DnsServer {
                 if (running.get()) udpSendErrorCount.increment();
             }
         } catch (Throwable t) {
-            logger.error("Unexpected error in processUdpRequest", t);
+            logger.error(LocaleUtil.getString("dns_unexpected_error_tcp"), t);
         } finally {
             queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
             activeUdpSockets.decrementAndRemoveIfZero(clientIp, activeSockets);
@@ -667,7 +669,7 @@ public class DnsServer {
         queriesByClient.removeZeroCounters();
         activeUdpSockets.removeZeroCounters();
         tcpConnectionsByClient.removeZeroCounters();
-        if (removedDns > 0) logger.debug("DNS cache cleanup completed: removed={}", removedDns);
+        if (removedDns > 0) logger.debug(LocaleUtil.getString("dns_cache_cleanup_completed"), removedDns);
 
     }
 

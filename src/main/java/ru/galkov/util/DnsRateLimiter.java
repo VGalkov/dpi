@@ -73,9 +73,9 @@ public final class DnsRateLimiter {
             int burst,
             long clientIdleNanos
     ) {
-        if (requestsPerSecond <= 0) throw new IllegalArgumentException("requestsPerSecond must be > 0");
-        if (burst <= 0) throw new IllegalArgumentException("burst must be > 0");
-        if (clientIdleNanos <= 0) throw new IllegalArgumentException("clientIdleNanos must be > 0");
+        if (requestsPerSecond <= 0) throw new IllegalArgumentException(LocaleUtil.getString("dns_rate_limiter_requests_per_second_invalid"));
+        if (burst <= 0) throw new IllegalArgumentException(LocaleUtil.getString("dns_rate_limiter_burst_invalid"));
+        if (clientIdleNanos <= 0) throw new IllegalArgumentException(LocaleUtil.getString("dns_rate_limiter_client_idle_nanos_invalid"));
 
         this.enabled = true;
         this.requestsPerSecond = requestsPerSecond;
@@ -119,10 +119,8 @@ public final class DnsRateLimiter {
             if (currentSize < CLEANUP_EVERY_N_REQUESTS) return;
             List<Map.Entry<String, TokenBucket>> idle = new ArrayList<>();
 
-            for (Map.Entry<String, TokenBucket> entry : buckets.entrySet()) {
+            for (Map.Entry<String, TokenBucket> entry : buckets.entrySet())
                 if (now - entry.getValue().getLastSeenNanos() > clientIdleNanos) idle.add(entry);
-
-            }
 
             idle.sort(Comparator.comparingLong(entry -> entry.getValue().getLastSeenNanos()));
             int target = Math.max(1, currentSize * CLEANUP_PERCENT_TO_REMOVE / 100);
@@ -135,7 +133,7 @@ public final class DnsRateLimiter {
 
             if (removed > 0) {
                 logger.info(
-                        "DNS RateLimiter: fast cleanup removed {} clients, rejectedRequestsSinceLastCleanup={}",
+                        LocaleUtil.getString("dns_rate_limiter_cleanup_removed"),
                         removed,
                         rejectedRequestCounter.getAndSet(0)
                 );

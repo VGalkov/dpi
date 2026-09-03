@@ -23,7 +23,6 @@ public class HttpProxyServer {
     private final BlacklistLoader blacklist;
     private final HttpAnomalyDetector httpAnomalyDetector;
     private final List<Integer> ports;
-    private final int maxConnections;
     private final int maxConnectionsPerClient;
     private final int maxActiveSockets;
     private final Semaphore connectionSlots;
@@ -47,26 +46,26 @@ public class HttpProxyServer {
 
     public HttpProxyServer(Set<Integer> ports, BlacklistLoader blacklist, HttpAnomalyDetector httpAnomalyDetector) {
         this.ports = new ArrayList<>(Objects.requireNonNull(ports));
-        if (this.ports.isEmpty()) throw new IllegalArgumentException("Ports list cannot be empty");
+        if (this.ports.isEmpty()) throw new IllegalArgumentException(LocaleUtil.getString("http_proxy_ports_empty"));
         this.blacklist = Objects.requireNonNull(blacklist);
         this.httpAnomalyDetector = httpAnomalyDetector;
-        this.maxConnections = getConfig().getInt("proxy.max-connections");
+        int maxConnections = getConfig().getInt("proxy.max-connections");
         this.maxConnectionsPerClient = getConfig().getInt("proxy.max-connections-per-client");
         int multiplier = getConfig().getInt("proxy.max-active-sockets-multiplier");
         this.maxActiveSockets = maxConnections * (multiplier > 0 ? multiplier : 2);
         int idleSec = getConfig().getInt("proxy.idle-socket-timeout-seconds");
         this.idleCleanupThresholdMillis = (idleSec > 0 ? idleSec : 30) * 1000L;
-        if (maxConnections <= 0) throw new IllegalArgumentException("proxy.max-connections > 0");
-        if (maxConnectionsPerClient <= 0) throw new IllegalArgumentException("proxy.max-connections-per-client > 0");
-        if (maxConnectionsPerClient > maxConnections) throw new IllegalArgumentException("max-connections-per-client <= max-connections");
+        if (maxConnections <= 0) throw new IllegalArgumentException(LocaleUtil.getString("http_proxy_max_connections_invalid"));
+        if (maxConnectionsPerClient <= 0) throw new IllegalArgumentException(LocaleUtil.getString("http_proxy_max_connections_per_client_invalid"));
+        if (maxConnectionsPerClient > maxConnections) throw new IllegalArgumentException(LocaleUtil.getString("http_proxy_max_connections_per_client_exceeded"));
         this.connectionSlots = new Semaphore(maxConnections, true);
     }
 
     public void start() {
         synchronized (lifecycleLock) {
-            if (running) { logger.warn("Прокси сервер уже запущен на портах {}", ports); return; }
+            if (running) { logger.warn(LocaleUtil.getString("http_proxy_already_running"), ports); return; }
             running = true;
-            logger.info("Инициализация HTTP proxy на портах: {}", ports);
+            logger.info(LocaleUtil.getString("http_proxy_initializing"), ports);
             for (int port : ports) {
                 boolean transparentMode = (port == 8080);
                 Thread thread = new NamedThreadFactory("HttpProxy-Server-Thread-" + port, false).newThread(() -> runServer(port, transparentMode));
@@ -80,7 +79,7 @@ public class HttpProxyServer {
     public void stop() {
         synchronized (lifecycleLock) {
             if (!running) return;
-            logger.info("Остановка HTTP proxy на портах: {}", ports);
+            logger.info(LocaleUtil.getString("http_proxy_stopping"), ports);
             running = false;
             serverSockets.values().forEach(IoUtil::closeQuietly);
             serverSockets.clear();
@@ -92,7 +91,7 @@ public class HttpProxyServer {
         }
         joinServerThreads();
         logAggregatedStatistics();
-        logger.info("Остановка HTTP proxy завершена на портах: {}", ports);
+        logger.info(LocaleUtil.getString("http_proxy_stopped_complete"), ports);
     }
 
     private void runServer(int port, boolean transparentMode) {
@@ -100,7 +99,7 @@ public class HttpProxyServer {
         try {
             localServerSocket = new ServerSocket(port);
             serverSockets.put(port, localServerSocket);
-            logger.info("HTTP Proxy слушает порт {} (transparent={})", port, transparentMode);
+            logger.info(LocaleUtil.getString("http_proxy_listening"), port, transparentMode);
             while (running) {
                 Socket clientSocket;
                 try {
@@ -118,11 +117,11 @@ public class HttpProxyServer {
                 handleAcceptedConnection(clientSocket, transparentMode);
             }
         } catch (IOException e) {
-            if (running) logger.error("Не удалось запустить HTTP Proxy на порту {}", port, e);
-            else logger.info("HTTP Proxy остановлен на порту {}", port);
+            if (running) logger.error(LocaleUtil.getString("http_proxy_start_failed"), port, e);
+            else logger.info(LocaleUtil.getString("http_proxy_stopped"), port);
         } finally {
             if (localServerSocket != null) { serverSockets.remove(port); closeQuietly(localServerSocket); }
-            logger.info("HTTP Proxy server thread для порта {} завершён", port);
+            logger.info(LocaleUtil.getString("http_proxy_thread_ended"), port);
         }
     }
 
@@ -155,7 +154,7 @@ public class HttpProxyServer {
             if (lease != null) { leasesBySocket.remove(clientSocket, lease); lease.release(); } else { connectionSlots.release(); }
             removeSocketBookkeeping(clientSocket);
             closeQuietly(clientSocket);
-            logger.error("Не удалось передать соединение в worker pool: client={}", clientIp, e);
+            logger.error(LocaleUtil.getString("http_proxy_worker_pool_error"), clientIp, e);
         }
     }
 
@@ -202,7 +201,7 @@ public class HttpProxyServer {
             if (allBound) return;
             try { Thread.sleep(50L); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
-        logger.warn("HTTP Proxy не открыл все порты {} за 5 секунд", ports);
+        logger.warn(LocaleUtil.getString("http_proxy_ports_timeout"), ports);
     }
 
     private void logAggregatedStatistics() {

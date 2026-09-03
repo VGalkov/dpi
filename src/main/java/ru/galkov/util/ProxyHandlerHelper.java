@@ -9,7 +9,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 
 import static ru.galkov.util.IoUtil.readExactly;
@@ -70,9 +71,8 @@ public final class ProxyHandlerHelper {
             }
             return res.toByteArray();
         } catch (SocketTimeoutException e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Timeout while reading initial TLS handshake");
-            }
+            if (logger.isDebugEnabled()) logger.debug(LocaleUtil.getString("proxy_helper_tls_timeout"));
+
             return null;
         } finally {
             socket.setSoTimeout(origTimeout);
@@ -129,9 +129,9 @@ public final class ProxyHandlerHelper {
             }
             return null;
         } catch (RuntimeException e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Invalid TLS handshake structure", e);
-            }
+            if (logger.isDebugEnabled())
+                logger.debug(LocaleUtil.getString("proxy_helper_tls_invalid_structure"), e);
+
             return null;
         }
     }
@@ -158,18 +158,23 @@ public final class ProxyHandlerHelper {
             if (hostHeader != null && !hostHeader.isEmpty()) {
                 return parseHttpHostHeader(hostHeader);
             }
+
             if (target.startsWith("http://") || target.startsWith("https://")) {
-                URL url = new URL(target);
-                String host = url.getHost();
+                URI uri = new URI(target);
+                String host = uri.getHost();
                 if (host == null || host.isEmpty()) return null;
-                int port = url.getPort() == -1 ? url.getDefaultPort() : url.getPort();
+                int port = uri.getPort();
+                if (port == -1) {
+                    port = "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+                }
                 if (port < 1 || port > 65535) return null;
                 return new HostNormalizer.HostAndPort(host, port);
             }
             return null;
-        } catch (Exception e) {
-            if (logger.isDebugEnabled()) logger.debug("Unable to resolve HTTP target", e);
-
+        } catch (URISyntaxException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug(LocaleUtil.getString("proxy_helper_http_unable_resolve"), e);
+            }
             return null;
         }
     }
@@ -205,15 +210,18 @@ public final class ProxyHandlerHelper {
     public static String extractHttpPath(String target) {
         if (target == null) return "/";
         if (!target.startsWith("http://") && !target.startsWith("https://")) return target;
-        try {
-            URL url = new URL(target);
-            String path = url.getPath();
-            if (path == null || path.isEmpty()) path = "/";
-            if (url.getQuery() != null) path += "?" + url.getQuery();
-            return path;
-        } catch (Exception e) {
-            if (logger.isDebugEnabled()) logger.debug("Unable to extract HTTP path", e);
 
+        try {
+            URI uri = new URI(target);
+            String path = uri.getPath();
+            if (path == null || path.isEmpty()) path = "/";
+            String query = uri.getQuery();
+            if (query != null) path += "?" + query;
+            return path;
+        } catch (URISyntaxException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug(LocaleUtil.getString("proxy_helper_http_unable_extract_path"), e);
+            }
             return "/";
         }
     }
@@ -235,7 +243,7 @@ public final class ProxyHandlerHelper {
             Thread.currentThread().interrupt();
             t1.interrupt();
             t2.interrupt();
-            if (logger.isDebugEnabled()) logger.debug("Proxy tunnel interrupted", e);
+            if (logger.isDebugEnabled()) logger.debug(LocaleUtil.getString("proxy_helper_tunnel_interrupted"), e);
 
         } finally {
             IoUtil.closeQuietly(client);
@@ -260,7 +268,7 @@ public final class ProxyHandlerHelper {
             } catch (IOException ignored) {
             }
         } catch (IOException e) {
-            if (logger.isDebugEnabled()) logger.debug("Proxy tunnel pipe closed: {}", e.getMessage());
+            if (logger.isDebugEnabled()) logger.debug(LocaleUtil.getString("proxy_helper_tunnel_pipe_closed"), e.getMessage());
 
         } finally {
             if (in != null) {
@@ -295,29 +303,29 @@ public final class ProxyHandlerHelper {
 
     public static void relayChunked(InputStream in, OutputStream out, long maxBodyBytes) throws IOException {
         if (in == null || out == null) {
-            throw new IllegalArgumentException("in and out must not be null");
+            throw new IllegalArgumentException(LocaleUtil.getString("proxy_helper_invalid_args"));
         }
         byte[] buf = new byte[8192];
         long total = 0;
         while (true) {
             String chunkLine = readLine(in, 64);
-            if (chunkLine == null) throw new IOException("Unexpected end of chunked body");
+            if (chunkLine == null) throw new IOException(LocaleUtil.getString("proxy_helper_chunked_unexpected_end"));
             int semi = chunkLine.indexOf(';');
             String sizePart = semi >= 0 ? chunkLine.substring(0, semi).trim() : chunkLine.trim();
             int chunkSize;
             try {
                 chunkSize = Integer.parseInt(sizePart, 16);
             } catch (NumberFormatException e) {
-                throw new IOException("Invalid chunk size: " + sizePart);
+                throw new IOException(LocaleUtil.getString("proxy_helper_chunked_invalid_size", sizePart));
             }
-            if (chunkSize < 0) throw new IOException("Negative chunk size: " + chunkSize);
+            if (chunkSize < 0) throw new IOException(LocaleUtil.getString("proxy_helper_chunked_negative_size", chunkSize));
             if (chunkSize == 0) break;
             if (total + chunkSize > maxBodyBytes)
                 throw new RequestTooLargeException("Chunked body exceeds " + maxBodyBytes + " bytes");
             int rem = chunkSize;
             while (rem > 0) {
                 int r = in.read(buf, 0, Math.min(rem, buf.length));
-                if (r == -1) throw new IOException("Unexpected end of chunked body");
+                if (r == -1) throw new IOException(LocaleUtil.getString("proxy_helper_chunked_unexpected_end"));
                 out.write(buf, 0, r);
                 rem -= r;
             }
@@ -328,13 +336,13 @@ public final class ProxyHandlerHelper {
 
     public static void relayFixed(InputStream in, OutputStream out, long len) throws IOException {
         if (in == null || out == null) {
-            throw new IllegalArgumentException("in and out must not be null");
+            throw new IllegalArgumentException(LocaleUtil.getString("proxy_helper_invalid_args"));
         }
         byte[] buf = new byte[8192];
         long rem = len;
         while (rem > 0) {
             int r = in.read(buf, 0, (int) Math.min(rem, buf.length));
-            if (r == -1) throw new IOException("Unexpected end of body");
+            if (r == -1) throw new IOException(LocaleUtil.getString("proxy_helper_body_unexpected_end"));
             out.write(buf, 0, r);
             rem -= r;
         }
@@ -355,17 +363,17 @@ public final class ProxyHandlerHelper {
             total += line.length() + 2;
             if (total > maxHeaderBytes) {
                 throw new RequestTooLargeException(
-                        discardOnly
-                                ? "CONNECT headers exceed " + maxHeaderBytes + " bytes"
-                                : "HTTP headers exceed " + maxHeaderBytes + " bytes"
+                        LocaleUtil.getString("proxy_helper_headers_exceed_max", maxHeaderBytes)
                 );
             }
             if (!discardOnly) sb.append(line).append("\r\n");
-            if (releasedChecker.getAsBoolean()) throw new IOException("Connection lease released");
+            if (releasedChecker.getAsBoolean()) throw new IOException(LocaleUtil.getString("proxy_helper_connection_released"));
 
         }
         if (line == null) {
-            throw new IOException(discardOnly ? "Incomplete CONNECT request" : "Incomplete HTTP request headers");
+            throw new IOException(
+                    LocaleUtil.getString("proxy_helper_incomplete_request", discardOnly ? "CONNECT" : "HTTP")
+            );
         }
         if (!discardOnly) sb.append("\r\n");
         return sb;

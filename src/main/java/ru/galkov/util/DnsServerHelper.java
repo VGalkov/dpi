@@ -21,7 +21,7 @@ public final class DnsServerHelper {
 
     public static byte[] shortToBytes(int value) {
         if (value < 0 || value > 0xFFFF)
-            throw new IllegalArgumentException("Длина вне диапазона: " + value);
+            throw new IllegalArgumentException(LocaleUtil.getString("dns_helper_length_out_of_range", value));
 
         return new byte[]{(byte) ((value >> 8) & 0xFF), (byte) (value & 0xFF)};
     }
@@ -78,20 +78,19 @@ public final class DnsServerHelper {
         if (question == null || question.getName() == null)
             return Optional.empty();
 
-
         String qname = question.getName().toString();
 
         if (snapshot.checkDomain(qname).isBlocked())
-            return Optional.of("запрещённый домен: " + qname);
+            return Optional.of(LocaleUtil.getString("dns_helper_blocked_domain", qname));
 
         String ipv4 = extractIpv4FromPtrQuery(qname);
 
         if (ipv4 != null && snapshot.checkIp(ipv4).isBlocked())
-            return Optional.of("запрещённый IPv4: " + ipv4);
+            return Optional.of(LocaleUtil.getString("dns_helper_blocked_ipv4", ipv4));
 
         String ipv6 = extractIpv6FromPtrQuery(qname);
         if (ipv6 != null && snapshot.checkIp(ipv6).isBlocked())
-            return Optional.of("запрещённый IPv6: " + ipv6);
+            return Optional.of(LocaleUtil.getString("dns_helper_blocked_ipv6", ipv6));
 
         return Optional.empty();
     }
@@ -125,23 +124,19 @@ public final class DnsServerHelper {
         if (record == null || snapshot == null) return null;
         Name ownerName = record.getName();
         if (ownerName != null && snapshot.checkDomain(ownerName.toString()).isBlocked()) {
-            return "запрещённый owner domain "
-                    + ownerName
-                    + " в секции "
-                    + Section.string(section)
-                    + " для запроса "
-                    + requestedDomain;
+            return LocaleUtil.getString(
+                    "dns_helper_blocked_owner_domain",
+                    ownerName,
+                    Section.string(section),
+                    requestedDomain
+            );
         }
 
         if (record instanceof ARecord aRecord) {
             String ip = aRecord.getAddress().getHostAddress();
 
-            if (snapshot.checkIp(ip).isBlocked()) {
-                return "запрещённый IPv4 "
-                        + ip
-                        + " в A-record, секция "
-                        + Section.string(section);
-            }
+            if (snapshot.checkIp(ip).isBlocked())
+                return LocaleUtil.getString("dns_helper_blocked_ipv4_a_record", ip, Section.string(section));
 
             return null;
         }
@@ -150,10 +145,11 @@ public final class DnsServerHelper {
             String ip = aaaaRecord.getAddress().getHostAddress();
 
             if (snapshot.checkIp(ip).isBlocked()) {
-                return "запрещённый IPv6 "
-                        + ip
-                        + " в AAAA-record, секция "
-                        + Section.string(section);
+                return LocaleUtil.getString(
+                        "dns_helper_blocked_ipv6_aaaa_record",
+                        ip,
+                        Section.string(section)
+                );
             }
 
             return null;
@@ -161,14 +157,13 @@ public final class DnsServerHelper {
 
         Name targetName = extractTargetName(record);
 
-        if (targetName != null
-                && snapshot.checkDomain(targetName.toString()).isBlocked()) {
-            return "запрещённый target domain "
-                    + targetName
-                    + " в "
-                    + record.getClass().getSimpleName()
-                    + ", секция "
-                    + Section.string(section);
+        if (targetName != null && snapshot.checkDomain(targetName.toString()).isBlocked()) {
+            return LocaleUtil.getString(
+                    "dns_helper_blocked_target_domain",
+                    targetName,
+                    record.getClass().getSimpleName(),
+                    Section.string(section)
+            );
         }
 
         return null;
@@ -186,7 +181,7 @@ public final class DnsServerHelper {
     }
 
     public static Message createRefusedResponse(Message query) {
-        if (query == null) throw new IllegalArgumentException("query must not be null");
+        if (query == null) throw new IllegalArgumentException(LocaleUtil.getString("dns_helper_query_null"));
         Message response = new Message(query.getHeader().getID());
         response.getHeader().setFlag(Flags.QR);
         response.getHeader().setRcode(Rcode.REFUSED);
@@ -201,7 +196,7 @@ public final class DnsServerHelper {
             Message query
     ) throws IOException {
         if (socket == null || originalPacket == null || query == null)
-            throw new IllegalArgumentException("socket, originalPacket and query are required");
+            throw new IllegalArgumentException(LocaleUtil.getString("dns_helper_send_refused_args"));
 
         Message response = createRefusedResponse(query);
         byte[] responseBytes = response.toWire();
@@ -216,7 +211,7 @@ public final class DnsServerHelper {
     }
 
     public static void sendTcpRefusedResponse(OutputStream output, Message query) throws IOException {
-        if (output == null || query == null) throw new IllegalArgumentException("output and query are required");
+        if (output == null || query == null) throw new IllegalArgumentException(LocaleUtil.getString("dns_helper_send_tcp_refused_args"));
 
         Message refused = createRefusedResponse(query);
         byte[] refusedBytes = refused.toWire();

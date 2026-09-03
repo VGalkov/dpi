@@ -104,15 +104,12 @@ public final class BlacklistLoader implements AutoCloseable {
 
     public void reloadNow() {
         synchronized (reloadLock) {
-            if (pendingSnapshot != null
-                    && !pendingSnapshot.isDone()) {
-                logger.info("Blacklist reload already in progress");
+            if (pendingSnapshot != null && !pendingSnapshot.isDone()) {
+                logger.info(LocaleUtil.getString("blacklist_reload_in_progress"));
                 return;
             }
 
-            pendingSnapshot = CompletableFuture.supplyAsync(
-                    this::buildSnapshot
-            );
+            pendingSnapshot = CompletableFuture.supplyAsync(this::buildSnapshot);
 
             pendingSnapshot
                     .thenAccept(newSnapshot -> {
@@ -122,21 +119,13 @@ public final class BlacklistLoader implements AutoCloseable {
                             cachedSnapshotTime = 0;
                             loaded = true;
 
-                            logger.info(
-                                    "Blacklist reload completed successfully"
-                            );
+                            logger.info(LocaleUtil.getString("blacklist_reload_completed"));
                         } catch (Exception e) {
-                            logger.error(
-                                    "Blacklist reload error",
-                                    e
-                            );
+                            logger.error(LocaleUtil.getString("blacklist_reload_error"), e);
                         }
                     })
                     .exceptionally(ex -> {
-                        logger.error(
-                                "Blacklist reload error",
-                                ex
-                        );
+                        logger.error(LocaleUtil.getString("blacklist_reload_error"), ex);
                         return null;
                     });
         }
@@ -150,7 +139,7 @@ public final class BlacklistLoader implements AutoCloseable {
 
             try {
                 snapshot.set(buildSnapshot());
-                logger.info("Blacklist first load completed successfully");
+                logger.info(LocaleUtil.getString("blacklist_first_load_completed"));
             } catch (Exception e) {
                 logger.error(LocaleUtil.getString("blacklist_critical_load_error"), e);
                 snapshot.set(BlacklistSnapshot.empty());
@@ -311,9 +300,7 @@ public final class BlacklistLoader implements AutoCloseable {
                 loadedSources++;
                 invalidRules += invalid;
 
-                logStats.loadedSources++;
                 logStats.rulesAccepted += accepted;
-                logStats.invalidRules += invalid;
 
                 if (logger.isDebugEnabled()) {
                     logStats.sourceResults.add(
@@ -342,18 +329,17 @@ public final class BlacklistLoader implements AutoCloseable {
                     );
 
                     throw new IllegalStateException(
-                            "Превышен лимит памяти blacklist: " + usedMemoryMB + " MB > " + MAX_MEMORY_MB + " MB");
+                            LocaleUtil.getString("blacklist_max_memory_exceeded", usedMemoryMB, MAX_MEMORY_MB)
+                    );
                 }
             }
         } finally {
             shutdownLoaderExecutor(loaderExecutor);
         }
 
-        if (!sources.isEmpty() && loadedSources == 0) {
-            throw new IllegalStateException(
-                    LocaleUtil.getString("blacklist_no_sources_loaded")
-            );
-        }
+        if (!sources.isEmpty() && loadedSources == 0)
+            throw new IllegalStateException(LocaleUtil.getString("blacklist_no_sources_loaded"));
+
         logStats.buildDurationMillis = elapsedMillis(buildStartedAt);
         logSnapshotSummary(
                 logStats,
@@ -456,22 +442,21 @@ public final class BlacklistLoader implements AutoCloseable {
 
     private void logSourceErrors(LoadLogStats stats) {
         if (stats.failedSources.isEmpty()) return;
-        logger.warn("Blacklist source errors: count={}, details={}", stats.sourceLoadErrors, stats.failedSources);
+        logger.warn(LocaleUtil.getString("blacklist_source_errors", stats.sourceLoadErrors, stats.failedSources));
     }
 
     private void logTruncationDetails(LoadLogStats stats) {
         if (stats.truncatedSourceDetails.isEmpty()) return;
-        logger.warn(
-                "Blacklist source rule limits reached: "
-                        + "count={}, details={}",
+        logger.warn(LocaleUtil.getString(
+                "blacklist_source_limits_reached",
                 stats.truncatedSources,
-                stats.truncatedSourceDetails
+                stats.truncatedSourceDetails)
         );
     }
 
     private void logSourceDetails(LoadLogStats stats) {
         if (!logger.isDebugEnabled() || stats.sourceResults.isEmpty()) return;
-        logger.debug("Blacklist source statistics: {}", stats.sourceResults);
+        logger.debug(LocaleUtil.getString("blacklist_source_statistics", stats.sourceResults));
     }
 
     private static void addLogDetail(List<String> details, Object value) {
@@ -510,11 +495,9 @@ public final class BlacklistLoader implements AutoCloseable {
     private static final class LoadLogStats {
 
         private final int sourcesTotal;
-        private int loadedSources;
         private int sourceLoadErrors;
         private int rulesRead;
         private int rulesAccepted;
-        private int invalidRules;
         private int truncatedSources;
         private boolean totalLimitReached;
         private long sourceLoadTimeMillis;
@@ -565,10 +548,7 @@ public final class BlacklistLoader implements AutoCloseable {
             if (reloadExecutor != null && !reloadExecutor.isShutdown()) {return;}
             ScheduledExecutorService newExecutor =
                     Executors.newSingleThreadScheduledExecutor(r -> {
-                        Thread thread = new Thread(
-                                r,
-                                "Blacklist-Reload-Thread"
-                        );
+                        Thread thread = new Thread(r, "Blacklist-Reload-Thread");
                         thread.setDaemon(true);
                         return thread;
                     });
@@ -599,7 +579,7 @@ public final class BlacklistLoader implements AutoCloseable {
             executor.shutdownNow();
         }
 
-        logger.info("Blacklist reload scheduler stopped");
+        logger.info(LocaleUtil.getString("blacklist_scheduler_stopped"));
     }
 
     private static boolean isSubtreeRule(BlacklistSource source) {

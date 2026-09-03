@@ -15,7 +15,6 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.StringTokenizer;
-import java.util.concurrent.atomic.LongAdder;
 
 import static ru.galkov.Main.getConfig;
 import static ru.galkov.util.IoUtil.closeQuietly;
@@ -33,13 +32,6 @@ public class ProxyHandler implements Runnable {
     private final boolean blockOnSniMismatch;
     private final boolean limitResponseBody;
     private final long maxResponseBytes;
-    private final LongAdder emptyRequestCounter = new LongAdder();
-    private final LongAdder invalidTargetCounter = new LongAdder();
-    private final LongAdder unsupportedMethodCounter = new LongAdder();
-    private final LongAdder headersTooLargeCounter = new LongAdder();
-    private final LongAdder timeoutCounter = new LongAdder();
-    private final LongAdder socketErrorCounter = new LongAdder();
-    private final LongAdder ioErrorCounter = new LongAdder();
     private final boolean transparentMode;
 
     public ProxyHandler(ConnectionLease lease, BlacklistLoader blacklist, HttpAnomalyDetector detector, boolean transparentMode) {
@@ -74,20 +66,18 @@ public class ProxyHandler implements Runnable {
             OutputStream out = clientSocket.getOutputStream();
             int firstByte = in.read();
             if (firstByte == -1) {
-                emptyRequestCounter.increment();
                 return;
             }
             in.unread(firstByte);
 
             if (transparentMode && firstByte == 22) {
-                handleTransparentHttps(in, out);
+                handleTransparentHttps(in);
                 return;
             }
 
             String firstLine = ProxyHandlerHelper.readLine(in, maxHeaderBytes);
             if (leased()) return;
             if (firstLine == null || firstLine.isEmpty()) {
-                emptyRequestCounter.increment();
                 return;
             }
 
@@ -97,7 +87,6 @@ public class ProxyHandler implements Runnable {
 
             StringTokenizer t = new StringTokenizer(firstLine);
             if (!t.hasMoreTokens()) {
-                invalidTargetCounter.increment();
                 sendError(out, 400, "Bad Request");
                 return;
             }
@@ -105,7 +94,6 @@ public class ProxyHandler implements Runnable {
             String method = t.nextToken().toUpperCase(Locale.ROOT);
 
             if (!t.hasMoreTokens()) {
-                invalidTargetCounter.increment();
                 sendError(out, 400, "Bad Request (no target)");
                 return;
             }
@@ -114,7 +102,6 @@ public class ProxyHandler implements Runnable {
 
             if ("CONNECT".equals(method)) {
                 if (transparentMode) {
-                    invalidTargetCounter.increment();
                     sendError(out, 400, "CONNECT is not valid for transparent proxy port");
                     return;
                 }
@@ -129,25 +116,16 @@ public class ProxyHandler implements Runnable {
                 return;
             }
 
-            unsupportedMethodCounter.increment();
             sendError(out, 501, "Not Implemented");
         } catch (ProxyHandlerHelper.RequestTooLargeException e) {
-            headersTooLargeCounter.increment();
             sendErrorQuietly(431, "Request Header Fields Too Large");
         } catch (SocketTimeoutException e) {
-            timeoutCounter.increment();
             sendErrorQuietly(408, "Request Timeout");
         } catch (IOException e) {
-            if (e instanceof java.net.SocketException) {
-                socketErrorCounter.increment();
-            } else {
-                ioErrorCounter.increment();
-            }
             logger.debug("Proxy I/O error: client={}, transparent={}, message={}", clientIp, transparentMode, e.getMessage());
         } catch (Throwable t) {
             logger.error(LocaleUtil.getString("proxy_handler_unexpected_error"), clientIp, t);
         } finally {
-            logRequestSummary();
             lease.release();
         }
     }
@@ -156,7 +134,7 @@ public class ProxyHandler implements Runnable {
         return lease.isReleased() || clientSocket.isClosed();
     }
 
-    private void handleTransparentHttps(InputStream in, OutputStream out) throws IOException {
+    private void handleTransparentHttps(InputStream in) throws IOException {
         if (leased()) return;
 
         byte[] hello = ProxyHandlerHelper.readInitialTlsHandshake(in, clientSocket, clientReadTimeout);
@@ -230,7 +208,6 @@ public class ProxyHandler implements Runnable {
         if (leased()) return;
         HostNormalizer.HostAndPort hp = HostNormalizer.parseHostPort(target);
         if (hp == null || hp.host() == null) {
-            invalidTargetCounter.increment();
             sendError(out, 400, "Bad Request (invalid host and port)");
             return;
         }
@@ -285,6 +262,8 @@ public class ProxyHandler implements Runnable {
             String normalizedSni = (sni != null) ? HostNormalizer.normalizeHost(sni) : null;
             boolean mismatch = !targetIsIp && normalizedHost != null && normalizedSni != null && !normalizedHost.equals(normalizedSni);
             if (mismatch && blockOnSniMismatch) {
+                logger.info("Blocked CONNECT: SNI mismatch - host='{}' vs SNI='{}' port={} client={}",
+                        hp.host(), sni, hp.port(), clientIp);
                 closeQuietly(remote);
                 return;
             }
@@ -325,7 +304,6 @@ public class ProxyHandler implements Runnable {
             hostAndPort = parseHostFromHeader(headers.hostHeader);
 
             if (hostAndPort == null || hostAndPort.host() == null) {
-                invalidTargetCounter.increment();
                 sendError(out, 400, "Missing Host header");
                 return;
             }
@@ -333,7 +311,6 @@ public class ProxyHandler implements Runnable {
             hostAndPort = ProxyHandlerHelper.resolveHttpTarget(headers.hostHeader, target);
 
             if (hostAndPort == null || hostAndPort.host() == null) {
-                invalidTargetCounter.increment();
                 sendError(out, 400, "Cannot determine target host");
                 return;
             }
@@ -516,12 +493,6 @@ public class ProxyHandler implements Runnable {
         String response = "HTTP/1.1 " + code + " " + message + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: " + body.getBytes(StandardCharsets.UTF_8).length + "\r\nConnection: close\r\n\r\n" + body;
         out.write(response.getBytes(StandardCharsets.UTF_8));
         out.flush();
-    }
-
-    private void logRequestSummary() {
-        long empty = emptyRequestCounter.sum(), invalid = invalidTargetCounter.sum(), unsupported = unsupportedMethodCounter.sum(), tooLarge = headersTooLargeCounter.sum(), timeouts = timeoutCounter.sum(), socketErrors = socketErrorCounter.sum(), ioErrors = ioErrorCounter.sum();
-        if (empty == 0 && invalid == 0 && unsupported == 0 && tooLarge == 0 && timeouts == 0 && socketErrors == 0 && ioErrors == 0) return;
-        logger.debug("ProxyHandler request summary: client={}, emptyRequests={}, invalidTargets={}, unsupportedMethods={}, headersTooLarge={}, timeouts={}, socketErrors={}, ioErrors={}", clientIp, empty, invalid, unsupported, tooLarge, timeouts, socketErrors, ioErrors);
     }
 
     private record HttpHeaders(String rawHeaders, String hostHeader, long contentLength, boolean chunked, boolean expectContinuePresent) { }

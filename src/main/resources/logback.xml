@@ -23,6 +23,9 @@
     <logger name="ru.galkov.servers.ProxyHandler" level="WARN"/>
     <logger name="ru.galkov.servers.IptablesIpBlocker" level="INFO"/>
     <logger name="ru.galkov.AppConfig" level="INFO"/>
+    <logger name="ru.galkov.util.ProxyHandlerHelper" level="INFO"/>
+    <logger name="org.xbill.DNS.SimpleResolver" level="DEBUG"/>
+    <logger name="ru.galkov.servers.DnsServer" level="INFO"/>
 
     <root level="DEBUG">
         <appender-ref ref="FILE"/>
