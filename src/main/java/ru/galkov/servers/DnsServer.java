@@ -305,7 +305,9 @@ public class DnsServer {
 
     private DnsRateLimiter createRateLimiter() {
         boolean enabled = getConfig().getBoolean("dns.rate-limit.enabled");
-        if (!enabled) {return DnsRateLimiter.disabled();}
+        if (!enabled) {
+            return DnsRateLimiter.disabled();
+        }
         int rps = getConfig().getInt("dns.rate-limit.requests-per-second");
         int burst = getConfig().getInt("dns.rate-limit.burst");
         int idle = getConfig().getInt("dns.rate-limit.client-idle-seconds");
@@ -342,9 +344,10 @@ public class DnsServer {
 
                 if (cached != null && !cached.isExpired()) {
                     addr = cached.address;
-                    logger.debug("Используем кэшированный DNS: {} -> {}", dns, addr);
+                    if (logger.isDebugEnabled())
+                        logger.debug("Используем кэшированный DNS: {} -> {}", dns, addr);
                 } else {
-                    if (cached != null) {
+                    if (cached != null && logger.isDebugEnabled()) {
                         logger.debug(
                                 LocaleUtil.getString("dns_resolver_cache_expired"),
                                 dns,
@@ -356,7 +359,8 @@ public class DnsServer {
                     if (dnsCache.size() >= maxDnsCacheSize) cleanupDnsCacheBySize();
                     dnsCache.put(dns, new CachedInetAddress(addr));
                     resolverCacheRefreshCount.incrementAndGet();
-                    logger.debug(LocaleUtil.getString("dns_resolver_cache_refreshed"), dns, addr);
+                    if (logger.isDebugEnabled())
+                        logger.debug(LocaleUtil.getString("dns_resolver_cache_refreshed"), dns, addr);
                 }
 
                 if (addr == null)
@@ -378,8 +382,10 @@ public class DnsServer {
         int removed = 0;
 
         Iterator<Map.Entry<String, CachedInetAddress>> it = dnsCache.entrySet().iterator();
-        while (it.hasNext()) if (it.next().getValue().isExpired()) {it.remove();removed++;}
-
+        while (it.hasNext()) if (it.next().getValue().isExpired()) {
+            it.remove();
+            removed++;
+        }
 
         while (dnsCache.size() > maxDnsCacheSize && !dnsCache.isEmpty()) {
             dnsCache.remove(dnsCache.keySet().iterator().next());
@@ -388,7 +394,6 @@ public class DnsServer {
 
         if (removed > 0)
             logger.debug(LocaleUtil.getString("dns_cache_size_eviction"), removed, dnsCache.size(), maxDnsCacheSize);
-
     }
 
     private Message processQuery(Message query, String clientIp, String qname) {
@@ -734,37 +739,37 @@ public class DnsServer {
         ) {
             return;
         }
-
-        logger.debug(
-                "DNS server aggregated statistics: "
-                        + "packetPoolEmpty={}, "
-                        + "maxPacketSizeExceeded={}, "
-                        + "activeUdpSocketsOverflow={}, "
-                        + "maxQueriesByClientExceeded={}, "
-                        + "maxClientsExceeded={}, "
-                        + "rateLimitExceeded={}, "
-                        + "udpWorkerRejected={}, "
-                        + "tcpWorkerRejected={}, "
-                        + "tcpSessionLimitExceeded={}, "
-                        + "tcpClientLimitExceeded={}, "
-                        + "upstreamErrors={}, "
-                        + "udpSendErrors={}, "
-                        + "tcpSessionErrors={}, "
-                        + "tcpSocketErrors={}",
-                packetPoolEmpty,
-                maxPacketSizeExceeded,
-                activeUdpSocketsOverflow,
-                maxQueriesByClientExceeded,
-                maxClientsExceeded,
-                rateLimitExceeded,
-                udpWorkerRejected,
-                tcpWorkerRejected,
-                tcpSessionLimitExceeded,
-                tcpClientLimitExceeded,
-                upstreamErrors,
-                udpSendErrors,
-                tcpSessionErrors,
-                tcpSocketErrors
-        );
+        if (logger.isDebugEnabled())
+            logger.debug(
+                    "DNS server aggregated statistics: "
+                            + "packetPoolEmpty={}, "
+                            + "maxPacketSizeExceeded={}, "
+                            + "activeUdpSocketsOverflow={}, "
+                            + "maxQueriesByClientExceeded={}, "
+                            + "maxClientsExceeded={}, "
+                            + "rateLimitExceeded={}, "
+                            + "udpWorkerRejected={}, "
+                            + "tcpWorkerRejected={}, "
+                            + "tcpSessionLimitExceeded={}, "
+                            + "tcpClientLimitExceeded={}, "
+                            + "upstreamErrors={}, "
+                            + "udpSendErrors={}, "
+                            + "tcpSessionErrors={}, "
+                            + "tcpSocketErrors={}",
+                    packetPoolEmpty,
+                    maxPacketSizeExceeded,
+                    activeUdpSocketsOverflow,
+                    maxQueriesByClientExceeded,
+                    maxClientsExceeded,
+                    rateLimitExceeded,
+                    udpWorkerRejected,
+                    tcpWorkerRejected,
+                    tcpSessionLimitExceeded,
+                    tcpClientLimitExceeded,
+                    upstreamErrors,
+                    udpSendErrors,
+                    tcpSessionErrors,
+                    tcpSocketErrors
+            );
     }
 }

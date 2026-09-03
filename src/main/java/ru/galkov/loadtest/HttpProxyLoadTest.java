@@ -31,10 +31,10 @@ public class HttpProxyLoadTest {
 
     private static final String PROXY_HOST = "10.0.1.235";
     private static final int PROXY_PORT = 3128;
-    private static final int TIMEOUT_MS = 10000;
-    private static final int SLEEP_TIMEOUT = 3000;
-    private static final int CLIENTS = 50;
-    private static final int REQUESTS = 50;
+    private static final int TIMEOUT_MS = 15000;
+    private static final int SLEEP_TIMEOUT = 2000;
+    private static final int CLIENTS = 100;
+    private static final int REQUESTS = 30;
 
     // Список URL для тестирования (чтобы избежать блокировки за частые запросы к одному)
     private static final List<String> TEST_URLS = Arrays.asList(

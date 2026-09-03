@@ -27,9 +27,9 @@ public class DnsLoadTest {
     private static final DecimalFormat DF = new DecimalFormat("#,###.##");
     private static final String DNS_HOST = "10.0.1.235";
     private static final int DNS_PORT = 53;
-    private static final int TIMEOUT_MS = 2000;
-    private static final int CLIENTS = 200;
-    private static final int REQUESTS = 90;
+    private static final int TIMEOUT_MS = 3000;
+    private static final int CLIENTS = 100;
+    private static final int REQUESTS = 30;
 
     public static void main(String[] args) throws Exception {
         int concurrentClients = CLIENTS;
@@ -38,7 +38,6 @@ public class DnsLoadTest {
         if (args.length >= 1) concurrentClients = Integer.parseInt(args[0]);
         if (args.length >= 2) requestsPerClient = Integer.parseInt(args[1]);
         else requestsPerClient = REQUESTS;
-
 
         logger.info("========================================");
         logger.info("         DNS LOAD TEST");

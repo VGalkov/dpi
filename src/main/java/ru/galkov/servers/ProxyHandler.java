@@ -122,7 +122,8 @@ public class ProxyHandler implements Runnable {
         } catch (SocketTimeoutException e) {
             sendErrorQuietly(408, "Request Timeout");
         } catch (IOException e) {
-            logger.debug("Proxy I/O error: client={}, transparent={}, message={}", clientIp, transparentMode, e.getMessage());
+            if (logger.isDebugEnabled())
+                logger.debug("Proxy I/O error: client={}, transparent={}, message={}", clientIp, transparentMode, e.getMessage());
         } catch (Throwable t) {
             logger.error(LocaleUtil.getString("proxy_handler_unexpected_error"), clientIp, t);
         } finally {
@@ -179,8 +180,8 @@ public class ProxyHandler implements Runnable {
                 closeQuietly(clientSocket);
             }
         } catch (IOException e) {
-            logger.debug("Transparent HTTPS upstream connection failed: client={}, host={}, message={}", clientIp, sni, e.getMessage());
-
+            if (logger.isDebugEnabled())
+                logger.debug("Transparent HTTPS upstream connection failed: client={}, host={}, message={}", clientIp, sni, e.getMessage());
             if (!leased()) {
                 closeQuietly(clientSocket);
             }
@@ -434,26 +435,37 @@ public class ProxyHandler implements Runnable {
             else if (regionMatches(line, "content-length:")) {
                 Long v = parseContentLength(line.substring(15).trim());
                 if (v == null) throw new IOException("Invalid Content-Length");
-                if (contentLen != null && contentLen.longValue() != v.longValue()) throw new IOException("Conflicting Content-Length");
+                if (contentLen != null && contentLen.longValue() != v.longValue())
+                    throw new IOException("Conflicting Content-Length");
                 contentLen = v;
-            }
-            else if (regionMatches(line, "transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked")) chunked = true;
-            else if (regionMatches(line, "expect:") && line.substring(7).trim().equalsIgnoreCase("100-continue")) expect = true;
+            } else if (regionMatches(line, "transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked"))
+                chunked = true;
+            else if (regionMatches(line, "expect:") && line.substring(7).trim().equalsIgnoreCase("100-continue"))
+                expect = true;
         }
         if (chunked && contentLen != null) throw new IOException("Both Content-Length and Transfer-Encoding present");
         return new HttpHeaders(rawHeaders, host, contentLen == null ? 0L : contentLen, chunked, expect);
     }
 
-    private static boolean regionMatches(String str, String prefix) { return str.regionMatches(true, 0, prefix, 0, prefix.length()); }
+    private static boolean regionMatches(String str, String prefix) {
+        return str.regionMatches(true, 0, prefix, 0, prefix.length());
+    }
+
     private BlockDecision checkBlockedHostOrIp(String host) {
         if (blacklist == null || host == null) return BlockDecision.allow();
         BlacklistSnapshot snapshot = blacklist.snapshot();
         BlockDecision ip = snapshot.checkIp(host);
         return ip.isBlocked() ? ip : snapshot.checkDomain(host);
     }
+
     private Long parseContentLength(String value) {
         if (value == null || value.isEmpty()) return null;
-        try { long length = Long.parseLong(value); return length < 0 ? null : length; } catch (NumberFormatException e) { return null; }
+        try {
+            long length = Long.parseLong(value);
+            return length < 0 ? null : length;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private void relayResponse(InputStream in, OutputStream out) throws IOException {
@@ -466,16 +478,22 @@ public class ProxyHandler implements Runnable {
         String line;
         while ((line = ProxyHandlerHelper.readLine(in, maxHeaderBytes)) != null && !line.isEmpty()) {
             ProxyHandlerHelper.writeLine(out, line);
-            if (regionMatches(line, "content-length:")) { Long v = parseContentLength(line.substring(15).trim()); if (v != null) contentLen = v; }
-            else if (regionMatches(line, "transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked")) chunked = true;
+            if (regionMatches(line, "content-length:")) {
+                Long v = parseContentLength(line.substring(15).trim());
+                if (v != null) contentLen = v;
+            } else if (regionMatches(line, "transfer-encoding:") && line.substring(18).trim().toLowerCase(Locale.ROOT).contains("chunked"))
+                chunked = true;
             if (leased()) return;
         }
         if (line == null) return;
         ProxyHandlerHelper.writeLine(out, "");
         long responseLimit = limitResponseBody ? maxResponseBytes : Long.MAX_VALUE;
         if (chunked) ProxyHandlerHelper.relayChunked(in, out, responseLimit);
-        else if (contentLen >= 0) { if (limitResponseBody && contentLen > maxResponseBytes) throw new ProxyHandlerHelper.RequestTooLargeException("Response body exceeds " + maxResponseBytes + " bytes"); ProxyHandlerHelper.relayFixed(in, out, contentLen); }
-        else relayUntilEofLimited(in, out, responseLimit);
+        else if (contentLen >= 0) {
+            if (limitResponseBody && contentLen > maxResponseBytes)
+                throw new ProxyHandlerHelper.RequestTooLargeException("Response body exceeds " + maxResponseBytes + " bytes");
+            ProxyHandlerHelper.relayFixed(in, out, contentLen);
+        } else relayUntilEofLimited(in, out, responseLimit);
         out.flush();
     }
 
@@ -483,10 +501,22 @@ public class ProxyHandler implements Runnable {
         byte[] buf = new byte[8192];
         long total = 0;
         int len;
-        while ((len = in.read(buf)) != -1) { if (leased()) return; if (total + len > max) throw new ProxyHandlerHelper.RequestTooLargeException("Response body exceeds " + max + " bytes"); out.write(buf, 0, len); total += len; }
+        while ((len = in.read(buf)) != -1) {
+            if (leased()) return;
+            if (total + len > max)
+                throw new ProxyHandlerHelper.RequestTooLargeException("Response body exceeds " + max + " bytes");
+            out.write(buf, 0, len);
+            total += len;
+        }
     }
 
-    private void sendErrorQuietly(int code, String message) { try { if (!leased()) sendError(clientSocket.getOutputStream(), code, message); } catch (IOException ignored) { } }
+    private void sendErrorQuietly(int code, String message) {
+        try {
+            if (!leased()) sendError(clientSocket.getOutputStream(), code, message);
+        } catch (IOException ignored) {
+        }
+    }
+
     private void sendError(OutputStream out, int code, String message) throws IOException {
         if (leased()) return;
         String body = "<h1>" + code + " " + message + "</h1>";
@@ -495,5 +525,7 @@ public class ProxyHandler implements Runnable {
         out.flush();
     }
 
-    private record HttpHeaders(String rawHeaders, String hostHeader, long contentLength, boolean chunked, boolean expectContinuePresent) { }
+    private record HttpHeaders(String rawHeaders, String hostHeader, long contentLength, boolean chunked,
+                               boolean expectContinuePresent) {
+    }
 }
