@@ -1,35 +1,92 @@
-
 <configuration scan="true" scanPeriod="10 seconds">
 
-    <!-- Аппендер для файла (ротация по дням) -->
+    <!-- ============================================
+         БАЗОВЫЕ АППЕНДЕРЫ (синхронные)
+         ============================================ -->
+
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/app.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>logs/app.%d{yyyy-MM-dd}.log</fileNamePattern>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>logs/app.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
             <maxFileSize>100MB</maxFileSize>
             <maxHistory>7</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
+
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
         </encoder>
+
+        <immediateFlush>true</immediateFlush>
     </appender>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
         </encoder>
+        <immediateFlush>true</immediateFlush>
     </appender>
 
-    <logger name="ru.galkov.servers.ProxyHandler" level="WARN"/>
-    <logger name="ru.galkov.servers.IptablesIpBlocker" level="INFO"/>
-    <logger name="ru.galkov.AppConfig" level="INFO"/>
-    <logger name="ru.galkov.util.ProxyHandlerHelper" level="INFO"/>
-    <logger name="org.xbill.DNS.SimpleResolver" level="DEBUG"/>
-    <logger name="ru.galkov.servers.DnsServer" level="INFO"/>
+    <!-- ============================================
+         АСИНХРОННЫЕ ОБЁРТКИ
+         ============================================ -->
 
-    <root level="DEBUG">
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
         <appender-ref ref="FILE"/>
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <includeCallerData>false</includeCallerData>
+        <neverBlock>false</neverBlock>
+    </appender>
+
+    <appender name="ASYNC_CONSOLE" class="ch.qos.logback.classic.AsyncAppender">
         <appender-ref ref="CONSOLE"/>
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <includeCallerData>false</includeCallerData>
+        <neverBlock>false</neverBlock>
+    </appender>
+
+    <!-- ============================================
+         УРОВНИ ЛОГИРОВАНИЯ
+         ДОБАВЛЕНО: additivity="false"
+         ============================================ -->
+
+    <logger name="ru.galkov.servers.ProxyHandler" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </logger>
+
+    <logger name="ru.galkov.servers.HttpProxyServer" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </logger>
+
+    <logger name="ru.galkov.servers.DnsServer" level="DEBUG" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </logger>
+
+    <logger name="ru.galkov.util.ProxyHandlerHelper" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </logger>
+
+    <logger name="ru.galkov.AppConfig" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </logger>
+
+    <!-- ============================================
+         ROOT (по умолчанию) - только для остальных классов
+         ============================================ -->
+
+    <root level="WARN">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
     </root>
 
 </configuration>
