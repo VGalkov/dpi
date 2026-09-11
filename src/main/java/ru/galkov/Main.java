@@ -9,10 +9,7 @@ import ru.galkov.blacklist_source.RknBlacklistSource;
 import ru.galkov.llm.DnsAnomalyDetector;
 import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.llm.LlmAnomalyDetector;
-import ru.galkov.servers.CheckApiHandler;
-import ru.galkov.servers.DnsServer;
-import ru.galkov.servers.HttpProxyServer;
-import ru.galkov.servers.WorkerPool;
+import ru.galkov.servers.*;
 import ru.galkov.util.BlacklistLoader;
 import ru.galkov.util.BlacklistSnapshot;
 import ru.galkov.util.LocaleUtil;
@@ -32,7 +29,7 @@ public final class Main {
     private static volatile DnsAnomalyDetector dnsAnomalyDetector;
     private static volatile HttpAnomalyDetector httpAnomalyDetector;
     private static volatile boolean shutdownStarted;
-
+    private static volatile RknSignatureFtpServer signatureFtpServer;
     private Main() {}
 
     public static void main(String[] args) {
@@ -59,6 +56,7 @@ public final class Main {
             startDnsServer();
             startProxyServer();
             startDetectors();
+            startRknSignatureFtpServer();
             registerShutdownHook();
 
             int checkApiPort = getConfig().getInt("check.api.port");
@@ -70,6 +68,28 @@ public final class Main {
             logger.error(LocaleUtil.getString("system_not_started"), e);
             stopApplication();
             Runtime.getRuntime().exit(1);
+        }
+    }
+
+    private static void startRknSignatureFtpServer() {
+        if (!config.getBoolean("blacklist.rkn.remote.ftp.enabled")) {
+            logger.info("RKN Signature FTP Server disabled");
+            return;
+        }
+
+        try {
+            signatureFtpServer = new RknSignatureFtpServer();
+            signatureFtpServer.start();
+            logger.info("RKN Signature FTP Server started");
+        } catch (Exception e) {
+            logger.error("Failed to start RKN Signature FTP Server: {}", e.getMessage(), e);
+        }
+    }
+
+    private static void stopRknSignatureFtpServer() {
+        if (signatureFtpServer != null) {
+            signatureFtpServer.stop();
+            signatureFtpServer = null;
         }
     }
 
@@ -216,6 +236,7 @@ public final class Main {
         if (shutdownStarted) return;
         shutdownStarted = true;
         logger.info(LocaleUtil.getString("shutdown_started"));
+        stopRknSignatureFtpServer();
         stopProxyServer();
         stopDnsServer();
         stopHttpAnomalyDetector();
@@ -334,7 +355,7 @@ public final class Main {
         if (httpAnomalyDetector == null) { logger.error(LocaleUtil.getString("main_anomaly_detector_null"), "HttpAnomalyDetector"); return; }
         try {
             String portsStr = config.get("proxy.local.ports");
-            if (portsStr == null || portsStr.isBlank()) {
+            if (portsStr.isBlank()) {
                 int singlePort = config.getInt("proxy.local.port");
                 portsStr = String.valueOf(singlePort);
             }

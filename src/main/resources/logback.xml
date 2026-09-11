@@ -84,7 +84,7 @@
          ROOT (по умолчанию) - только для остальных классов
          ============================================ -->
 
-    <root level="WARN">
+    <root level="DEBUG">
         <appender-ref ref="ASYNC_FILE"/>
         <appender-ref ref="ASYNC_CONSOLE"/>
     </root>
