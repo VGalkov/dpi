@@ -2,10 +2,7 @@ package ru.galkov;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.blacklist_source.AdguardBlacklistSource;
-import ru.galkov.blacklist_source.BlacklistSource;
-import ru.galkov.blacklist_source.FileBlacklistSource;
-import ru.galkov.blacklist_source.RknBlacklistSource;
+import ru.galkov.blacklist_source.*;
 import ru.galkov.llm.DnsAnomalyDetector;
 import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.llm.LlmAnomalyDetector;
@@ -22,6 +19,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public final class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
@@ -31,9 +31,9 @@ public final class Main {
     private static volatile BlacklistLoader blacklist;
     private static volatile DnsAnomalyDetector dnsAnomalyDetector;
     private static volatile HttpAnomalyDetector httpAnomalyDetector;
+    private static volatile RknAutoDownloader rknAutoDownloader;
+    private static volatile ScheduledExecutorService rknReloadScheduler;
     private static volatile boolean shutdownStarted;
-
-    private Main() {}
 
     public static void main(String[] args) {
         try {
@@ -59,6 +59,7 @@ public final class Main {
             startDnsServer();
             startProxyServer();
             startDetectors();
+            startRknAutoDownloader();
             registerShutdownHook();
 
             int checkApiPort = getConfig().getInt("check.api.port");
@@ -94,7 +95,24 @@ public final class Main {
         addAdguardSource(sources);
         addMvpsSource(sources);
         addRknSource(sources);
+        addRknPublicRegistrySource(sources); // ← Добавить эту строку
         return sources;
+    }
+
+    private static void addRknPublicRegistrySource(List<BlacklistSource> sources) {
+        if (config == null) {
+            logger.error(LocaleUtil.getString("main_config_null"));
+            return;
+        }
+
+        try {
+            RknPublicRegistrySource source = new RknPublicRegistrySource();
+            // Источник сам проверяет enabled в loadRules()
+            sources.add(source);
+            logger.info(LocaleUtil.getString("source_rkn_public_added"), source);
+        } catch (Exception e) {
+            logger.error(LocaleUtil.getString("main_source_add_error"), "RKN_PUBLIC", e);
+        }
     }
 
     private static void startDetectors() {
@@ -103,6 +121,55 @@ public final class Main {
         logger.info("Anomaly detectors started: dns={}, http={}",
                 dnsAnomalyDetector != null && dnsAnomalyDetector.isEnabled(),
                 httpAnomalyDetector != null && httpAnomalyDetector.isEnabled());
+    }
+
+    private static void startRknAutoDownloader() {
+        if (!config.getBoolean("blacklist.rkn.remote.enabled")) {
+            logger.info("RKN auto-download disabled");
+            return;
+        }
+
+        try {
+            rknAutoDownloader = new RknAutoDownloader();
+
+            // Первая загрузка при старте
+            logger.info("Первая загрузка RKN выгрузки...");
+            Path downloadedFile = rknAutoDownloader.download();
+            if (downloadedFile != null) {
+                logger.info("RKN выгрузка загружена: {}", downloadedFile.toAbsolutePath());
+            }
+
+            // Планировщик периодической загрузки (раз в сутки)
+            int reloadIntervalSeconds = config.getInt("blacklist.rkn.remote.reload-interval");
+            if (reloadIntervalSeconds > 0) {
+                rknReloadScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "RKN-Reload-Scheduler");
+                    t.setDaemon(true);
+                    return t;
+                });
+
+                rknReloadScheduler.scheduleWithFixedDelay(() -> {
+                    try {
+                        logger.info("Автоматическая перезагрузка RKN выгрузки...");
+                        Path file = rknAutoDownloader.download();
+                        if (file != null) {
+                            logger.info("RKN выгрузка обновлена: {}", file.toAbsolutePath());
+                            // Перезагружаем blacklist
+                            if (blacklist != null) {
+                                blacklist.reloadNow();
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.error("Ошибка автоматической загрузки RKN: {}", e.getMessage(), e);
+                    }
+                }, reloadIntervalSeconds, reloadIntervalSeconds, TimeUnit.SECONDS);
+
+                logger.info("RKN auto-download scheduled: interval={} seconds", reloadIntervalSeconds);
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to start RKN auto-downloader: {}", e.getMessage(), e);
+        }
     }
 
     private static void addLocalFileSource(List<BlacklistSource> sources) {
@@ -216,6 +283,7 @@ public final class Main {
         if (shutdownStarted) return;
         shutdownStarted = true;
         logger.info(LocaleUtil.getString("shutdown_started"));
+        stopRknReloadScheduler();
         stopProxyServer();
         stopDnsServer();
         stopHttpAnomalyDetector();
@@ -223,6 +291,22 @@ public final class Main {
         shutdownWorkerPool();
         closeBlacklist();
         logger.info(LocaleUtil.getString("shutdown_completed"));
+    }
+
+    private static void stopRknReloadScheduler() {
+        ScheduledExecutorService scheduler = rknReloadScheduler;
+        if (scheduler != null) {
+            scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                scheduler.shutdownNow();
+            }
+            logger.info("RKN reload scheduler stopped");
+        }
     }
 
     private static void stopProxyServer() {

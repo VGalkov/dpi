@@ -79,12 +79,16 @@
         <appender-ref ref="ASYNC_FILE"/>
         <appender-ref ref="ASYNC_CONSOLE"/>
     </logger>
-
+    <!-- RKN загрузчик: DEBUG для отладки, INFO для продакшена -->
+    <logger name="ru.galkov.blacklist_source.RknAutoDownloader" level="DEBUG" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </logger>
     <!-- ============================================
          ROOT (по умолчанию) - только для остальных классов
          ============================================ -->
 
-    <root level="WARN">
+    <root level="DEBUG">
         <appender-ref ref="ASYNC_FILE"/>
         <appender-ref ref="ASYNC_CONSOLE"/>
     </root>
