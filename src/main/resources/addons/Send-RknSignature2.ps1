@@ -52,9 +52,6 @@ Write-Host ""
 Write-Host "[2/3] Podpisanie..."
 
 # --- Поиск cryptcp.exe ---
-# 1) Рядом со скриптом (приоритет)
-# 2) Стандартные пути установки КриптоПро
-# 3) В PATH
 $cryptcp = $null
 $cryptcpPaths = @(
     "$PSScriptRoot\cryptcp.exe",
@@ -92,7 +89,6 @@ if ($allCerts.Count -eq 0) {
     exit 1
 }
 
-# Показываем все сертификаты
 Write-Host ""
 Write-Host "    Vse sertifikaty:" -ForegroundColor Cyan
 for ($i = 0; $i -lt $allCerts.Count; $i++) {
@@ -158,7 +154,7 @@ if ($cryptcp) {
     }
 
 } else {
-    # ---- CAdESCOM COM (фолбэк, если cryptcp.exe отсутствует) ----
+    # ---- CAdESCOM COM (фолбэк) ----
 
     $CAPICOM_CURRENT_USER_STORE         = 2
     $CAPICOM_MY_STORE                   = "My"
@@ -262,7 +258,7 @@ if ($cryptcp) {
 
 Write-Host "    Podpis sozdan: request.xml.sig" -ForegroundColor Green
 
-# 3. Отправка на FTP (raw TCP — без FtpWebRequest)
+# 3. Отправка на FTP (raw TCP)
 Write-Host ""
 Write-Host "[3/3] Otpravka na FTP..."
 
@@ -280,26 +276,27 @@ try {
     $client.SendTimeout = 30000
 
     $ctrlStream = $client.GetStream()
+    # ASCII — никаких BOM, FTP-протокол использует ASCII
     $ctrlReader = New-Object System.IO.StreamReader($ctrlStream, [System.Text.Encoding]::ASCII)
     $ctrlWriter = New-Object System.IO.StreamWriter($ctrlStream, [System.Text.Encoding]::ASCII)
     $ctrlWriter.AutoFlush = $true
-
-    # Вспомогательная функция: отправить команду и прочитать ответ
-    function Send-Ftp($cmd) {
-        Write-Host "    -> $cmd" -ForegroundColor DarkGray
-        $ctrlWriter.WriteLine($cmd)
-        $resp = $ctrlReader.ReadLine()
-        Write-Host "    <- $resp" -ForegroundColor DarkGray
-        return $resp
-    }
+    $ctrlWriter.NewLine = "`r`n"
 
     # 1. Ждём приветствие
     $welcome = $ctrlReader.ReadLine()
     Write-Host "    <- $welcome" -ForegroundColor DarkGray
 
     # 2. Авторизация
-    Send-Ftp "USER $FtpUser" | Out-Null
-    $passResp = Send-Ftp "PASS $FtpPassword"
+    Write-Host "    -> USER $FtpUser" -ForegroundColor DarkGray
+    $ctrlWriter.WriteLine("USER $FtpUser")
+    $userResp = $ctrlReader.ReadLine()
+    Write-Host "    <- $userResp" -ForegroundColor DarkGray
+
+    Write-Host "    -> PASS ***" -ForegroundColor DarkGray
+    $ctrlWriter.WriteLine("PASS $FtpPassword")
+    $passResp = $ctrlReader.ReadLine()
+    Write-Host "    <- $passResp" -ForegroundColor DarkGray
+
     if ($passResp -notlike "230*") {
         Write-Host "    Oshibka autentifikatsii: $passResp" -ForegroundColor Red
         $client.Close()
@@ -307,21 +304,41 @@ try {
     }
 
     # 3. Бинарный режим
-    Send-Ftp "TYPE I" | Out-Null
+    Write-Host "    -> TYPE I" -ForegroundColor DarkGray
+    $ctrlWriter.WriteLine("TYPE I")
+    $typeResp = $ctrlReader.ReadLine()
+    Write-Host "    <- $typeResp" -ForegroundColor DarkGray
 
-    # 4. PASV — парсим ответ 227 для data-соединения
-    $pasvResp = Send-Ftp "PASV"
+    # 4. PASV
+    Write-Host "    -> PASV" -ForegroundColor DarkGray
+    $ctrlWriter.WriteLine("PASV")
+    $pasvResp = $ctrlReader.ReadLine()
+    Write-Host "    <- $pasvResp" -ForegroundColor DarkGray
+
     if ($pasvResp -notlike "227*") {
         Write-Host "    Server ne podderzhivaet PASV: $pasvResp" -ForegroundColor Red
         $client.Close()
         exit 1
     }
 
-    # Парсим (h1,h2,h3,h4,p1,p2)
-    if ($pasvResp -match '$(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)$') {
-        $dataHost = "$($matches[1]).$($matches[2]).$($matches[3]).$($matches[4])"
-        $dataPort = ([int]$matches[5] * 256) + [int]$matches[6]
-    } else {
+    # Парсим содержимое скобок: (h1,h2,h3,h4,p1,p2)
+    $pasvResp = $pasvResp.Trim()
+    $dataHost = $null
+    $dataPort = 0
+
+    $openIdx = $pasvResp.IndexOf('(')
+    $closeIdx = $pasvResp.IndexOf(')')
+
+    if ($openIdx -ge 0 -and $closeIdx -gt $openIdx) {
+        $parenContent = $pasvResp.Substring($openIdx + 1, $closeIdx - $openIdx - 1)
+        $nums = $parenContent -split ','
+        if ($nums.Count -eq 6) {
+            $dataHost = "$($nums[0]).$($nums[1]).$($nums[2]).$($nums[3])"
+            $dataPort = ([int]$nums[4] * 256) + [int]$nums[5]
+        }
+    }
+
+    if ($null -eq $dataHost -or $dataPort -eq 0) {
         Write-Host "    Ne udalos rasparst PASV: $pasvResp" -ForegroundColor Red
         $client.Close()
         exit 1
@@ -329,8 +346,12 @@ try {
 
     Write-Host "    Data: $dataHost`:$dataPort" -ForegroundColor Gray
 
-    # 5. STOR — отправляем команду, ждём 150
-    $storResp = Send-Ftp "STOR request.xml.sig"
+    # 5. STOR
+    Write-Host "    -> STOR request.xml.sig" -ForegroundColor DarkGray
+    $ctrlWriter.WriteLine("STOR request.xml.sig")
+    $storResp = $ctrlReader.ReadLine()
+    Write-Host "    <- $storResp" -ForegroundColor DarkGray
+
     if ($storResp -notlike "150*") {
         Write-Host "    Server otklonil STOR: $storResp" -ForegroundColor Red
         $client.Close()
@@ -338,6 +359,7 @@ try {
     }
 
     # 6. Подключаемся к data-порту и отправляем файл
+    Write-Host "    Podklyuchenie k data-portu..." -ForegroundColor Gray
     $dataClient = New-Object System.Net.Sockets.TcpClient
     $dataClient.Connect($dataHost, $dataPort)
     $dataClient.NoDelay = $true
@@ -347,7 +369,7 @@ try {
     $dataStream.Write($sigBytes, 0, $sigBytes.Length)
     $dataStream.Flush()
 
-    # Закрываем data-соединение (сервер должен получить EOF)
+    # Закрываем data-соединение — сервер получит EOF
     $dataStream.Close()
     $dataClient.Close()
 
@@ -358,7 +380,11 @@ try {
     Write-Host "    <- $doneResp" -ForegroundColor DarkGray
 
     # 8. QUIT
-    Send-Ftp "QUIT" | Out-Null
+    Write-Host "    -> QUIT" -ForegroundColor DarkGray
+    $ctrlWriter.WriteLine("QUIT")
+    $quitResp = $ctrlReader.ReadLine()
+    Write-Host "    <- $quitResp" -ForegroundColor DarkGray
+
     $client.Close()
 
     if ($doneResp -like "226*") {

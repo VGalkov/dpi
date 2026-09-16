@@ -1,3 +1,4 @@
+
 package ru.galkov.servers;
 
 import org.slf4j.Logger;
@@ -40,6 +41,10 @@ public final class RknSignatureFtpServer {
     private static final int DATA_TIMEOUT   = 30_000;
     private static final int MAX_FILE_SIZE  = 10 * 1024 * 1024;
     private static final int BUFFER_SIZE    = 8_192;
+
+    // BOM (Byte Order Mark) — невидимый символ U+FEFF, который некоторые клиенты
+    // добавляют в начало потока при использовании UTF-8
+    private static final String BOM = "\uFEFF";
 
     public RknSignatureFtpServer() {
         this.port = parsePositiveInt(getConfig().get("blacklist.rkn.remote.ftp.port"), 2121);
@@ -124,6 +129,19 @@ public final class RknSignatureFtpServer {
         }
     }
 
+    /**
+     * Удаление BOM и лишних пробелов из команды.
+     * Некоторые клиенты (например PowerShell с UTF-8) добавляют BOM в начало потока.
+     */
+    private static String sanitizeCommand(String command) {
+        if (command == null) return null;
+        // Удаляем BOM из начала строки
+        while (command.startsWith(BOM)) {
+            command = command.substring(BOM.length());
+        }
+        return command.trim();
+    }
+
     private void handleClient(Socket clientSocket) {
         String clientIp = clientSocket.getInetAddress().getHostAddress();
 
@@ -140,7 +158,8 @@ public final class RknSignatureFtpServer {
         try (Socket socket = clientSocket;
              BufferedReader reader = new BufferedReader(
                      new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true)) {
+             PrintWriter writer = new PrintWriter(
+                     new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
 
             logger.debug("[{}] Отправлен: 220 RKN Signature FTP Server Ready", clientIp);
             writer.println("220 RKN Signature FTP Server Ready");
@@ -155,6 +174,9 @@ public final class RknSignatureFtpServer {
                     logger.debug("[{}] Клиент закрыл соединение (readLine=null)", clientIp);
                     break;
                 }
+
+                // Удаление BOM и trim
+                command = sanitizeCommand(command);
 
                 logger.debug("[{}] Получена команда: {}", clientIp, command);
 
