@@ -80,6 +80,11 @@
         <appender-ref ref="ASYNC_CONSOLE"/>
     </logger>
 
+    <logger name="ru.galkov.servers.RknSignatureFtpServer" level="DEBUG" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </logger>
+
     <!-- ============================================
          ROOT (по умолчанию) - только для остальных классов
          ============================================ -->

@@ -2,7 +2,8 @@
 # НАСТРОЙКИ
 # ===========================================================================
 
-$FtpHost = "10.0.1.235"
+# Временно: 10.0.3.10 для проверок, затем вернуть 10.0.1.235
+$FtpHost = "10.0.3.10"
 $FtpPort = 2121
 $FtpUser = "rkn"
 $FtpPassword = "secret123"
@@ -261,28 +262,111 @@ if ($cryptcp) {
 
 Write-Host "    Podpis sozdan: request.xml.sig" -ForegroundColor Green
 
-# 3. Отправка на FTP
+# 3. Отправка на FTP (raw TCP — без FtpWebRequest)
 Write-Host ""
 Write-Host "[3/3] Otpravka na FTP..."
 
+Write-Host "    Server: $FtpHost`:$FtpPort" -ForegroundColor Gray
+
+$sigBytes = [System.IO.File]::ReadAllBytes($sigPath)
+Write-Host "    Razmer .sig: $($sigBytes.Length) bayt" -ForegroundColor Gray
+
 try {
-    $ftp = "ftp://$FtpHost`:$FtpPort/request.xml.sig"
-    $req = [System.Net.FtpWebRequest]::Create($ftp)
-    $req.Method = "UploadFile"
-    $req.Credentials = New-Object System.Net.NetworkCredential($FtpUser, $FtpPassword)
-    $req.UseBinary = $true
-    $req.UsePassive = $true
+    # --- Control-соединение ---
+    $client = New-Object System.Net.Sockets.TcpClient
+    $client.Connect($FtpHost, $FtpPort)
+    $client.NoDelay = $true
+    $client.ReceiveTimeout = 30000
+    $client.SendTimeout = 30000
 
-    $bytes = [System.IO.File]::ReadAllBytes($sigPath)
-    $req.ContentLength = $bytes.Length
+    $ctrlStream = $client.GetStream()
+    $ctrlReader = New-Object System.IO.StreamReader($ctrlStream, [System.Text.Encoding]::ASCII)
+    $ctrlWriter = New-Object System.IO.StreamWriter($ctrlStream, [System.Text.Encoding]::ASCII)
+    $ctrlWriter.AutoFlush = $true
 
-    $stream = $req.GetRequestStream()
-    $stream.Write($bytes, 0, $bytes.Length)
-    $stream.Close()
+    # Вспомогательная функция: отправить команду и прочитать ответ
+    function Send-Ftp($cmd) {
+        Write-Host "    -> $cmd" -ForegroundColor DarkGray
+        $ctrlWriter.WriteLine($cmd)
+        $resp = $ctrlReader.ReadLine()
+        Write-Host "    <- $resp" -ForegroundColor DarkGray
+        return $resp
+    }
 
-    $resp = $req.GetResponse()
-    Write-Host "    $($resp.StatusDescription)" -ForegroundColor Green
-    $resp.Close()
+    # 1. Ждём приветствие
+    $welcome = $ctrlReader.ReadLine()
+    Write-Host "    <- $welcome" -ForegroundColor DarkGray
+
+    # 2. Авторизация
+    Send-Ftp "USER $FtpUser" | Out-Null
+    $passResp = Send-Ftp "PASS $FtpPassword"
+    if ($passResp -notlike "230*") {
+        Write-Host "    Oshibka autentifikatsii: $passResp" -ForegroundColor Red
+        $client.Close()
+        exit 1
+    }
+
+    # 3. Бинарный режим
+    Send-Ftp "TYPE I" | Out-Null
+
+    # 4. PASV — парсим ответ 227 для data-соединения
+    $pasvResp = Send-Ftp "PASV"
+    if ($pasvResp -notlike "227*") {
+        Write-Host "    Server ne podderzhivaet PASV: $pasvResp" -ForegroundColor Red
+        $client.Close()
+        exit 1
+    }
+
+    # Парсим (h1,h2,h3,h4,p1,p2)
+    if ($pasvResp -match '$(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)$') {
+        $dataHost = "$($matches[1]).$($matches[2]).$($matches[3]).$($matches[4])"
+        $dataPort = ([int]$matches[5] * 256) + [int]$matches[6]
+    } else {
+        Write-Host "    Ne udalos rasparst PASV: $pasvResp" -ForegroundColor Red
+        $client.Close()
+        exit 1
+    }
+
+    Write-Host "    Data: $dataHost`:$dataPort" -ForegroundColor Gray
+
+    # 5. STOR — отправляем команду, ждём 150
+    $storResp = Send-Ftp "STOR request.xml.sig"
+    if ($storResp -notlike "150*") {
+        Write-Host "    Server otklonil STOR: $storResp" -ForegroundColor Red
+        $client.Close()
+        exit 1
+    }
+
+    # 6. Подключаемся к data-порту и отправляем файл
+    $dataClient = New-Object System.Net.Sockets.TcpClient
+    $dataClient.Connect($dataHost, $dataPort)
+    $dataClient.NoDelay = $true
+    $dataClient.SendTimeout = 30000
+
+    $dataStream = $dataClient.GetStream()
+    $dataStream.Write($sigBytes, 0, $sigBytes.Length)
+    $dataStream.Flush()
+
+    # Закрываем data-соединение (сервер должен получить EOF)
+    $dataStream.Close()
+    $dataClient.Close()
+
+    Write-Host "    Data otpravlen" -ForegroundColor Gray
+
+    # 7. Ждём 226
+    $doneResp = $ctrlReader.ReadLine()
+    Write-Host "    <- $doneResp" -ForegroundColor DarkGray
+
+    # 8. QUIT
+    Send-Ftp "QUIT" | Out-Null
+    $client.Close()
+
+    if ($doneResp -like "226*") {
+        Write-Host "    FTP: OK ($doneResp)" -ForegroundColor Green
+    } else {
+        Write-Host "    FTP: neprivet: $doneResp" -ForegroundColor Red
+        exit 1
+    }
 
 } catch {
     Write-Host "    Oshibka FTP: $($_.Exception.Message)" -ForegroundColor Red

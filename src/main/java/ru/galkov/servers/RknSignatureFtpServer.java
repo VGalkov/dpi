@@ -104,12 +104,14 @@ public final class RknSignatureFtpServer {
                 try {
                     Socket clientSocket = localServerSocket.accept();
                     clientSocket.setSoTimeout(SOCKET_TIMEOUT);
-                    logger.info("Новое подключение: {}", clientSocket.getRemoteSocketAddress());
+                    logger.debug("Новое подключение: remote={}, local={}",
+                            clientSocket.getRemoteSocketAddress(),
+                            clientSocket.getLocalSocketAddress());
                     new Thread(() -> handleClient(clientSocket),
                             "RKN-FTP-Client-" + clientSocket.getPort()).start();
                 } catch (IOException e) {
                     if (running.get()) {
-                        logger.warn("Ошибка accept: {}", e.getMessage());
+                        logger.debug("Ошибка accept: {}", e.getMessage());
                     }
                 }
             }
@@ -140,6 +142,7 @@ public final class RknSignatureFtpServer {
                      new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
              PrintWriter writer = new PrintWriter(socket.getOutputStream(), true)) {
 
+            logger.debug("[{}] Отправлен: 220 RKN Signature FTP Server Ready", clientIp);
             writer.println("220 RKN Signature FTP Server Ready");
 
             String userName = null;
@@ -148,9 +151,12 @@ public final class RknSignatureFtpServer {
 
             while (running.get()) {
                 String command = reader.readLine();
-                if (command == null) break;
+                if (command == null) {
+                    logger.debug("[{}] Клиент закрыл соединение (readLine=null)", clientIp);
+                    break;
+                }
 
-                logger.info("CMD от {}: {}", clientIp, command);
+                logger.debug("[{}] Получена команда: {}", clientIp, command);
 
                 String[] parts = command.split(" ", 2);
                 String cmd = parts[0].toUpperCase();
@@ -158,6 +164,7 @@ public final class RknSignatureFtpServer {
                 switch (cmd) {
                     case "USER":
                         userName = parts.length > 1 ? parts[1].trim() : "";
+                        logger.debug("[{}] Отправлен: 331 Password required for {}", clientIp, userName);
                         writer.println("331 Password required for " + userName);
                         break;
 
@@ -165,20 +172,24 @@ public final class RknSignatureFtpServer {
                         String pass = parts.length > 1 ? parts[1].trim() : "";
                         if (this.username.equals(userName) && this.password.equals(pass)) {
                             authenticated = true;
+                            logger.debug("[{}] Отправлен: 230 Login successful", clientIp);
                             writer.println("230 Login successful");
                             logger.info("Аутентификация успешна: {}@{}", userName, clientIp);
                         } else {
+                            logger.debug("[{}] Отправлен: 530 Login incorrect", clientIp);
                             writer.println("530 Login incorrect");
                             logger.warn("Аутентификация неудачна: {}@{}", userName, clientIp);
                         }
                         break;
 
                     case "TYPE":
+                        logger.debug("[{}] Отправлен: 200 Type set to I", clientIp);
                         writer.println("200 Type set to I");
                         break;
 
                     case "PASV":
                         if (!authenticated) {
+                            logger.debug("[{}] Отправлен: 530 Not authenticated (PASV)", clientIp);
                             writer.println("530 Not authenticated");
                             break;
                         }
@@ -193,9 +204,12 @@ public final class RknSignatureFtpServer {
                             String ipStr = addr.getHostAddress().replace(".", ",");
                             int p1 = dataPort / 256;
                             int p2 = dataPort % 256;
-                            writer.println("227 Entering Passive Mode (" + ipStr + "," + p1 + "," + p2 + ")");
-                            logger.info("PASV: data-порт {} для {}", dataPort, clientIp);
+                            String pasvResp = "227 Entering Passive Mode (" + ipStr + "," + p1 + "," + p2 + ")";
+                            logger.debug("[{}] Отправлен: {}", clientIp, pasvResp);
+                            writer.println(pasvResp);
+                            logger.debug("[{}] Data socket открыт на порту {}", clientIp, dataPort);
                         } catch (IOException e) {
+                            logger.debug("[{}] Отправлен: 425 Cannot open data connection ({})", clientIp, e.getMessage());
                             writer.println("425 Cannot open data connection");
                             logger.error("Ошибка открытия data socket: {}", e.getMessage());
                         }
@@ -203,12 +217,12 @@ public final class RknSignatureFtpServer {
 
                     case "STOR":
                         if (!authenticated) {
+                            logger.debug("[{}] Отправлен: 530 Not authenticated (STOR)", clientIp);
                             writer.println("530 Not authenticated");
                             break;
                         }
                         String fileName = parts.length > 1 ? parts[1].trim() : "";
                         handleStoreFile(writer, dataServerSocket, fileName, clientIp);
-                        // Закрываем data socket после передачи
                         if (dataServerSocket != null && !dataServerSocket.isClosed()) {
                             try { dataServerSocket.close(); } catch (IOException ignored) {}
                         }
@@ -216,6 +230,7 @@ public final class RknSignatureFtpServer {
                         break;
 
                     case "QUIT":
+                        logger.debug("[{}] Отправлен: 221 Goodbye", clientIp);
                         writer.println("221 Goodbye");
                         if (dataServerSocket != null) {
                             try { dataServerSocket.close(); } catch (IOException ignored) {}
@@ -223,36 +238,70 @@ public final class RknSignatureFtpServer {
                         return;
 
                     case "NOOP":
+                        logger.debug("[{}] Отправлен: 200 NOOP", clientIp);
                         writer.println("200 NOOP");
                         break;
 
                     case "SYST":
+                        logger.debug("[{}] Отправлен: 215 UNIX Type: L8", clientIp);
                         writer.println("215 UNIX Type: L8");
                         break;
 
                     case "CWD":
+                        logger.debug("[{}] Отправлен: 250 OK (CWD)", clientIp);
                         writer.println("250 OK");
                         break;
 
                     case "PWD":
+                        logger.debug("[{}] Отправлен: 257 /", clientIp);
                         writer.println("257 \"/\"");
                         break;
 
                     case "OPTS":
+                        logger.debug("[{}] Отправлен: 200 OK (OPTS)", clientIp);
                         writer.println("200 OK");
                         break;
 
+                    case "FEAT":
+                        logger.debug("[{}] Отправлен: 211 No features", clientIp);
+                        writer.println("211-Features:");
+                        writer.println("211 End");
+                        break;
+
                     case "REST":
+                        logger.debug("[{}] Отправлен: 350 Ready to restart", clientIp);
                         writer.println("350 Ready to restart");
                         break;
 
                     case "SIZE":
+                        logger.debug("[{}] Отправлен: 550 Not available (SIZE)", clientIp);
+                        writer.println("550 Not available");
+                        break;
+
+                    case "MDTM":
+                        logger.debug("[{}] Отправлен: 550 Not available (MDTM)", clientIp);
+                        writer.println("550 Not available");
+                        break;
+
+                    case "DELE":
+                        logger.debug("[{}] Отправлен: 550 Not allowed (DELE)", clientIp);
+                        writer.println("550 Not allowed");
+                        break;
+
+                    case "LIST":
+                        logger.debug("[{}] Отправлен: 550 Not available (LIST)", clientIp);
+                        writer.println("550 Not available");
+                        break;
+
+                    case "NLST":
+                        logger.debug("[{}] Отправлен: 550 Not available (NLST)", clientIp);
                         writer.println("550 Not available");
                         break;
 
                     default:
+                        logger.debug("[{}] Отправлен: 502 Command not implemented: {}", clientIp, cmd);
                         writer.println("502 Command not implemented: " + cmd);
-                        logger.debug("Неизвестная команда: {} от {}", cmd, clientIp);
+                        logger.debug("[{}] Неизвестная команда: {}", clientIp, cmd);
                 }
             }
 
@@ -261,7 +310,7 @@ public final class RknSignatureFtpServer {
             }
 
         } catch (IOException e) {
-            logger.warn("Ошибка обработки клиента {}: {}", clientIp, e.getMessage());
+            logger.debug("[{}] Ошибка обработки клиента: {}", clientIp, e.getMessage(), e);
         }
     }
 
@@ -270,24 +319,29 @@ public final class RknSignatureFtpServer {
      */
     private void handleStoreFile(PrintWriter writer, ServerSocket dataServerSocket,
                                  String fileName, String clientIp) {
-        logger.info("STOR: {} от {}", fileName, clientIp);
+        logger.debug("[{}] STOR: имя файла={}", clientIp, fileName);
 
         if (!allowedFileName.equals(fileName)) {
+            logger.debug("[{}] Отправлен: 553 File name not allowed (разрешён: {})", clientIp, allowedFileName);
             writer.println("553 File name not allowed. Only " + allowedFileName + " is accepted");
             logger.warn("Отклонён файл: {} (разрешён только {})", fileName, allowedFileName);
             return;
         }
 
         if (dataServerSocket == null || dataServerSocket.isClosed()) {
+            logger.debug("[{}] Отправлен: 425 Use PASV first", clientIp);
             writer.println("425 Use PASV first");
             logger.warn("STOR без PASV от {}", clientIp);
             return;
         }
 
+        logger.debug("[{}] Отправлен: 150 Ok to send data", clientIp);
         writer.println("150 Ok to send data");
 
         try (Socket dataSocket = dataServerSocket.accept()) {
             dataSocket.setSoTimeout(DATA_TIMEOUT);
+            logger.debug("[{}] Data-соединение установлено: remote={}", clientIp, dataSocket.getRemoteSocketAddress());
+
             Path outputPath = saveDirectory.resolve(fileName);
             long totalBytes;
 
@@ -305,19 +359,22 @@ public final class RknSignatureFtpServer {
                     fos.write(buffer, 0, bytesRead);
                     totalBytes += bytesRead;
                     if (totalBytes > MAX_FILE_SIZE) {
-                        logger.warn("Превышен лимит размера файла ({} байт) от {}", MAX_FILE_SIZE, clientIp);
+                        logger.debug("[{}] Отправлен: 550 File too large ({} байт)", clientIp, totalBytes);
                         writer.println("550 File too large");
+                        logger.warn("Превышен лимит размера файла ({} байт) от {}", MAX_FILE_SIZE, clientIp);
                         return;
                     }
                 }
             }
 
+            logger.debug("[{}] Отправлен: 226 Transfer complete ({} байт)", clientIp, totalBytes);
             writer.println("226 Transfer complete. Received " + totalBytes + " bytes");
             logger.info("Файл сохранён: {} ({} байт) от {}", outputPath.toAbsolutePath(), totalBytes, clientIp);
 
         } catch (IOException e) {
+            logger.debug("[{}] Отправлен: 426 Transfer failed: {}", clientIp, e.getMessage());
             writer.println("426 Transfer failed: " + e.getMessage());
-            logger.error("Ошибка передачи файла от {}: {}", clientIp, e.getMessage());
+            logger.error("Ошибка передачи файла от {}: {}", clientIp, e.getMessage(), e);
         }
     }
 
