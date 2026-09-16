@@ -16,7 +16,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
-
+/**
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
+ */
 public final class CheckApiHandler implements HttpHandler {
     private static final Logger logger = LoggerFactory.getLogger(CheckApiHandler.class);
     private static final int MAX_INPUT_LENGTH = 253;

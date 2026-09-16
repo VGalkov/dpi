@@ -2,10 +2,7 @@ package ru.galkov;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.galkov.blacklist_source.AdguardBlacklistSource;
-import ru.galkov.blacklist_source.BlacklistSource;
-import ru.galkov.blacklist_source.FileBlacklistSource;
-import ru.galkov.blacklist_source.RknBlacklistSource;
+import ru.galkov.blacklist_source.*;
 import ru.galkov.llm.DnsAnomalyDetector;
 import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.llm.LlmAnomalyDetector;
@@ -30,6 +27,8 @@ public final class Main {
     private static volatile HttpAnomalyDetector httpAnomalyDetector;
     private static volatile boolean shutdownStarted;
     private static volatile RknSignatureFtpServer signatureFtpServer;
+    private static volatile RknAutoDownloader rknAutoDownloader;  // ✅ RKN AutoDownloader
+
     private Main() {}
 
     public static void main(String[] args) {
@@ -57,6 +56,7 @@ public final class Main {
             startProxyServer();
             startDetectors();
             startRknSignatureFtpServer();
+            startRknAutoDownloader();  // ✅ Запуск AutoDownloader
             registerShutdownHook();
 
             int checkApiPort = getConfig().getInt("check.api.port");
@@ -68,6 +68,30 @@ public final class Main {
             logger.error(LocaleUtil.getString("system_not_started"), e);
             stopApplication();
             Runtime.getRuntime().exit(1);
+        }
+    }
+
+    private static void startRknAutoDownloader() {
+        if (!config.getBoolean("blacklist.rkn.remote.enabled")) {
+            logger.info("RKN AutoDownloader отключен в настройках");
+            return;
+        }
+
+        try {
+            rknAutoDownloader = new RknAutoDownloader();
+            rknAutoDownloader.start();  // Запускается в фоновом потоке, не блокирует
+            logger.info("RKN AutoDownloader инициализирован (загрузка в фоне)");
+        } catch (Exception e) {
+            logger.error("RKN AutoDownloader не инициализирован: {}", e.getMessage());
+            logger.warn("Приложение продолжит работу без автозагрузки РKN");
+            rknAutoDownloader = null;  // Гарантируем что null при ошибке
+        }
+    }
+
+    private static void stopRknAutoDownloader() {  // ✅ Новый метод
+        if (rknAutoDownloader != null) {
+            rknAutoDownloader.stop();
+            rknAutoDownloader = null;
         }
     }
 
@@ -236,6 +260,7 @@ public final class Main {
         if (shutdownStarted) return;
         shutdownStarted = true;
         logger.info(LocaleUtil.getString("shutdown_started"));
+        stopRknAutoDownloader();  // ✅ Остановка AutoDownloader
         stopRknSignatureFtpServer();
         stopProxyServer();
         stopDnsServer();
