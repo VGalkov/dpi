@@ -24,13 +24,54 @@ $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(866)
 [Console]::InputEncoding  = [System.Text.Encoding]::GetEncoding(866)
 
-Write-Host "========================================="
-Write-Host "  RKN Signature Generator"
-Write-Host "========================================="
-Write-Host ""
+# --- Логирование ---
+$logPath = "$PSScriptRoot\rkn_signature.log"
+$lockPath = "$PSScriptRoot\rkn_signature.lock"
+
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "$ts [$Level] $Message"
+    $line | Out-File -FilePath $logPath -Append -Encoding UTF8
+    # Дублируем в консоль для интерактивного запуска
+    switch ($Level) {
+        "ERROR" { Write-Host $Message -ForegroundColor Red }
+        "WARN"  { Write-Host $Message -ForegroundColor Yellow }
+        "OK"    { Write-Host $Message -ForegroundColor Green }
+        "DBG"   { Write-Host $Message -ForegroundColor DarkGray }
+        default { Write-Host $Message }
+    }
+}
+
+# --- Защита от параллельных запусков ---
+if (Test-Path $lockPath) {
+    $lockAge = (Get-Date) - (Get-Item $lockPath).LastWriteTime
+    if ($lockAge.TotalMinutes -lt 10) {
+        Write-Log "Другой экземпляр уже работает. Выход." "WARN"
+        exit 0
+    } else {
+        Write-Log "Найден устаревший lock-файл ($([int]$lockAge.TotalMinutes) мин). Удаляю." "WARN"
+        Remove-Item $lockPath -Force
+    }
+}
+New-Item -Path $lockPath -ItemType File -Force | Out-Null
+
+# Функция для гарантированного выхода с очисткой
+function Stop-Script {
+    param([int]$ExitCode = 0)
+    if (Test-Path $lockPath) {
+        Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+    }
+    exit $ExitCode
+}
+
+Write-Log "=========================================" "OK"
+Write-Log "  RKN Signature Generator"
+Write-Log "========================================="
+Write-Log ""
 
 # 1. Создание request.xml
-Write-Host "[1/3] Sozdanie request.xml..."
+Write-Log "[1/3] Sozdanie request.xml..."
 
 $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"
 $xml  = "<?xml version=`"1.0`" encoding=`"windows-1251`"?>`r`n"
@@ -45,11 +86,11 @@ $xml += "</request>"
 $enc1251 = [System.Text.Encoding]::GetEncoding(1251)
 [System.IO.File]::WriteAllText("$PSScriptRoot\request.xml", $xml, $enc1251)
 
-Write-Host "    Gotovo: request.xml" -ForegroundColor Green
+Write-Log "    Gotovo: request.xml" "OK"
 
 # 2. Подписание
-Write-Host ""
-Write-Host "[2/3] Podpisanie..."
+Write-Log ""
+Write-Log "[2/3] Podpisanie..."
 
 # --- Поиск cryptcp.exe ---
 $cryptcp = $null
@@ -72,33 +113,33 @@ if (-not $cryptcp) {
 }
 
 if ($cryptcp) {
-    Write-Host "    cryptcp: $cryptcp" -ForegroundColor Green
+    Write-Log "    cryptcp: $cryptcp" "OK"
 } else {
-    Write-Host "    cryptcp.exe ne nayden, budet ispolzovan CAdESCOM COM" -ForegroundColor Yellow
+    Write-Log "    cryptcp.exe ne nayden, budet ispolzovan CAdESCOM COM" "WARN"
 }
 
 # --- Получаем сертификаты через .NET ---
-Write-Host "    Poluchaem spisok sertifikatov..." -ForegroundColor Gray
+Write-Log "    Poluchaem spisok sertifikatov..." "DBG"
 
 $allCerts = @(Get-ChildItem -Path "Cert:\CurrentUser\My" |
     Where-Object { $_.HasPrivateKey -and $_.NotBefore -le (Get-Date) -and $_.NotAfter -gt (Get-Date) } |
     Sort-Object NotAfter -Descending)
 
 if ($allCerts.Count -eq 0) {
-    Write-Host "    Net podhodyaschih sertifikatov s zakrytym klyuchom!" -ForegroundColor Red
-    exit 1
+    Write-Log "    Net podhodyaschih sertifikatov s zakrytym klyuchom!" "ERROR"
+    Stop-Script 1
 }
 
-Write-Host ""
-Write-Host "    Vse sertifikaty:" -ForegroundColor Cyan
+Write-Log ""
+Write-Log "    Vse sertifikaty:"
 for ($i = 0; $i -lt $allCerts.Count; $i++) {
     $c = $allCerts[$i]
-    Write-Host ("    [{0}] {1}  (do {2:dd.MM.yyyy})" -f $i, $c.Subject, $c.NotAfter) -ForegroundColor White
+    Write-Log ("    [{0}] {1}  (do {2:dd.MM.yyyy})" -f $i, $c.Subject, $c.NotAfter)
 }
-Write-Host ""
+Write-Log ""
 
 # --- Фильтрация по ИНН в Subject ---
-Write-Host "    Filtraciya: INN=$CertInnFilter" -ForegroundColor Gray
+Write-Log "    Filtraciya: INN=$CertInnFilter" "DBG"
 
 $matchedCerts = @()
 
@@ -114,43 +155,43 @@ foreach ($c in $allCerts) {
 }
 
 if ($matchedCerts.Count -eq 0) {
-    Write-Host "    Sertifikat s INN=$CertInnFilter ne nayden!" -ForegroundColor Red
-    Write-Host "    Proverte Subject sertifikata vyshen v spiske." -ForegroundColor Yellow
-    exit 1
+    Write-Log "    Sertifikat s INN=$CertInnFilter ne nayden!" "ERROR"
+    Write-Log "    Proverte Subject sertifikata vyshen v spiske." "WARN"
+    Stop-Script 1
 }
 
 if ($matchedCerts.Count -gt 1) {
-    Write-Host "    Naydeno neskolko sertifikatov ($($matchedCerts.Count))!" -ForegroundColor Yellow
-    Write-Host "    Budet ispolzovan pervyy (samyy svezhiy po sroku)." -ForegroundColor Yellow
+    Write-Log "    Naydeno neskolko sertifikatov ($($matchedCerts.Count))!" "WARN"
+    Write-Log "    Budet ispolzovan pervyy (samyy svezhiy po sroku)." "WARN"
 }
 
 $cert = $matchedCerts[0]
 $thumbprint = $cert.Thumbprint
 
-Write-Host "    Vybran: $($cert.Subject)" -ForegroundColor Cyan
-Write-Host "    Thumbprint: $thumbprint" -ForegroundColor Gray
+Write-Log "    Vybran: $($cert.Subject)"
+Write-Log "    Thumbprint: $thumbprint" "DBG"
 
 # Удаляем старую подпись
 $sigPath = "$PSScriptRoot\request.xml.sig"
 if (Test-Path $sigPath) {
     Remove-Item $sigPath -Force
-    Write-Host "    Udalen staryy .sig" -ForegroundColor Gray
+    Write-Log "    Udalen staryy .sig" "DBG"
 }
 
 # --- Подписание ---
-Write-Host "    Podpisanie..." -ForegroundColor Gray
+Write-Log "    Podpisanie..." "DBG"
 
 if ($cryptcp) {
     & $cryptcp -sign -detached -der -cert -thumbprint $thumbprint "$PSScriptRoot\request.xml" $sigPath
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "    Oshibka podpisi! (kod: 0x$('{0:X8}' -f $LASTEXITCODE))" -ForegroundColor Red
-        Write-Host "    Proverte: zakrytyy klyuch, srok sertifikata, PIN-kod tokena." -ForegroundColor Yellow
-        exit 1
+        Write-Log "    Oshibka podpisi! (kod: 0x$('{0:X8}' -f $LASTEXITCODE))" "ERROR"
+        Write-Log "    Proverte: zakrytyy klyuch, srok sertifikata, PIN-kod tokena." "WARN"
+        Stop-Script 1
     }
     if (!(Test-Path $sigPath)) {
-        Write-Host "    Fail .sig ne sozdan!" -ForegroundColor Red
-        exit 1
+        Write-Log "    Fail .sig ne sozdan!" "ERROR"
+        Stop-Script 1
     }
 
 } else {
@@ -165,13 +206,13 @@ if ($cryptcp) {
     $CADESCOM_BASE64_TO_BINARY          = 1
 
     try {
-        Write-Host "    [COM] Sozdanie Store..." -ForegroundColor Gray
+        Write-Log "    [COM] Sozdanie Store..." "DBG"
         $store = New-Object -ComObject CAPICOM.Store -ErrorAction Stop
 
-        Write-Host "    [COM] Otkrytie hranilishha..." -ForegroundColor Gray
+        Write-Log "    [COM] Otkrytie hranilishha..." "DBG"
         $store.Open($CAPICOM_CURRENT_USER_STORE, $CAPICOM_MY_STORE, $CAPICOM_STORE_OPEN_MAXIMUM_ALLOWED)
 
-        Write-Host "    [COM] Poisk sertifikata po thumbprint..." -ForegroundColor Gray
+        Write-Log "    [COM] Poisk sertifikata po thumbprint..." "DBG"
         $comCert = $null
 
         try {
@@ -180,11 +221,11 @@ if ($cryptcp) {
                 $comCert = $foundCerts.Item(1)
             }
         } catch {
-            Write-Host "    [COM] Find ne srabotal: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Log "    [COM] Find ne srabotal: $($_.Exception.Message)" "WARN"
         }
 
         if ($null -eq $comCert) {
-            Write-Host "    [COM] Ruchnoy poisk po thumbprint..." -ForegroundColor Gray
+            Write-Log "    [COM] Ruchnoy poisk po thumbprint..." "DBG"
             $storeCerts = $store.Certificates
             $certCount = $storeCerts.Count
 
@@ -199,43 +240,43 @@ if ($cryptcp) {
         }
 
         if ($null -eq $comCert) {
-            Write-Host "    [COM] Sertifikat ne nayden v COM store!" -ForegroundColor Red
+            Write-Log "    [COM] Sertifikat ne nayden v COM store!" "ERROR"
             $store.Close()
-            exit 1
+            Stop-Script 1
         }
 
         $store.Close()
 
-        Write-Host "    [COM] Sozdanie CPSigner..." -ForegroundColor Gray
+        Write-Log "    [COM] Sozdanie CPSigner..." "DBG"
         $signer = New-Object -ComObject CAdESCOM.CPSigner -ErrorAction Stop
         $signer.Certificate = $comCert
         $signer.Options = $CAPICOM_CERTIFICATE_INCLUDE_WHOLE_CHAIN
 
-        Write-Host "    [COM] Chtenie faila..." -ForegroundColor Gray
+        Write-Log "    [COM] Chtenie faila..." "DBG"
         $fileBytes = [System.IO.File]::ReadAllBytes("$PSScriptRoot\request.xml")
         $base64Content = [Convert]::ToBase64String($fileBytes)
 
-        Write-Host "    [COM] Sozdanie CadesSignedData..." -ForegroundColor Gray
+        Write-Log "    [COM] Sozdanie CadesSignedData..." "DBG"
         $signedData = New-Object -ComObject CAdESCOM.CadesSignedData -ErrorAction Stop
         $signedData.ContentEncoding = $CADESCOM_BASE64_TO_BINARY
         $signedData.Content = $base64Content
 
-        Write-Host "    [COM] Vyzov SignCades..." -ForegroundColor Gray
+        Write-Log "    [COM] Vyzov SignCades..." "DBG"
         $signatureBase64 = $null
 
         try {
             $signatureBase64 = $signedData.SignCades($signer, $CADES_BES, $true)
         } catch {
-            Write-Host "    [COM] SignCades(3 args) ne udalsya, popytka s 4..." -ForegroundColor Yellow
+            Write-Log "    [COM] SignCades(3 args) ne udalsya, popytka s 4..." "WARN"
             $signatureBase64 = $signedData.SignCades($signer, $CADES_BES, $true, 0)
         }
 
         if ([string]::IsNullOrEmpty($signatureBase64)) {
-            Write-Host "    [COM] SignCades vernul pustotu!" -ForegroundColor Red
-            exit 1
+            Write-Log "    [COM] SignCades vernul pustotu!" "ERROR"
+            Stop-Script 1
         }
 
-        Write-Host "    [COM] Dekodirovanie i sohranenie..." -ForegroundColor Gray
+        Write-Log "    [COM] Dekodirovanie i sohranenie..." "DBG"
         $sigBytes = [Convert]::FromBase64String($signatureBase64)
         [System.IO.File]::WriteAllBytes($sigPath, $sigBytes)
 
@@ -245,27 +286,27 @@ if ($cryptcp) {
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject($store) | Out-Null
 
     } catch {
-        Write-Host "    Oshibka CAdESCOM: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "    Ustanovite cryptcp.exe rjadom so skriptom ili KriptoPro ECP Browser plug-in." -ForegroundColor Yellow
-        exit 1
+        Write-Log "    Oshibka CAdESCOM: $($_.Exception.Message)" "ERROR"
+        Write-Log "    Ustanovite cryptcp.exe rjadom so skriptom ili KriptoPro ECP Browser plug-in." "WARN"
+        Stop-Script 1
     }
 
     if (!(Test-Path $sigPath)) {
-        Write-Host "    Fail .sig ne sozdan!" -ForegroundColor Red
-        exit 1
+        Write-Log "    Fail .sig ne sozdan!" "ERROR"
+        Stop-Script 1
     }
 }
 
-Write-Host "    Podpis sozdan: request.xml.sig" -ForegroundColor Green
+Write-Log "    Podpis sozdan: request.xml.sig" "OK"
 
 # 3. Отправка на FTP (raw TCP)
-Write-Host ""
-Write-Host "[3/3] Otpravka na FTP..."
+Write-Log ""
+Write-Log "[3/3] Otpravka na FTP..."
 
-Write-Host "    Server: $FtpHost`:$FtpPort" -ForegroundColor Gray
+Write-Log "    Server: $FtpHost`:$FtpPort" "DBG"
 
 $sigBytes = [System.IO.File]::ReadAllBytes($sigPath)
-Write-Host "    Razmer .sig: $($sigBytes.Length) bayt" -ForegroundColor Gray
+Write-Log "    Razmer .sig: $($sigBytes.Length) bayt" "DBG"
 
 try {
     # --- Control-соединение ---
@@ -284,41 +325,41 @@ try {
 
     # 1. Ждём приветствие
     $welcome = $ctrlReader.ReadLine()
-    Write-Host "    <- $welcome" -ForegroundColor DarkGray
+    Write-Log "    <- $welcome" "DBG"
 
     # 2. Авторизация
-    Write-Host "    -> USER $FtpUser" -ForegroundColor DarkGray
+    Write-Log "    -> USER $FtpUser" "DBG"
     $ctrlWriter.WriteLine("USER $FtpUser")
     $userResp = $ctrlReader.ReadLine()
-    Write-Host "    <- $userResp" -ForegroundColor DarkGray
+    Write-Log "    <- $userResp" "DBG"
 
-    Write-Host "    -> PASS ***" -ForegroundColor DarkGray
+    Write-Log "    -> PASS ***" "DBG"
     $ctrlWriter.WriteLine("PASS $FtpPassword")
     $passResp = $ctrlReader.ReadLine()
-    Write-Host "    <- $passResp" -ForegroundColor DarkGray
+    Write-Log "    <- $passResp" "DBG"
 
     if ($passResp -notlike "230*") {
-        Write-Host "    Oshibka autentifikatsii: $passResp" -ForegroundColor Red
+        Write-Log "    Oshibka autentifikatsii: $passResp" "ERROR"
         $client.Close()
-        exit 1
+        Stop-Script 1
     }
 
     # 3. Бинарный режим
-    Write-Host "    -> TYPE I" -ForegroundColor DarkGray
+    Write-Log "    -> TYPE I" "DBG"
     $ctrlWriter.WriteLine("TYPE I")
     $typeResp = $ctrlReader.ReadLine()
-    Write-Host "    <- $typeResp" -ForegroundColor DarkGray
+    Write-Log "    <- $typeResp" "DBG"
 
     # 4. PASV
-    Write-Host "    -> PASV" -ForegroundColor DarkGray
+    Write-Log "    -> PASV" "DBG"
     $ctrlWriter.WriteLine("PASV")
     $pasvResp = $ctrlReader.ReadLine()
-    Write-Host "    <- $pasvResp" -ForegroundColor DarkGray
+    Write-Log "    <- $pasvResp" "DBG"
 
     if ($pasvResp -notlike "227*") {
-        Write-Host "    Server ne podderzhivaet PASV: $pasvResp" -ForegroundColor Red
+        Write-Log "    Server ne podderzhivaet PASV: $pasvResp" "ERROR"
         $client.Close()
-        exit 1
+        Stop-Script 1
     }
 
     # Парсим содержимое скобок: (h1,h2,h3,h4,p1,p2)
@@ -339,27 +380,27 @@ try {
     }
 
     if ($null -eq $dataHost -or $dataPort -eq 0) {
-        Write-Host "    Ne udalos rasparst PASV: $pasvResp" -ForegroundColor Red
+        Write-Log "    Ne udalos rasparst PASV: $pasvResp" "ERROR"
         $client.Close()
-        exit 1
+        Stop-Script 1
     }
 
-    Write-Host "    Data: $dataHost`:$dataPort" -ForegroundColor Gray
+    Write-Log "    Data: $dataHost`:$dataPort" "DBG"
 
     # 5. STOR
-    Write-Host "    -> STOR request.xml.sig" -ForegroundColor DarkGray
+    Write-Log "    -> STOR request.xml.sig" "DBG"
     $ctrlWriter.WriteLine("STOR request.xml.sig")
     $storResp = $ctrlReader.ReadLine()
-    Write-Host "    <- $storResp" -ForegroundColor DarkGray
+    Write-Log "    <- $storResp" "DBG"
 
     if ($storResp -notlike "150*") {
-        Write-Host "    Server otklonil STOR: $storResp" -ForegroundColor Red
+        Write-Log "    Server otklonil STOR: $storResp" "ERROR"
         $client.Close()
-        exit 1
+        Stop-Script 1
     }
 
     # 6. Подключаемся к data-порту и отправляем файл
-    Write-Host "    Podklyuchenie k data-portu..." -ForegroundColor Gray
+    Write-Log "    Podklyuchenie k data-portu..." "DBG"
     $dataClient = New-Object System.Net.Sockets.TcpClient
     $dataClient.Connect($dataHost, $dataPort)
     $dataClient.NoDelay = $true
@@ -373,33 +414,38 @@ try {
     $dataStream.Close()
     $dataClient.Close()
 
-    Write-Host "    Data otpravlen" -ForegroundColor Gray
+    Write-Log "    Data otpravlen" "DBG"
 
     # 7. Ждём 226
     $doneResp = $ctrlReader.ReadLine()
-    Write-Host "    <- $doneResp" -ForegroundColor DarkGray
+    Write-Log "    <- $doneResp" "DBG"
 
     # 8. QUIT
-    Write-Host "    -> QUIT" -ForegroundColor DarkGray
+    Write-Log "    -> QUIT" "DBG"
     $ctrlWriter.WriteLine("QUIT")
     $quitResp = $ctrlReader.ReadLine()
-    Write-Host "    <- $quitResp" -ForegroundColor DarkGray
+    Write-Log "    <- $quitResp" "DBG"
 
     $client.Close()
 
     if ($doneResp -like "226*") {
-        Write-Host "    FTP: OK ($doneResp)" -ForegroundColor Green
+        Write-Log "    FTP: OK ($doneResp)" "OK"
     } else {
-        Write-Host "    FTP: neprivet: $doneResp" -ForegroundColor Red
-        exit 1
+        Write-Log "    FTP: neprivet: $doneResp" "ERROR"
+        Stop-Script 1
     }
 
 } catch {
-    Write-Host "    Oshibka FTP: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
+    Write-Log "    Oshibka FTP: $($_.Exception.Message)" "ERROR"
+    Stop-Script 1
 }
 
-Write-Host ""
-Write-Host "========================================="
-Write-Host "  GOTOVO!"
-Write-Host "========================================="
+Write-Log ""
+Write-Log "=========================================" "OK"
+Write-Log "  GOTOVO!"
+Write-Log "=========================================" "OK"
+
+# Снимаем lock
+if (Test-Path $lockPath) {
+    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+}
