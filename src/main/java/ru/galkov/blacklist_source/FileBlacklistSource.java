@@ -8,7 +8,7 @@ import java.net.URL;
 import java.util.List;
 
 /**
- * s0506777@yandex.ru Galkov V.A.
+ * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
  */
 public final class FileBlacklistSource extends AbstractBlacklistSource {
     private final File file;
@@ -22,24 +22,24 @@ public final class FileBlacklistSource extends AbstractBlacklistSource {
     public List<BlacklistRule> loadRules() throws IOException {
         InputStream input = openInputStream();
         List<BlacklistRule> rules = loadFromStream(input, "LocalFile");
-        logger.info(LocaleUtil.getString("local_blacklist_loaded"), file.getPath(), rules.size());
+        logger.info(LocaleUtil.getString("file_blacklist_loaded"), file.getPath(), rules.size());
         return rules;
     }
 
     private InputStream openInputStream() throws IOException {
         if (file.isFile()) {
-            logger.info("File source found: file={}", file.getAbsolutePath());
+            logger.info(LocaleUtil.getString("file_blacklist_source_found"), file.getAbsolutePath());
             return new FileInputStream(file);
         }
 
         String resourceName = file.getPath().replace('\\', '/').replaceFirst("^/", "");
         URL resource = FileBlacklistSource.class.getClassLoader().getResource(resourceName);
         if (resource != null) {
-            logger.info(LocaleUtil.getString("blacklist_in_classpath"), resource.toExternalForm());
+            logger.info(LocaleUtil.getString("file_blacklist_in_classpath"), resource.toExternalForm());
             return resource.openStream();
         }
 
-        throw new FileNotFoundException(LocaleUtil.getString("blacklist_not_found") + file.getAbsolutePath());
+        throw new FileNotFoundException(LocaleUtil.getString("file_blacklist_not_found") + file.getAbsolutePath());
     }
 
     @Override

@@ -24,9 +24,9 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private final int readTimeout;
 
     public AdguardBlacklistSource(String url, int connectTimeout, int readTimeout) {
-        if (url == null || url.isBlank()) throw new IllegalArgumentException("AdGuard URL cannot be null or blank");
-        if (connectTimeout <= 0) throw new IllegalArgumentException("connectTimeout must be positive");
-        if (readTimeout <= 0) throw new IllegalArgumentException("readTimeout must be positive");
+        if (url == null || url.isBlank()) throw new IllegalArgumentException(LocaleUtil.getString("adguard_url_null_blank"));
+        if (connectTimeout <= 0) throw new IllegalArgumentException(LocaleUtil.getString("adguard_connect_timeout_invalid"));
+        if (readTimeout <= 0) throw new IllegalArgumentException(LocaleUtil.getString("adguard_read_timeout_invalid"));
         SecurityUtil.validateLlmUrl(url, true, -1);
         this.url = url;
         this.connectTimeout = connectTimeout;
@@ -45,7 +45,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
                 throw new IOException(LocaleUtil.getString("adguard_http_error") + status);
             long contentLength = connection.getContentLengthLong();
             if (contentLength > MAX_RESPONSE_BYTES)
-                throw new IOException("AdGuard response is too large: " + contentLength);
+                throw new IOException(LocaleUtil.getString("adguard_response_too_large", contentLength));
             try (InputStream input = new LimitedInputStream(connection.getInputStream(), MAX_RESPONSE_BYTES)) {
                 List<BlacklistRule> rules = loadFromStream(input, "AdGuard");
                 logger.info(LocaleUtil.getString("adguard_blacklist_loaded"), rules.size());
@@ -60,24 +60,29 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         String currentUrl = sourceUrl;
         for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
             URL parsedUrl = parseHttpUrl(currentUrl);
-            HttpURLConnection connection = (HttpURLConnection) parsedUrl.openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(connectTimeout);
-            connection.setReadTimeout(readTimeout);
-            connection.setUseCaches(false);
-            connection.setDoInput(true);
-            connection.setRequestProperty("Accept", "text/plain, */*");
-            connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
+            HttpURLConnection connection = getHttpURLConnection(parsedUrl);
             int status = connection.getResponseCode();
             if (!isRedirect(status)) return connection;
             String location = connection.getHeaderField("Location");
             connection.disconnect();
             if (location == null || location.isBlank())
-                throw new IOException("Redirect response has no Location header");
+                throw new IOException(LocaleUtil.getString("adguard_redirect_no_location"));
             currentUrl = resolveRedirect(currentUrl, location);
         }
-        throw new IOException("Too many redirects");
+        throw new IOException(LocaleUtil.getString("adguard_too_many_redirects"));
+    }
+
+    private HttpURLConnection getHttpURLConnection(URL parsedUrl) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) parsedUrl.openConnection();
+        connection.setInstanceFollowRedirects(false);
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(connectTimeout);
+        connection.setReadTimeout(readTimeout);
+        connection.setUseCaches(false);
+        connection.setDoInput(true);
+        connection.setRequestProperty("Accept", "text/plain, */*");
+        connection.setRequestProperty("User-Agent", "Galkov-DnsProxy/1.0");
+        return connection;
     }
 
     private static URL parseHttpUrl(String value) throws IOException {
@@ -88,29 +93,29 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             ensureHostIsSafe(host);
             return uri.toURL();
         } catch (URISyntaxException | IllegalArgumentException e) {
-            throw new IOException("Invalid HTTP URL", e);
+            throw new IOException(LocaleUtil.getString("adguard_invalid_url"), e);
         }
     }
 
     private static void validateUri(URI uri) throws IOException {
         String scheme = uri.getScheme();
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
-            throw new IOException("Only HTTP and HTTPS URLs are allowed");
-        if (uri.getHost() == null || uri.getHost().isBlank()) throw new IOException("URL host is missing");
-        if (uri.getUserInfo() != null) throw new IOException("URL user info is not allowed");
-        if (uri.getFragment() != null) throw new IOException("URL fragments are not allowed");
+            throw new IOException(LocaleUtil.getString("adguard_only_http_https"));
+        if (uri.getHost() == null || uri.getHost().isBlank()) throw new IOException(LocaleUtil.getString("adguard_url_host_missing"));
+        if (uri.getUserInfo() != null) throw new IOException(LocaleUtil.getString("adguard_url_user_info_not_allowed"));
+        if (uri.getFragment() != null) throw new IOException(LocaleUtil.getString("adguard_url_fragments_not_allowed"));
         int port = uri.getPort();
-        if (port != -1 && (port < 1 || port > 65535)) throw new IOException("Invalid URL port");
+        if (port != -1 && (port < 1 || port > 65535)) throw new IOException(LocaleUtil.getString("adguard_url_port_invalid"));
     }
 
     private static void ensureHostIsSafe(String host) throws IOException {
-        if (host == null || host.isBlank()) throw new IOException("Host is missing");
-        if ("localhost".equalsIgnoreCase(host)) throw new IOException("Localhost URL is not allowed");
+        if (host == null || host.isBlank()) throw new IOException(LocaleUtil.getString("adguard_host_missing"));
+        if ("localhost".equalsIgnoreCase(host)) throw new IOException(LocaleUtil.getString("adguard_localhost_not_allowed"));
         InetAddress[] addresses = InetAddress.getAllByName(host);
-        if (addresses.length == 0) throw new IOException("Host has no resolved addresses");
+        if (addresses.length == 0) throw new IOException(LocaleUtil.getString("adguard_no_resolved_addresses"));
         for (InetAddress address : addresses) {
             if (SecurityUtil.isBlockedAddress(address))
-                throw new IOException("URL resolves to blocked address: " + address.getHostAddress());
+                throw new IOException(LocaleUtil.getString("adguard_blocked_address", address.getHostAddress()));
         }
     }
 
@@ -122,7 +127,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
             ensureHostIsSafe(resolved.getHost());
             return resolved.toString();
         } catch (URISyntaxException | IllegalArgumentException e) {
-            throw new IOException("Invalid redirect URL", e);
+            throw new IOException(LocaleUtil.getString("adguard_invalid_redirect"), e);
         }
     }
 
@@ -187,7 +192,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         private LimitedInputStream(InputStream input, long maxBytes) { super(input); this.maxBytes = maxBytes; }
         @Override
         public int read() throws IOException {
-            if (totalBytes >= maxBytes) throw new IOException("AdGuard response exceeds maximum size");
+            if (totalBytes >= maxBytes) throw new IOException(LocaleUtil.getString("adguard_response_exceeds_max"));
             int value = super.read();
             if (value >= 0) totalBytes++;
             return value;
@@ -196,7 +201,7 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         public int read(byte[] buffer, int offset, int length) throws IOException {
             if (length == 0) return 0;
             long remaining = maxBytes - totalBytes;
-            if (remaining <= 0) throw new IOException("AdGuard response exceeds maximum size");
+            if (remaining <= 0) throw new IOException(LocaleUtil.getString("adguard_response_exceeds_max"));
             int toRead = (int) Math.min(length, remaining);
             int read = super.read(buffer, offset, toRead);
             if (read > 0) totalBytes += read;

@@ -64,33 +64,49 @@ public final class SecurityUtil {
 
     public static String validateLlmUrl(String urlString, boolean allowLocalLlm, int localLlmPort) {
         if (urlString == null || urlString.isBlank())
-            throw new IllegalArgumentException("LLM URL cannot be null or blank");
+            throw new IllegalArgumentException(LocaleUtil.getString("security_url_null_blank"));
+
         try {
             URI uri = new URI(urlString);
             String scheme = uri.getScheme();
             String host = uri.getHost();
+
             if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
-                throw new IllegalArgumentException("Only HTTP and HTTPS schemes are allowed");
-            if (host == null || host.isBlank()) throw new IllegalArgumentException("LLM URL host is missing");
-            if (uri.getUserInfo() != null) throw new IllegalArgumentException("User info in LLM URL is not allowed");
-            if (uri.getFragment() != null) throw new IllegalArgumentException("Fragment in LLM URL is not allowed");
+                throw new IllegalArgumentException(LocaleUtil.getString("security_url_scheme_invalid"));
+
+            if (host == null || host.isBlank())
+                throw new IllegalArgumentException(LocaleUtil.getString("security_url_host_missing"));
+
+            if (uri.getUserInfo() != null)
+                throw new IllegalArgumentException(LocaleUtil.getString("security_url_user_info_not_allowed"));
+
+            if (uri.getFragment() != null)
+                throw new IllegalArgumentException(LocaleUtil.getString("security_url_fragment_not_allowed"));
+
             int port = uri.getPort();
             if (port == -1) port = "https".equalsIgnoreCase(scheme) ? 443 : 80;
-            if (port < 1 || port > 65535) throw new IllegalArgumentException("Invalid LLM URL port");
+
+            if (port < 1 || port > 65535)
+                throw new IllegalArgumentException(LocaleUtil.getString("security_url_port_invalid"));
+
             if (isLocalHost(host)) {
                 if (!allowLocalLlm)
-                    throw new IllegalArgumentException("Local LLM is disabled; set allow-local=true");
+                    throw new IllegalArgumentException(LocaleUtil.getString("security_url_local_disabled"));
+
                 if (port != localLlmPort)
-                    throw new IllegalArgumentException("Local LLM allowed only on port " + localLlmPort);
+                    throw new IllegalArgumentException(LocaleUtil.getString("security_url_local_port_invalid", localLlmPort));
+
                 return uri.toString();
             }
+
             for (InetAddress address : InetAddress.getAllByName(host)) {
                 if (isBlockedAddress(address))
-                    throw new IllegalArgumentException("LLM URL resolves to blocked address: " + address.getHostAddress());
+                    throw new IllegalArgumentException(LocaleUtil.getString("security_url_blocked_address", address.getHostAddress()));
             }
+
             return uri.toString();
         } catch (URISyntaxException | UnknownHostException e) {
-            throw new IllegalArgumentException("Invalid or unresolved LLM URL", e);
+            throw new IllegalArgumentException(LocaleUtil.getString("security_url_invalid_or_unresolved"), e);
         }
     }
 }

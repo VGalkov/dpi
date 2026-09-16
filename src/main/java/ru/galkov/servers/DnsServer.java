@@ -125,7 +125,7 @@ public class DnsServer {
 
     public void run() {
         if (!running.compareAndSet(false, true)) {
-            logger.warn("DNS server уже запущен");
+            logger.warn(LocaleUtil.getString("dns_server_already_running"));
             return;
         }
 
@@ -221,7 +221,8 @@ public class DnsServer {
                 }
             }
         } catch (IOException e) {
-            if (running.get()) logger.error("Критическая ошибка запуска DNS-сервера", e);
+            if (running.get())
+                logger.error(LocaleUtil.getString("dns_server_critical_start_error"), e);
 
         } finally {
             running.set(false);
@@ -229,7 +230,7 @@ public class DnsServer {
             tcpListener = null;
             stopCacheCleanup();
             logAggregatedRuntimeStatistics();
-            logger.info("DNS server завершил работу");
+            logger.info(LocaleUtil.getString("dns_server_stopped"));
         }
     }
 
@@ -358,7 +359,8 @@ public class DnsServer {
                     logger.debug(LocaleUtil.getString("dns_resolver_cache_refreshed"), dns, addr);
                 }
 
-                if (addr == null) throw new IllegalArgumentException("Некорректный DNS upstream: " + dns);
+                if (addr == null)
+                    throw new IllegalArgumentException(LocaleUtil.getString("dns_upstream_invalid", dns));
 
                 SimpleResolver resolver = new SimpleResolver(addr);
                 resolver.setTimeout(Duration.ofSeconds(timeout));
@@ -368,7 +370,7 @@ public class DnsServer {
             }
         }
 
-        if (result.isEmpty()) throw new IllegalStateException("Список DNS upstream пуст");
+        if (result.isEmpty()) throw new IllegalStateException(LocaleUtil.getString("dns_upstream_list_empty"));
         return Collections.unmodifiableMap(result);
     }
 
@@ -399,7 +401,7 @@ public class DnsServer {
 
         if (DnsServerHelper.checkQueryBlacklist(query, snapshot).isPresent()) return null;
 
-        Message response = forwardToResolver(query);
+        Message response = forwardToResolver(query, clientIp, qname);
         if (response == null) return null;
         if (DnsServerHelper.checkResponseBlacklist(response, qname, blacklist) != null) return null;
 
@@ -455,14 +457,14 @@ public class DnsServer {
             }
 
             String qname = DnsServerHelper.getQuestionName(query);
-            logger.debug("[DNS-DEBUG] UDP Request from: {} | Domain: {}", clientIp, qname);
+            logger.debug(LocaleUtil.getString("dns_udp_request"), clientIp, qname);
             Message response = processQuery(query, clientIp, qname);
 
             if (response == null) {
                 try {
                     DnsServerHelper.sendRefusedResponse(socket, packet, query);
-                } catch (IOException ignored) {
-                    // Client may have disconnected.
+                } catch (IOException e) {
+                    logger.trace(e.getMessage());
                 }
 
                 return;
@@ -475,7 +477,7 @@ public class DnsServer {
                 if (running.get()) udpSendErrorCount.increment();
             }
         } catch (Throwable t) {
-            logger.error("Unexpected error in processUdpRequest", t);
+            logger.error(LocaleUtil.getString("dns_unexpected_error_tcp"), t);
         } finally {
             queriesByClient.decrementAndRemoveIfZero(clientIp, clientQueries);
             activeUdpSockets.decrementAndRemoveIfZero(clientIp, activeSockets);
@@ -571,37 +573,113 @@ public class DnsServer {
         }
     }
 
-    private Message forwardToResolver(Message query) {
+    private Message forwardToResolver(Message query, String clientIp, String qname) {
         if (query == null || query.getQuestion() == null) return null;
 
+        int queryId = query.getHeader().getID();
+        int queryType = query.getQuestion().getType();
+        String queryTypeStr = org.xbill.DNS.Type.string(queryType);
+
+        logger.debug("DNS upstream query: client={}, qname={}, type={}, id={}",
+                clientIp, qname, queryTypeStr, queryId);
+
+        if (logger.isTraceEnabled()) {
+            byte[] queryWire = query.toWire();
+            logger.trace("DNS query raw: client={}, qname={}, hex={}",
+                    clientIp, qname, toHexString(queryWire));
+        }
+
+        long startTime = System.currentTimeMillis();
+
         for (Map.Entry<String, SimpleResolver> entry : resolvers.entrySet()) {
+            String upstreamAddr = entry.getKey();
             SimpleResolver resolver = entry.getValue();
 
             try {
                 Message response = resolver.send(query);
-                if (response == null) continue;
+                long responseTime = System.currentTimeMillis() - startTime;
+
+                if (response == null) {
+                    logger.debug("DNS upstream null response: upstream={}, qname={}, client={}, time={}ms",
+                            upstreamAddr, qname, clientIp, responseTime);
+                    continue;
+                }
+
+                int rcode = response.getHeader().getRcode();
+                String rcodeStr = org.xbill.DNS.Rcode.string(rcode);
+                int answerCount = response.getSection(org.xbill.DNS.Section.ANSWER).size();
+                int authCount = response.getSection(org.xbill.DNS.Section.AUTHORITY).size();
+                int addCount = response.getSection(org.xbill.DNS.Section.ADDITIONAL).size();
+
+                logger.debug("DNS upstream response: upstream={}, qname={}, client={}, rcode={}, " +
+                                "answers={}, auth={}, add={}, time={}ms",
+                        upstreamAddr, qname, clientIp, rcodeStr,
+                        answerCount, authCount, addCount, responseTime);
+
+                if (logger.isTraceEnabled()) {
+                    byte[] responseWire = response.toWire();
+                    logger.trace("DNS response raw: upstream={}, qname={}, client={}, hex={}",
+                            upstreamAddr, qname, clientIp, toHexString(responseWire));
+                }
+
                 byte[] responseBytes = response.toWire();
                 if (responseBytes.length > maxResponseSize) {
                     response.getHeader().setFlag(Flags.TC);
-                    logger.debug("DNS response truncated: size={} > max={}", responseBytes.length, maxResponseSize);
+                    logger.debug("DNS response truncated: size={} > max={}, qname={}, client={}",
+                            responseBytes.length, maxResponseSize, qname, clientIp);
                 }
 
-                if (response.getHeader().getFlag(Flags.TC)) response = forwardToResolverTcp(query, resolver);
+                if (response.getHeader().getFlag(Flags.TC)) {
+                    logger.debug("DNS response TC flag, retry TCP: upstream={}, qname={}, client={}",
+                            upstreamAddr, qname, clientIp);
+                    response = forwardToResolverTcp(query, resolver, clientIp, qname);
+
+                    if (response != null && logger.isInfoEnabled()) {
+                        logger.info("DNS response (TCP): upstream={}, qname={}, client={}, time={}ms",
+                                upstreamAddr, qname, clientIp,
+                                System.currentTimeMillis() - startTime);
+                    }
+                }
+
                 return response;
+
             } catch (Exception e) {
                 upstreamErrorCount.increment();
+                logger.debug("DNS upstream error: upstream={}, qname={}, client={}, error={}",
+                        upstreamAddr, qname, clientIp, e.getMessage());
+
+                if (logger.isTraceEnabled()) {
+                    logger.trace("DNS upstream error stack: upstream={}, qname={}, client={}",
+                            upstreamAddr, qname, clientIp, e);
+                }
             }
         }
 
+        logger.debug("DNS all upstreams failed: qname={}, client={}", qname, clientIp);
         return null;
     }
 
-    private Message forwardToResolverTcp(Message query, SimpleResolver resolver) {
+    private Message forwardToResolverTcp(Message query, SimpleResolver resolver,
+                                         String clientIp, String qname) {
+        long startTime = System.currentTimeMillis();
+
         try {
             resolver.setTCP(true);
-            return resolver.send(query);
+            Message response = resolver.send(query);
+            long responseTime = System.currentTimeMillis() - startTime;
+
+            if (logger.isDebugEnabled() && response != null) {
+                int rcode = response.getHeader().getRcode();
+                String rcodeStr = org.xbill.DNS.Rcode.string(rcode);
+                logger.debug("DNS TCP response: upstream={}, qname={}, client={}, rcode={}, time={}ms",
+                        resolver.getAddress(), qname, clientIp, rcodeStr, responseTime);
+            }
+
+            return response;
         } catch (Exception e) {
             upstreamErrorCount.increment();
+            logger.debug("DNS TCP error: upstream={}, qname={}, client={}, error={}",
+                    resolver.getAddress(), qname, clientIp, e.getMessage());
             return null;
         } finally {
             resolver.setTCP(false);
@@ -667,7 +745,7 @@ public class DnsServer {
         queriesByClient.removeZeroCounters();
         activeUdpSockets.removeZeroCounters();
         tcpConnectionsByClient.removeZeroCounters();
-        if (removedDns > 0) logger.debug("DNS cache cleanup completed: removed={}", removedDns);
+        if (removedDns > 0) logger.debug(LocaleUtil.getString("dns_cache_cleanup_completed"), removedDns);
 
     }
 
@@ -764,5 +842,23 @@ public class DnsServer {
                 tcpSessionErrors,
                 tcpSocketErrors
         );
+    }
+
+    /**
+     * Преобразует байты в hex-строку для TRACE-логирования.
+     */
+    public static String toHexString(byte[] data) {
+        if (data == null || data.length == 0) return "";
+
+        StringBuilder sb = new StringBuilder(data.length * 3);
+        for (int i = 0; i < data.length; i++) {
+            sb.append(String.format("%02X", data[i]));
+            if (i < data.length - 1 && (i + 1) % 16 == 0) {
+                sb.append("\n");
+            } else if (i < data.length - 1) {
+                sb.append(" ");
+            }
+        }
+        return sb.toString();
     }
 }

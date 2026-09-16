@@ -1,6 +1,5 @@
 package ru.galkov.util;
 
-import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -26,6 +25,6 @@ public record BlacklistRule(RuleType type, String value, String source, String s
 
     @Override
     public String toString() {
-        return String.format(Locale.ROOT, "BlacklistRule{type=%s, value='%s', source='%s'}", type, value, source);
+        return LocaleUtil.getString("blacklist_rule_to_string", type, value, source);
     }
 }
