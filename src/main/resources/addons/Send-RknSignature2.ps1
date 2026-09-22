@@ -305,6 +305,10 @@ Write-Log "[3/3] Otpravka na FTP..."
 
 Write-Log "    Server: $FtpHost`:$FtpPort" "DBG"
 
+$xmlPath = "$PSScriptRoot\request.xml"
+$xmlBytes = [System.IO.File]::ReadAllBytes($xmlPath)
+Write-Log "    Razmer request.xml: $($xmlBytes.Length) bayt" "DBG"
+
 $sigBytes = [System.IO.File]::ReadAllBytes($sigPath)
 Write-Log "    Razmer .sig: $($sigBytes.Length) bayt" "DBG"
 
@@ -349,6 +353,10 @@ try {
     $ctrlWriter.WriteLine("TYPE I")
     $typeResp = $ctrlReader.ReadLine()
     Write-Log "    <- $typeResp" "DBG"
+
+    # =========================================================
+    # Файл 1: request.xml.sig
+    # =========================================================
 
     # 4. PASV
     Write-Log "    -> PASV" "DBG"
@@ -414,26 +422,111 @@ try {
     $dataStream.Close()
     $dataClient.Close()
 
-    Write-Log "    Data otpravlen" "DBG"
+    Write-Log "    Data otpravlen (request.xml.sig)" "DBG"
 
     # 7. Ждём 226
     $doneResp = $ctrlReader.ReadLine()
     Write-Log "    <- $doneResp" "DBG"
 
-    # 8. QUIT
+    if ($doneResp -notlike "226*") {
+        Write-Log "    FTP: neprivet: $doneResp" "ERROR"
+        $client.Close()
+        Stop-Script 1
+    }
+
+    Write-Log "    FTP: request.xml.sig OK ($doneResp)" "OK"
+
+    # =========================================================
+    # Файл 2: request.xml
+    # =========================================================
+
+    # PASV снова
+    Write-Log "    -> PASV (dlya request.xml)" "DBG"
+    $ctrlWriter.WriteLine("PASV")
+    $pasvResp2 = $ctrlReader.ReadLine()
+    Write-Log "    <- $pasvResp2" "DBG"
+
+    if ($pasvResp2 -notlike "227*") {
+        Write-Log "    Server ne podderzhivaet PASV: $pasvResp2" "ERROR"
+        $client.Close()
+        Stop-Script 1
+    }
+
+    # Парсим
+    $pasvResp2 = $pasvResp2.Trim()
+    $dataHost2 = $null
+    $dataPort2 = 0
+
+    $openIdx2 = $pasvResp2.IndexOf('(')
+    $closeIdx2 = $pasvResp2.IndexOf(')')
+
+    if ($openIdx2 -ge 0 -and $closeIdx2 -gt $openIdx2) {
+        $parenContent2 = $pasvResp2.Substring($openIdx2 + 1, $closeIdx2 - $openIdx2 - 1)
+        $nums2 = $parenContent2 -split ','
+        if ($nums2.Count -eq 6) {
+            $dataHost2 = "$($nums2[0]).$($nums2[1]).$($nums2[2]).$($nums2[3])"
+            $dataPort2 = ([int]$nums2[4] * 256) + [int]$nums2[5]
+        }
+    }
+
+    if ($null -eq $dataHost2 -or $dataPort2 -eq 0) {
+        Write-Log "    Ne udalos rasparst PASV: $pasvResp2" "ERROR"
+        $client.Close()
+        Stop-Script 1
+    }
+
+    Write-Log "    Data: $dataHost2`:$dataPort2" "DBG"
+
+    # STOR request.xml
+    Write-Log "    -> STOR request.xml" "DBG"
+    $ctrlWriter.WriteLine("STOR request.xml")
+    $storResp2 = $ctrlReader.ReadLine()
+    Write-Log "    <- $storResp2" "DBG"
+
+    if ($storResp2 -notlike "150*") {
+        Write-Log "    Server otklonil STOR: $storResp2" "ERROR"
+        $client.Close()
+        Stop-Script 1
+    }
+
+    # Подключаемся к data-порту и отправляем файл
+    Write-Log "    Podklyuchenie k data-portu..." "DBG"
+    $dataClient2 = New-Object System.Net.Sockets.TcpClient
+    $dataClient2.Connect($dataHost2, $dataPort2)
+    $dataClient2.NoDelay = $true
+    $dataClient2.SendTimeout = 30000
+
+    $dataStream2 = $dataClient2.GetStream()
+    $dataStream2.Write($xmlBytes, 0, $xmlBytes.Length)
+    $dataStream2.Flush()
+
+    $dataStream2.Close()
+    $dataClient2.Close()
+
+    Write-Log "    Data otpravlen (request.xml)" "DBG"
+
+    # Ждём 226
+    $doneResp2 = $ctrlReader.ReadLine()
+    Write-Log "    <- $doneResp2" "DBG"
+
+    if ($doneResp2 -notlike "226*") {
+        Write-Log "    FTP: neprivet: $doneResp2" "ERROR"
+        $client.Close()
+        Stop-Script 1
+    }
+
+    Write-Log "    FTP: request.xml OK ($doneResp2)" "OK"
+
+    # =========================================================
+    # QUIT
+    # =========================================================
+
     Write-Log "    -> QUIT" "DBG"
     $ctrlWriter.WriteLine("QUIT")
     $quitResp = $ctrlReader.ReadLine()
     Write-Log "    <- $quitResp" "DBG"
 
     $client.Close()
-
-    if ($doneResp -like "226*") {
-        Write-Log "    FTP: OK ($doneResp)" "OK"
-    } else {
-        Write-Log "    FTP: neprivet: $doneResp" "ERROR"
-        Stop-Script 1
-    }
 
 } catch {
     Write-Log "    Oshibka FTP: $($_.Exception.Message)" "ERROR"

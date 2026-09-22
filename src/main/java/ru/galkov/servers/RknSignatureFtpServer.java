@@ -26,7 +26,8 @@ public final class RknSignatureFtpServer {
 
     private final int port;
     private final Path saveDirectory;
-    private final String allowedFileName;
+    private final String allowedFileName1;
+    private final String allowedFileName2;
     private final String username;
     private final String password;
     private final String allowedIp;
@@ -55,7 +56,8 @@ public final class RknSignatureFtpServer {
         }
         this.saveDirectory = Paths.get(saveDirStr);
 
-        this.allowedFileName = getConfig().get("blacklist.rkn.remote.ftp.allowed-file");
+        this.allowedFileName1 = getConfig().get("blacklist.rkn.remote.ftp.allowed-file1");
+        this.allowedFileName2 = getConfig().get("blacklist.rkn.remote.ftp.allowed-file2");
         this.username = getConfig().get("blacklist.rkn.remote.ftp.username");
         this.password = getConfig().get("blacklist.rkn.remote.ftp.password");
 
@@ -68,8 +70,8 @@ public final class RknSignatureFtpServer {
             throw new RuntimeException("Не удалось создать директорию: " + saveDirectory, e);
         }
 
-        logger.info("RknSignatureFtpServer: port={}, saveDir={}, allowedFile={}, allowedIp={}, maxConnections={}",
-                port, saveDirectory.toAbsolutePath(), allowedFileName,
+        logger.info("RknSignatureFtpServer: port={}, saveDir={}, allowedFile={} {}, allowedIp={}, maxConnections={}",
+                port, saveDirectory.toAbsolutePath(), allowedFileName1, allowedFileName2,
                 allowedIp.isBlank() ? "ANY" : allowedIp, MAX_CONNECTIONS);
     }
 
@@ -375,11 +377,11 @@ public final class RknSignatureFtpServer {
             logger.warn("Path traversal попытка: {} от {}", fileName, clientIp);
             return;
         }
-
-        if (!allowedFileName.equals(fileName)) {
-            logger.debug("[{}] Отправлен: 553 File name not allowed (разрешён: {})", clientIp, allowedFileName);
-            writer.println("553 File name not allowed. Only " + allowedFileName + " is accepted");
-            logger.warn("Отклонён файл: {} (разрешён только {})", fileName, allowedFileName);
+        //if (!fileName.equals("request.xml.sig") && !fileName.equals("request.xml")) {
+        if (!allowedFileName1.equals(fileName) && !allowedFileName2.equals(fileName)) {
+            logger.debug("[{}] Отправлен: 553 File name not allowed (разрешён: {} {})", clientIp, allowedFileName1, allowedFileName2);
+            writer.println("553 File name not allowed. Only " + allowedFileName1 + "or" + allowedFileName2 + " is accepted");
+            logger.warn("Отклонён файл: {} (разрешён только {} {})", fileName, allowedFileName1, allowedFileName2);
             return;
         }
 

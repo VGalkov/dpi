@@ -27,6 +27,9 @@
     <logger name="org.xbill.DNS.SimpleResolver" level="DEBUG"/>
 
     <logger name="ru.galkov.servers.DnsServer" level="INFO"/>
+    <logger name="ru.galkov.blacklist_source.RknAutoDownloader" level="DEBUG"/>
+    <logger name="ru.galkov.servers.RknSignatureFtpServer" level="DEBUG"/>
+    <logger name="ru.galkov.blacklist_source.RknAutoDownloader" level="DEBUG"/>
 
     <root level="DEBUG">
         <appender-ref ref="FILE"/>

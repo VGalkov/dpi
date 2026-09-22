@@ -2,18 +2,23 @@ package ru.galkov.blacklist_source;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
 import ru.galkov.AppConfig;
 
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -23,305 +28,680 @@ import java.util.zip.ZipInputStream;
 
 import static ru.galkov.Main.getConfig;
 
-/**
- * Автоматическая загрузка выгрузки из реестра РKN через SOAP API.
- *
- * Формат запроса (согласно документации РKN):
- * POST на https://vigruzki.rkn.gov.ru/services/OperatorRequest/
- * Content-Type: text/xml; charset=utf-8
- * SOAPAction: "getDumpByCert"
- *
- * Тело запроса - SOAP-конверт с base64 подписью.
- *
- * @author s0506777@yandex.ru Galkov V.A.
- */
 public final class RknAutoDownloader {
     private static final Logger logger = LoggerFactory.getLogger(RknAutoDownloader.class);
 
-    private final String apiUrl;
+    // ✅ ИСПРАВЛЕНО: Namespace из WSDL (без /services/)
+    private static final String SOAP_ENVELOPE_NAMESPACE = "http://schemas.xmlsoap.org/soap/envelope/";
+    private static final String RKN_NAMESPACE = "http://vigruzki.rkn.gov.ru/OperatorRequest/";
+
+    // ✅ ИСПРАВЛЕНО: Полный SOAPAction из WSDL binding
+    private static final String SOAP_ACTION_BASE = "http://vigruzki.rkn.gov.ru/services/OperatorRequest/";
+
+    private static final String OP_GET_LAST_DUMP_DATE_EX = "getLastDumpDateEx";
+    private static final String OP_SEND_REQUEST = "sendRequest";
+    private static final String OP_GET_RESULT = "getResult";
+
+    private static final int CONNECT_TIMEOUT_MILLIS = 30_000;
+    private static final int READ_TIMEOUT_MILLIS = 300_000;
+    private static final int MAX_HTTP_ERROR_BODY_FOR_EXCEPTION = 2_000;
+    private static final int MAX_HTTP_BODY_FOR_DEBUG_LOG = 20_000;
+
+    private final String serviceUrl;
+    private final Path requestFilePath;
     private final Path signatureFilePath;
-    private final Path outputPath;
-    private final Path tempZipPath;
+    private final Path outputFilePath;
+    private final String dumpFormatVersion;
     private final Duration updateInterval;
+    private final Duration resultPollInterval;
+    private final Duration resultTimeout;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
-    private ScheduledExecutorService scheduler;
-    private Instant lastSuccessfulUpdate;
-    private int consecutiveFailures = 0;
-
-    private static final int CONNECT_TIMEOUT = 30_000;
-    private static final int READ_TIMEOUT = 300_000;
-    private static final String SOAP_ACTION = "getDumpByCert";
-    private static final String NAMESPACE = "http://vigruzki.rkn.gov.ru/services/OperatorRequest/";
+    private volatile ScheduledExecutorService scheduler;
+    private volatile Instant lastSuccessfulUpdate;
+    private volatile long lastKnownDumpDate;
+    private volatile long lastKnownDumpDateUrgently;
+    private volatile int consecutiveFailures;
 
     public RknAutoDownloader() {
         AppConfig config = getConfig();
-
-        this.apiUrl = config.get("blacklist.rkn.remote.wsdl-url");
-        this.signatureFilePath = Paths.get(config.get("blacklist.rkn.remote.signature-file")).toAbsolutePath().normalize();
-        this.outputPath = Paths.get(config.get("blacklist.rkn.remote.output-file")).toAbsolutePath().normalize();
-        this.tempZipPath = Paths.get(config.get("blacklist.rkn.remote.temp-zip-file")).toAbsolutePath().normalize();
+        this.serviceUrl = config.get("blacklist.rkn.remote.service-url").trim();
+        this.requestFilePath = Path.of(config.get("blacklist.rkn.remote.request-file")).toAbsolutePath().normalize();
+        this.signatureFilePath = Path.of(config.get("blacklist.rkn.remote.signature-file")).toAbsolutePath().normalize();
+        this.outputFilePath = Path.of(config.get("blacklist.rkn.remote.output-file")).toAbsolutePath().normalize();
+        this.dumpFormatVersion = config.get("blacklist.rkn.remote.dump-format-version").trim();
         this.updateInterval = Duration.ofHours(config.getInt("blacklist.rkn.remote.update-interval-hours"));
+        this.resultPollInterval = Duration.ofSeconds(config.getInt("blacklist.rkn.remote.result-poll-interval-seconds"));
+        this.resultTimeout = Duration.ofMinutes(config.getInt("blacklist.rkn.remote.result-timeout-minutes"));
+        validateConfiguration();
 
-        logger.info("RknAutoDownloader: url={}, signature={}, output={}, interval={}h",
-                apiUrl, signatureFilePath.getFileName(), outputPath.getFileName(), updateInterval.toHours());
+        logger.info("RKN downloader initialized: endpoint={}, namespace={}, requestFile={}, signatureFile={}, outputFile={}",
+                serviceUrl, RKN_NAMESPACE, requestFilePath.getFileName(), signatureFilePath.getFileName(), outputFilePath.getFileName());
+        logger.debug("Full config: serviceUrl={}, dumpFormatVersion={}, updateInterval={}h, pollInterval={}s, timeout={}m",
+                serviceUrl, dumpFormatVersion, updateInterval.toHours(),
+                resultPollInterval.toSeconds(), resultTimeout.toMinutes());
     }
 
     public void start() {
         if (!running.compareAndSet(false, true)) {
-            logger.warn("RknAutoDownloader уже запущен");
+            logger.warn("RKN downloader already running");
             return;
         }
 
-        scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "RKN-AutoDownloader-Thread");
-            t.setDaemon(true);
-            t.setUncaughtExceptionHandler((thread, ex) ->
-                    logger.error("Необработанное исключение: {}", ex.getMessage(), ex)
+        scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "RKN-AutoDownloader-Thread");
+            thread.setDaemon(true);
+            thread.setUncaughtExceptionHandler((t, error) ->
+                    logger.error("Unhandled exception in RKN downloader thread", error)
             );
-            return t;
+            return thread;
         });
 
-        scheduler.schedule(this::loadWithRetry, 5, TimeUnit.SECONDS);
-        scheduler.scheduleAtFixedRate(this::loadWithRetry, updateInterval.toSeconds(), updateInterval.toSeconds(), TimeUnit.SECONDS);
-
-        logger.info("RknAutoDownloader запущен (интервал: {} ч.)", updateInterval.toHours());
+        scheduler.schedule(this::checkAndUpdate, 5, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(this::checkAndUpdate, updateInterval.toSeconds(), updateInterval.toSeconds(), TimeUnit.SECONDS);
+        logger.info("RKN downloader started: first check in 5s, interval={}h", updateInterval.toHours());
     }
 
     public void stop() {
         if (!running.compareAndSet(true, false)) return;
 
-        if (scheduler != null) {
-            scheduler.shutdown();
+        ScheduledExecutorService executor = scheduler;
+        scheduler = null;
+
+        if (executor != null) {
+            executor.shutdown();
             try {
-                if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow();
+                if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
                 }
             } catch (InterruptedException e) {
-                scheduler.shutdownNow();
                 Thread.currentThread().interrupt();
+                executor.shutdownNow();
             }
         }
 
-        logger.info("RknAutoDownloader остановлен (последняя успешная: {})",
-                lastSuccessfulUpdate != null ? lastSuccessfulUpdate : "никогда");
+        logger.info("RKN downloader stopped: lastSuccessfulUpdate={}, failures={}",
+                lastSuccessfulUpdate != null ? lastSuccessfulUpdate : "never", consecutiveFailures);
     }
 
-    private void loadWithRetry() {
-        int maxRetries = 3;
-        long retryDelayMs = 60_000;
+    public void forceLoad() {
+        logger.info("Forced RKN update requested");
+        checkAndUpdate();
+    }
 
-        logger.info("=== Загрузка выгрузки РKN ===");
+    private void checkAndUpdate() {
+        if (!running.get()) {
+            logger.debug("RKN update skipped: stopped");
+            return;
+        }
 
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                logger.info("--- Попытка {}/{} ---", attempt, maxRetries);
-                loadDump();
+        logger.info("=== RKN update check started ===");
 
-                consecutiveFailures = 0;
-                lastSuccessfulUpdate = Instant.now();
-                logger.info("=== Загрузка РKN успешна ===");
-                logger.info("Файл: {}", outputPath);
+        try {
+            LastDumpDates dates = getLastDumpDates();
+            boolean urgentChanged = lastKnownDumpDateUrgently > 0 && dates.lastDumpDateUrgently > lastKnownDumpDateUrgently;
+            boolean outputFileMissing = !Files.isRegularFile(outputFilePath);
+            boolean noSuccessfulDownload = lastSuccessfulUpdate == null;
+            boolean scheduledRefreshRequired = noSuccessfulDownload || outputFileMissing ||
+                    Duration.between(lastSuccessfulUpdate, Instant.now()).compareTo(updateInterval) >= 0;
+
+            logger.info("RKN dates: regular={}, urgent={}, prevRegular={}, prevUrgent={}",
+                    formatEpochMillis(dates.lastDumpDate), formatEpochMillis(dates.lastDumpDateUrgently),
+                    formatEpochMillis(lastKnownDumpDate), formatEpochMillis(lastKnownDumpDateUrgently));
+
+            boolean updateRequired = urgentChanged || scheduledRefreshRequired;
+            if (!updateRequired) {
+                lastKnownDumpDate = dates.lastDumpDate;
+                lastKnownDumpDateUrgently = dates.lastDumpDateUrgently;
+                logger.info("RKN update not required");
                 return;
+            }
 
+            logger.info("RKN update required: {}", urgentChanged ? "urgent" : "scheduled");
+            requestAndSaveDumpWithRetry();
+
+            lastKnownDumpDate = dates.lastDumpDate;
+            lastKnownDumpDateUrgently = dates.lastDumpDateUrgently;
+            lastSuccessfulUpdate = Instant.now();
+            consecutiveFailures = 0;
+
+            logger.info("=== RKN update completed: {} ===", outputFilePath.toAbsolutePath());
+
+        } catch (Exception e) {
+            consecutiveFailures++;
+            logger.error("RKN update failed: failures={}, error={}", consecutiveFailures, e.getMessage());
+            logger.debug("Details:", e);
+        }
+    }
+
+    private void requestAndSaveDumpWithRetry() throws Exception {
+        final int maxAttempts = 3;
+        final long baseRetryDelayMillis = 60_000L;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                logger.info("--- RKN request attempt {}/{} ---", attempt, maxAttempts);
+                requestAndSaveDump();
+                return;
+            } catch (RknBusinessException e) {
+                logger.error("RKN business error: resultCode={}, message={}", e.resultCode, e.getMessage());
+                throw e;
             } catch (Exception e) {
-                consecutiveFailures++;
-                logger.warn("Попытка {}/{} не удалась: {}", attempt, maxRetries, e.getMessage());
-                logger.debug("Детали:", e);
+                logger.warn("RKN technical error attempt {}/{}: {}", attempt, maxAttempts, e.getMessage());
+                logger.debug("Details:", e);
 
-                if (attempt < maxRetries) {
-                    long delay = retryDelayMs * attempt;
-                    logger.info("Повтор через {} мс", delay);
-                    try { Thread.sleep(delay); } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                } else {
-                    logger.error("=== Все попытки исчерпаны (всего неудач: {}) ===", consecutiveFailures);
-                    logger.error("Приложение работает без обновлений РKN");
-                }
+                if (attempt == maxAttempts) throw e;
+
+                long retryDelayMillis = baseRetryDelayMillis * attempt;
+                logger.info("Retry after {} ms", retryDelayMillis);
+                Thread.sleep(retryDelayMillis);
             }
         }
     }
 
-    private void loadDump() throws Exception {
-        logger.debug("[1/5] Проверка подписи...");
-        if (!Files.exists(signatureFilePath)) {
-            throw new FileNotFoundException("Подпись не найдена: " + signatureFilePath);
+    private void requestAndSaveDump() throws Exception {
+        logger.debug("[1/5] Validating files...");
+        validateInputFile(requestFilePath, "request.xml");
+        validateInputFile(signatureFilePath, "request.xml.sig");
+
+        byte[] requestFileBytes = Files.readAllBytes(requestFilePath);
+        byte[] signatureFileBytes = Files.readAllBytes(signatureFilePath);
+        logger.info("[1/5] Files read: request={} bytes, signature={} bytes",
+                requestFileBytes.length, signatureFileBytes.length);
+
+        String requestFileBase64 = Base64.getEncoder().encodeToString(requestFileBytes);
+        String signatureFileBase64 = Base64.getEncoder().encodeToString(signatureFileBytes);
+        logger.debug("[1/5] Base64: request={} chars, signature={} chars",
+                requestFileBase64.length(), signatureFileBase64.length());
+
+        logger.debug("[2/5] Calling sendRequest...");
+        SendRequestResponse sendResponse = sendRequest(requestFileBase64, signatureFileBase64);
+        logger.info("[2/5] sendRequest: result={}, code={}, comment={}",
+                sendResponse.result, safe(sendResponse.code), safe(sendResponse.resultComment));
+
+        if (!sendResponse.result) {
+            throw new RknBusinessException(-100, "sendRequest rejected: " + safe(sendResponse.resultComment));
         }
-        logger.info("[1/5] Подпись: {} ({} байт)", signatureFilePath.getFileName(), Files.size(signatureFilePath));
+        if (isBlank(sendResponse.code)) {
+            throw new IOException("sendRequest returned empty code");
+        }
 
-        logger.debug("[2/5] Чтение и кодирование подписи...");
-        byte[] signatureBytes = Files.readAllBytes(signatureFilePath);
-        String signatureBase64 = Base64.getEncoder().encodeToString(signatureBytes);
-        logger.info("[2/5] Base64: {} символов", signatureBase64.length());
+        logger.info("[2/5] Request accepted: code={}", sendResponse.code);
 
-        logger.debug("[3/5] Формирование SOAP-запроса...");
-        String soapRequest = createSoapRequest(signatureBase64);
-        logger.info("[3/5] SOAP-запрос: {} байт", soapRequest.getBytes(StandardCharsets.UTF_8).length);
-        logger.debug("[3/5] SOAP тело (первые 500 симв.):\n{}",
-                soapRequest.length() > 500 ? soapRequest.substring(0, 500) + "..." : soapRequest);
+        logger.debug("[3/5] Waiting for getResult...");
+        GetResultResponse resultResponse = waitForResult(sendResponse.code);
 
-        logger.debug("[4/5] Отправка запроса...");
-        byte[] zipBytes = sendSoapRequest(soapRequest);
-        logger.info("[4/5] Получен ZIP: {} байт", zipBytes.length);
+        if (resultResponse.resultCode != 1) {
+            throw new RknBusinessException(resultResponse.resultCode,
+                    "resultCode=" + resultResponse.resultCode + ": " + safe(resultResponse.resultComment));
+        }
+        if (isBlank(resultResponse.registerZipArchiveBase64)) {
+            throw new IOException("getResult returned empty registerZipArchive");
+        }
 
-        logger.debug("[5/5] Распаковка...");
-        extractFromZip(zipBytes);
-        logger.info("[5/5] Готово: {}", outputPath);
+        logger.info("[3/5] Result ready: operator={}, inn={}",
+                safe(resultResponse.operatorName), safe(resultResponse.inn));
+
+        logger.debug("[4/5] Decoding ZIP...");
+        byte[] zipBytes = Base64.getDecoder().decode(removeWhitespace(resultResponse.registerZipArchiveBase64));
+        logger.info("[4/5] ZIP decoded: {} bytes", zipBytes.length);
+        validateZipHeader(zipBytes);
+
+        logger.debug("[5/5] Extracting XML...");
+        extractXmlFromZip(zipBytes);
+        logger.info("[5/5] XML saved: {}", outputFilePath.toAbsolutePath());
     }
 
-    /**
-     * Создание SOAP-конверта.
-     */
-    private String createSoapRequest(String signatureBase64) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        sb.append("<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" ");
-        sb.append("xmlns:ns=\"").append(NAMESPACE).append("\">");
-        sb.append("<soapenv:Header/>");
-        sb.append("<soapenv:Body>");
-        sb.append("<ns:getDumpByCert>");
-        sb.append("<ns:request>").append(signatureBase64).append("</ns:request>");
-        sb.append("</ns:getDumpByCert>");
-        sb.append("</soapenv:Body>");
-        sb.append("</soapenv:Envelope>");
-        return sb.toString();
+    private LastDumpDates getLastDumpDates() throws Exception {
+        String soapRequest = createSoapEnvelope(OP_GET_LAST_DUMP_DATE_EX, "");
+        logger.debug("SOAP {} request:\n{}", OP_GET_LAST_DUMP_DATE_EX, soapRequest);
+
+        String soapResponse = postSoap(OP_GET_LAST_DUMP_DATE_EX, soapRequest);
+        logger.debug("SOAP {} response:\n{}", OP_GET_LAST_DUMP_DATE_EX,
+                trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
+
+        ensureNoSoapFault(soapResponse);
+        Document document = parseXml(soapResponse);
+
+        long lastDumpDate = getRequiredLong(document, "lastDumpDate");
+        long lastDumpDateUrgently = getRequiredLong(document, "lastDumpDateUrgently");
+        long lastDumpDateSocResources = getOptionalLong(document, "lastDumpDateSocResources", 0L);
+
+        logger.info("RKN {}: lastDumpDate={}, lastDumpDateUrgently={}",
+                OP_GET_LAST_DUMP_DATE_EX, formatEpochMillis(lastDumpDate), formatEpochMillis(lastDumpDateUrgently));
+
+        return new LastDumpDates(lastDumpDate, lastDumpDateUrgently, lastDumpDateSocResources);
     }
 
-    /**
-     * Отправка SOAP-запроса.
-     */
-    private byte[] sendSoapRequest(String soapBody) throws Exception {
-        URL url = new URL(apiUrl);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+    private SendRequestResponse sendRequest(String requestFileBase64, String signatureFileBase64) throws Exception {
+        String operationBody = element("requestFile", requestFileBase64)
+                + element("signatureFile", signatureFileBase64)
+                + element("dumpFormatVersion", dumpFormatVersion);
 
-        conn.setRequestMethod("POST");
-        conn.setConnectTimeout(CONNECT_TIMEOUT);
-        conn.setReadTimeout(READ_TIMEOUT);
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
-        conn.setRequestProperty("SOAPAction", SOAP_ACTION);
-        conn.setRequestProperty("Accept", "application/zip, application/octet-stream");
-        conn.setRequestProperty("User-Agent", "RKN-AutoDownloader/1.0");
+        String soapRequest = createSoapEnvelope(OP_SEND_REQUEST, operationBody);
+        logger.debug("SOAP {} formed: length={} bytes", OP_SEND_REQUEST,
+                soapRequest.getBytes(StandardCharsets.UTF_8).length);
 
-        logger.info("[HTTP] URL: {}", apiUrl);
-        logger.info("[HTTP] Method: POST");
-        logger.info("[HTTP] Content-Type: text/xml; charset=utf-8");
-        logger.info("[HTTP] SOAPAction: {}", SOAP_ACTION);
+        String soapResponse = postSoap(OP_SEND_REQUEST, soapRequest);
+        logger.debug("SOAP {} response:\n{}", OP_SEND_REQUEST,
+                trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
 
-        byte[] requestBody = soapBody.getBytes(StandardCharsets.UTF_8);
-        logger.debug("[HTTP] Отправка тела: {} байт", requestBody.length);
+        ensureNoSoapFault(soapResponse);
+        Document document = parseXml(soapResponse);
 
-        long start = System.currentTimeMillis();
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(requestBody);
-            os.flush();
+        boolean result = getRequiredBoolean(document, "result");
+        String resultComment = getOptionalText(document, "resultComment");
+        String code = getOptionalText(document, "code");
+
+        return new SendRequestResponse(result, resultComment, code);
+    }
+
+    private GetResultResponse waitForResult(String requestCode) throws Exception {
+        Instant deadline = Instant.now().plus(resultTimeout);
+        int pollNumber = 0;
+
+        logger.info("Waiting {}s before first getResult poll", resultPollInterval.toSeconds());
+        sleepForResultPollInterval();
+
+        while (Instant.now().isBefore(deadline)) {
+            pollNumber++;
+            logger.info("getResult poll #{}/{}: code={}", pollNumber,
+                    TimeUnit.MILLISECONDS.toMinutes(resultTimeout.toMillis()), requestCode);
+
+            GetResultResponse response = getResult(requestCode);
+            logger.info("Poll #{}: resultCode={}, comment={}",
+                    pollNumber, response.resultCode, safe(response.resultComment));
+
+            if (response.resultCode == 0) {
+                logger.debug("Still processing, next poll in {}s", resultPollInterval.toSeconds());
+                sleepForResultPollInterval();
+                continue;
+            }
+            if (response.resultCode < 0) {
+                throw new RknBusinessException(response.resultCode,
+                        "Rejected: " + safe(response.resultComment));
+            }
+            if (response.resultCode == 1) {
+                return response;
+            }
+            throw new RknBusinessException(response.resultCode,
+                    "Unsupported resultCode=" + response.resultCode);
         }
-        long end = System.currentTimeMillis();
-        logger.info("[HTTP] Отправлено за {} мс", (end - start));
 
-        int status = conn.getResponseCode();
-        logger.info("[HTTP] Статус: {}", status);
-        logger.debug("[HTTP] Content-Type: {}", conn.getContentType());
-        logger.debug("[HTTP] Content-Length: {}", conn.getContentLength());
+        throw new IOException("Timeout waiting for getResult: " + requestCode);
+    }
 
-        // Обработка различных статусов
-        if (status == HttpURLConnection.HTTP_OK) {
-            // Успех - читаем ZIP
-            try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[8192];
-                int bytesRead;
-                int total = 0;
-                try (InputStream is = conn.getInputStream()) {
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        baos.write(buffer, 0, bytesRead);
-                        total += bytesRead;
-                    }
-                }
-                logger.info("[HTTP] Получено: {} байт", total);
-                return baos.toByteArray();
-            } finally {
-                conn.disconnect();
+    private GetResultResponse getResult(String requestCode) throws Exception {
+        String operationBody = element("code", requestCode);
+        String soapRequest = createSoapEnvelope(OP_GET_RESULT, operationBody);
+        logger.debug("SOAP {} request for code={}:\n{}", OP_GET_RESULT, requestCode, soapRequest);
+
+        String soapResponse = postSoap(OP_GET_RESULT, soapRequest);
+        logger.debug("SOAP {} response:\n{}", OP_GET_RESULT,
+                trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
+
+        ensureNoSoapFault(soapResponse);
+        Document document = parseXml(soapResponse);
+
+        boolean result = getRequiredBoolean(document, "result");
+        String resultComment = getOptionalText(document, "resultComment");
+        int resultCode = getRequiredInt(document, "resultCode");
+        String registerZipArchive = getOptionalText(document, "registerZipArchive");
+        String dumpFormatVersion = getOptionalText(document, "dumpFormatVersion");
+        String operatorName = getOptionalText(document, "operatorName");
+        String inn = getOptionalText(document, "inn");
+
+        return new GetResultResponse(result, resultComment, resultCode,
+                registerZipArchive, dumpFormatVersion, operatorName, inn);
+    }
+
+    private String postSoap(String operation, String soapBody) throws IOException {
+        URL url = new URL(serviceUrl);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        byte[] requestBytes = soapBody.getBytes(StandardCharsets.UTF_8);
+        long startedAt = System.nanoTime();
+
+        try {
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
+            connection.setReadTimeout(READ_TIMEOUT_MILLIS);
+            connection.setDoOutput(true);
+            connection.setUseCaches(false);
+            connection.setRequestProperty("Content-Type", "text/xml; charset=UTF-8");
+
+            // ✅ ИСПРАВЛЕНО: Полный SOAPAction из WSDL binding
+            String soapAction = SOAP_ACTION_BASE + operation;
+            connection.setRequestProperty("SOAPAction", "\"" + soapAction + "\"");
+
+            connection.setRequestProperty("Accept", "text/xml, */*");
+            connection.setRequestProperty("Connection", "close");
+            connection.setRequestProperty("User-Agent", "DPI-RKN-AutoDownloader/1.0");
+
+            logger.info("[HTTP] POST {}, endpoint={}, bytes={}", operation, serviceUrl, requestBytes.length);
+            logger.debug("[HTTP] Headers: Content-Type=text/xml, SOAPAction=\"{}\"", soapAction);
+
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(requestBytes);
+                output.flush();
             }
 
-        } else if (status == 503) {
-            // Сервис временно недоступен
-            String errorBody = readStream(conn.getErrorStream());
-            logger.warn("[HTTP] 503 Service Unavailable - сервис РKN временно недоступен");
-            logger.debug("[HTTP] Тело ответа:\n{}", errorBody);
-            throw new IOException("HTTP 503: Сервис РKN временно недоступен. Попробуйте позже.");
+            int status = connection.getResponseCode();
+            long durationMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
 
-        } else if (status == 500) {
-            // Ошибка сервера
-            String errorBody = readStream(conn.getErrorStream());
-            logger.error("[HTTP] 500 Internal Server Error");
-            logger.error("[HTTP] Тело ошибки:\n{}", errorBody);
+            logger.info("[HTTP] Response {}, status={}, {}ms, contentType={}, length={}",
+                    operation, status, durationMillis,
+                    connection.getContentType(), connection.getContentLengthLong());
 
-            // Проверяем SOAP Fault
-            if (errorBody.contains("SOAP-ENV:Fault")) {
-                if (errorBody.contains("Client")) {
-                    throw new IOException("HTTP 500: Ошибка клиента. Проверьте формат запроса и подпись.");
-                } else if (errorBody.contains("Server")) {
-                    throw new IOException("HTTP 500: Ошибка сервера РKN. Попробуйте позже.");
+            InputStream responseStream = (status >= 200 && status < 300) ?
+                    connection.getInputStream() : connection.getErrorStream();
+            String responseText = readTextStream(responseStream);
+
+            logger.debug("[HTTP] Response body:\n{}", trimForLog(responseText, MAX_HTTP_BODY_FOR_DEBUG_LOG));
+
+            if (status == 503) {
+                if (responseText.contains("Сервис временно недоступен") ||
+                        responseText.contains("Service Unavailable")) {
+                    logger.warn("[HTTP] 503: RKN сервис временно недоступен");
+                    throw new IOException("RKN сервис временно недоступен (HTTP 503). " +
+                            "Проверите https://vigruzki.rkn.gov.ru/services/OperatorRequest/ в браузере.");
                 }
             }
-            throw new IOException("HTTP 500: Внутренняя ошибка сервера РKN");
 
-        } else if (status == 401 || status == 403) {
-            // Проблемы с авторизацией
-            logger.error("[HTTP] {} - проблема с сертификатом/подписью", status);
-            String errorBody = readStream(conn.getErrorStream());
-            logger.debug("[HTTP] Тело ошибки:\n{}", errorBody);
-            throw new IOException("HTTP " + status + ": Отказано в доступе. Проверьте сертификат.");
+            if (status != HttpURLConnection.HTTP_OK) {
+                throw new IOException("RKN HTTP " + status + " (" + operation + "): " +
+                        trimForLog(responseText, MAX_HTTP_ERROR_BODY_FOR_EXCEPTION));
+            }
 
-        } else {
-            // Другие ошибки
-            String errorBody = readStream(conn.getErrorStream());
-            logger.error("[HTTP] Ошибка {}: {}", status, errorBody);
-            throw new IOException("HTTP " + status + ": " + errorBody);
+            if (isBlank(responseText)) {
+                throw new IOException("HTTP 200 but empty response (" + operation + ")");
+            }
+
+            return responseText;
+
+        } finally {
+            connection.disconnect();
         }
     }
 
-    private void extractFromZip(byte[] zipBytes) throws Exception {
-        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+    // ✅ ИСПРАВЛЕНО: Правильный namespace из WSDL
+    private static String createSoapEnvelope(String operation, String operationBody) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<soapenv:Envelope "
+                + "xmlns:soapenv=\"" + SOAP_ENVELOPE_NAMESPACE + "\" "
+                + "xmlns:ns=\"" + RKN_NAMESPACE + "\">"
+                + "<soapenv:Header/>"
+                + "<soapenv:Body>"
+                + "<ns:" + operation + ">"
+                + operationBody
+                + "</ns:" + operation + ">"
+                + "</soapenv:Body>"
+                + "</soapenv:Envelope>";
+    }
+
+    private static String element(String name, String value) {
+        return "<" + name + ">" + escapeXml(value) + "</" + name + ">";
+    }
+
+    private static String escapeXml(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
+    }
+
+    private static Document parseXml(String xml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        try (ByteArrayInputStream input = new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8))) {
+            return builder.parse(input);
+        }
+    }
+
+    private static void ensureNoSoapFault(String soapResponse) throws IOException {
+        try {
+            Document document = parseXml(soapResponse);
+            NodeList faults = document.getElementsByTagNameNS(SOAP_ENVELOPE_NAMESPACE, "Fault");
+            if (faults.getLength() == 0) faults = document.getElementsByTagName("soapenv:Fault");
+            if (faults.getLength() == 0) faults = document.getElementsByTagName("SOAP-ENV:Fault");
+
+            if (faults.getLength() > 0) {
+                String faultMessage = faults.item(0).getTextContent();
+                throw new IOException("SOAP Fault: " + trimForLog(faultMessage, MAX_HTTP_ERROR_BODY_FOR_EXCEPTION));
+            }
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Could not parse SOAP response", e);
+        }
+    }
+
+    private static String getRequiredText(Document document, String localName) throws IOException {
+        String value = getOptionalText(document, localName);
+        if (isBlank(value)) throw new IOException("Required field absent: " + localName);
+        return value;
+    }
+
+    private static String getOptionalText(Document document, String localName) {
+        NodeList nodes = document.getElementsByTagNameNS("*", localName);
+        if (nodes.getLength() == 0) nodes = document.getElementsByTagName(localName);
+        if (nodes.getLength() == 0) return null;
+        String text = nodes.item(0).getTextContent();
+        return text != null ? text.trim() : null;
+    }
+
+    private static boolean getRequiredBoolean(Document document, String localName) throws IOException {
+        String value = getRequiredText(document, localName);
+        if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+            throw new IOException("Invalid boolean: " + localName + "=" + value);
+        }
+        return Boolean.parseBoolean(value);
+    }
+
+    private static int getRequiredInt(Document document, String localName) throws IOException {
+        String value = getRequiredText(document, localName);
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new IOException("Invalid integer: " + localName + "=" + value, e);
+        }
+    }
+
+    private static long getRequiredLong(Document document, String localName) throws IOException {
+        String value = getRequiredText(document, localName);
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            throw new IOException("Invalid long: " + localName + "=" + value, e);
+        }
+    }
+
+    private static long getOptionalLong(Document document, String localName, long defaultValue) throws IOException {
+        String value = getOptionalText(document, localName);
+        if (isBlank(value)) return defaultValue;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            throw new IOException("Invalid long: " + localName + "=" + value, e);
+        }
+    }
+
+    private static void validateZipHeader(byte[] bytes) throws IOException {
+        if (bytes == null || bytes.length < 4) {
+            throw new IOException("ZIP archive is null or too short");
+        }
+        boolean regularZip = (bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] == 3 && bytes[3] == 4);
+        boolean emptyZip = (bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] == 5 && bytes[3] == 6);
+        if (!regularZip && !emptyZip) {
+            String prefix = new String(bytes, 0, Math.min(bytes.length, 500), StandardCharsets.UTF_8);
+            throw new IOException("Not a ZIP file. Prefix=" + prefix);
+        }
+    }
+
+    private void extractXmlFromZip(byte[] zipBytes) throws IOException {
+        try (ZipInputStream zipInput = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
             ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                logger.debug("[ZIP] Элемент: {} ({} байт)", entry.getName(), entry.getSize());
+            while ((entry = zipInput.getNextEntry()) != null) {
+                logger.debug("[ZIP] Entry: {}, size={}, compressed={}",
+                        entry.getName(), entry.getSize(), entry.getCompressedSize());
 
-                if (entry.getName().endsWith(".xml")) {
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = zis.read(buffer)) != -1) {
-                        baos.write(buffer, 0, bytesRead);
+                if (!entry.isDirectory() && entry.getName().toLowerCase(Locale.ROOT).endsWith(".xml")) {
+                    byte[] xmlBytes = readAllBytes(zipInput);
+                    if (xmlBytes.length == 0) {
+                        throw new IOException("ZIP XML entry empty: " + entry.getName());
                     }
 
-                    byte[] xmlBytes = baos.toByteArray();
-                    Path parent = outputPath.getParent();
-                    if (parent != null && !Files.exists(parent)) Files.createDirectories(parent);
+                    Path parent = outputFilePath.getParent();
+                    if (parent != null) Files.createDirectories(parent);
 
-                    Files.write(outputPath, xmlBytes);
-                    logger.info("[ZIP] Сохранено: {} ({} байт)", outputPath.getFileName(), xmlBytes.length);
+                    Files.write(outputFilePath, xmlBytes);
+                    logger.info("[ZIP] Extracted: {}, output={}, bytes={}",
+                            entry.getName(), outputFilePath.toAbsolutePath(), xmlBytes.length);
                     return;
                 }
-                zis.closeEntry();
+                zipInput.closeEntry();
             }
         }
-        throw new IOException("В ZIP не найден XML");
+        throw new IOException("ZIP does not contain XML");
     }
 
-    private String readStream(InputStream is) throws Exception {
-        if (is == null) return "Пустой поток";
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = r.readLine()) != null) sb.append(line).append("\n");
-            return sb.toString();
+    private void validateConfiguration() {
+        if (serviceUrl.isBlank()) throw new IllegalArgumentException("serviceUrl is empty");
+        if (dumpFormatVersion.isBlank()) throw new IllegalArgumentException("dumpFormatVersion is empty");
+        if (updateInterval.isNegative() || updateInterval.isZero()) {
+            throw new IllegalArgumentException("updateInterval must be > 0");
+        }
+        if (resultPollInterval.isNegative() || resultPollInterval.isZero()) {
+            throw new IllegalArgumentException("resultPollInterval must be > 0");
+        }
+        if (resultTimeout.isNegative() || resultTimeout.isZero()) {
+            throw new IllegalArgumentException("resultTimeout must be > 0");
+        }
+        if (resultPollInterval.compareTo(resultTimeout) >= 0) {
+            throw new IllegalArgumentException("resultPollInterval must be < resultTimeout");
         }
     }
 
-    public Instant getLastSuccessfulUpdate() { return lastSuccessfulUpdate; }
-    public int getConsecutiveFailures() { return consecutiveFailures; }
-    public void forceLoad() { loadWithRetry(); }
+    private static void validateInputFile(Path path, String fileName) throws IOException {
+        if (!Files.isRegularFile(path)) {
+            throw new FileNotFoundException(fileName + " not found: " + path.toAbsolutePath());
+        }
+        if (Files.size(path) <= 0) {
+            throw new IOException(fileName + " is empty: " + path.toAbsolutePath());
+        }
+    }
+
+    private static byte[] readAllBytes(InputStream input) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[16 * 1024];
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private static String readTextStream(InputStream input) throws IOException {
+        if (input == null) return "";
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+            StringBuilder result = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                result.append(line).append('\n');
+            }
+            return result.toString();
+        }
+    }
+
+    private void sleepForResultPollInterval() throws IOException {
+        try {
+            Thread.sleep(resultPollInterval.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for getResult", e);
+        }
+    }
+
+    private static String removeWhitespace(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "");
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static String trimForLog(String value, int maxLength) {
+        if (value == null) return "";
+        if (value.length() <= maxLength) return value;
+        return value.substring(0, maxLength) + "\n... [truncated, original=" + value.length() + "]";
+    }
+
+    private static String formatEpochMillis(long epochMillis) {
+        if (epochMillis <= 0) return "not-set(" + epochMillis + ")";
+        return Instant.ofEpochMilli(epochMillis) + " (" + epochMillis + ")";
+    }
+
+    // ========== Inner classes ==========
+
+    private static final class LastDumpDates {
+        private final long lastDumpDate;
+        private final long lastDumpDateUrgently;
+        private final long lastDumpDateSocResources;
+        private LastDumpDates(long lastDumpDate, long lastDumpDateUrgently, long lastDumpDateSocResources) {
+            this.lastDumpDate = lastDumpDate;
+            this.lastDumpDateUrgently = lastDumpDateUrgently;
+            this.lastDumpDateSocResources = lastDumpDateSocResources;
+        }
+    }
+
+    private static final class SendRequestResponse {
+        private final boolean result;
+        private final String resultComment;
+        private final String code;
+        private SendRequestResponse(boolean result, String resultComment, String code) {
+            this.result = result;
+            this.resultComment = resultComment;
+            this.code = code;
+        }
+    }
+
+    private static final class GetResultResponse {
+        private final boolean result;
+        private final String resultComment;
+        private final int resultCode;
+        private final String registerZipArchiveBase64;
+        private final String dumpFormatVersion;
+        private final String operatorName;
+        private final String inn;
+        private GetResultResponse(boolean result, String resultComment, int resultCode,
+                                  String registerZipArchiveBase64, String dumpFormatVersion, String operatorName, String inn) {
+            this.result = result;
+            this.resultComment = resultComment;
+            this.resultCode = resultCode;
+            this.registerZipArchiveBase64 = registerZipArchiveBase64;
+            this.dumpFormatVersion = dumpFormatVersion;
+            this.operatorName = operatorName;
+            this.inn = inn;
+        }
+    }
+
+    private static final class RknBusinessException extends IOException {
+        private final int resultCode;
+        private RknBusinessException(int resultCode, String message) {
+            super(message);
+            this.resultCode = resultCode;
+        }
+    }
 }
