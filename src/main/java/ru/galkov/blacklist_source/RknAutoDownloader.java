@@ -56,6 +56,7 @@ public final class RknAutoDownloader {
     private final Duration resultPollInterval;
     private final Duration resultTimeout;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean updateInProgress = new AtomicBoolean(false);
 
     private volatile ScheduledExecutorService scheduler;
     private volatile Instant lastSuccessfulUpdate;
@@ -134,6 +135,11 @@ public final class RknAutoDownloader {
             return;
         }
 
+        if (!updateInProgress.compareAndSet(false, true)) {
+            logger.warn("RKN update skipped: previous update still in progress");
+            return;
+        }
+
         logger.info("=== RKN update check started ===");
 
         try {
@@ -172,6 +178,8 @@ public final class RknAutoDownloader {
             consecutiveFailures++;
             logger.error("RKN update failed: failures={}, error={}", consecutiveFailures, e.getMessage());
             logger.debug("Details:", e);
+        } finally {
+            updateInProgress.set(false);
         }
     }
 
