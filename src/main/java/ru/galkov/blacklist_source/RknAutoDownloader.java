@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import ru.galkov.AppConfig;
+import ru.galkov.Main;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -31,11 +32,8 @@ import static ru.galkov.Main.getConfig;
 public final class RknAutoDownloader {
     private static final Logger logger = LoggerFactory.getLogger(RknAutoDownloader.class);
 
-    // ✅ ИСПРАВЛЕНО: Namespace из WSDL (без /services/)
     private static final String SOAP_ENVELOPE_NAMESPACE = "http://schemas.xmlsoap.org/soap/envelope/";
     private static final String RKN_NAMESPACE = "http://vigruzki.rkn.gov.ru/OperatorRequest/";
-
-    // ✅ ИСПРАВЛЕНО: Полный SOAPAction из WSDL binding
     private static final String SOAP_ACTION_BASE = "http://vigruzki.rkn.gov.ru/services/OperatorRequest/";
 
     private static final String OP_GET_LAST_DUMP_DATE_EX = "getLastDumpDateEx";
@@ -50,7 +48,9 @@ public final class RknAutoDownloader {
     private final String serviceUrl;
     private final Path requestFilePath;
     private final Path signatureFilePath;
-    private final Path outputFilePath;
+    private final Path outputFilePath;      // dumpByCert.xml
+    private final Path dumpFilePath;        // dump.xml
+    private final Path oldDumpFilePath;     // dump_old.xml
     private final String dumpFormatVersion;
     private final Duration updateInterval;
     private final Duration resultPollInterval;
@@ -69,17 +69,18 @@ public final class RknAutoDownloader {
         this.requestFilePath = Path.of(config.get("blacklist.rkn.remote.request-file")).toAbsolutePath().normalize();
         this.signatureFilePath = Path.of(config.get("blacklist.rkn.remote.signature-file")).toAbsolutePath().normalize();
         this.outputFilePath = Path.of(config.get("blacklist.rkn.remote.output-file")).toAbsolutePath().normalize();
+        this.dumpFilePath = Path.of(config.get("blacklist.rkn.xml-file")).toAbsolutePath().normalize();
+        this.oldDumpFilePath = dumpFilePath.getParent().resolve("dump_old.xml");
         this.dumpFormatVersion = config.get("blacklist.rkn.remote.dump-format-version").trim();
         this.updateInterval = Duration.ofHours(config.getInt("blacklist.rkn.remote.update-interval-hours"));
         this.resultPollInterval = Duration.ofSeconds(config.getInt("blacklist.rkn.remote.result-poll-interval-seconds"));
         this.resultTimeout = Duration.ofMinutes(config.getInt("blacklist.rkn.remote.result-timeout-minutes"));
         validateConfiguration();
 
-        logger.info("RKN downloader initialized: endpoint={}, namespace={}, requestFile={}, signatureFile={}, outputFile={}",
-                serviceUrl, RKN_NAMESPACE, requestFilePath.getFileName(), signatureFilePath.getFileName(), outputFilePath.getFileName());
+        logger.info("RKN downloader initialized: endpoint={}, requestFile={}, signatureFile={}, outputFile={}, dumpFile={}",
+                serviceUrl, requestFilePath.getFileName(), signatureFilePath.getFileName(), outputFilePath.getFileName(), dumpFilePath.getFileName());
         logger.debug("Full config: serviceUrl={}, dumpFormatVersion={}, updateInterval={}h, pollInterval={}s, timeout={}m",
-                serviceUrl, dumpFormatVersion, updateInterval.toHours(),
-                resultPollInterval.toSeconds(), resultTimeout.toMinutes());
+                serviceUrl, dumpFormatVersion, updateInterval.toHours(), resultPollInterval.toSeconds(), resultTimeout.toMinutes());
     }
 
     public void start() {
@@ -91,9 +92,7 @@ public final class RknAutoDownloader {
         scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "RKN-AutoDownloader-Thread");
             thread.setDaemon(true);
-            thread.setUncaughtExceptionHandler((t, error) ->
-                    logger.error("Unhandled exception in RKN downloader thread", error)
-            );
+            thread.setUncaughtExceptionHandler((t, error) -> logger.error("Unhandled exception in RKN downloader thread", error));
             return thread;
         });
 
@@ -167,10 +166,42 @@ public final class RknAutoDownloader {
 
             logger.info("=== RKN update completed: {} ===", outputFilePath.toAbsolutePath());
 
+            rotateDumpFiles();
+
         } catch (Exception e) {
             consecutiveFailures++;
             logger.error("RKN update failed: failures={}, error={}", consecutiveFailures, e.getMessage());
             logger.debug("Details:", e);
+        }
+    }
+
+    public void rotateDumpFiles() throws IOException {
+        synchronized (Main.DUMP_FILE_LOCK) {
+            if (!Files.isRegularFile(outputFilePath)) {
+                throw new IOException("Cannot rotate: " + outputFilePath.getFileName() + " does not exist");
+            }
+            if (Files.size(outputFilePath) == 0) {
+                throw new IOException("Cannot rotate: " + outputFilePath.getFileName() + " is empty");
+            }
+
+            logger.info("Rotating dump files: {} -> {}, {} -> {}",
+                    dumpFilePath.getFileName(), oldDumpFilePath.getFileName(),
+                    outputFilePath.getFileName(), dumpFilePath.getFileName());
+
+            if (Files.isRegularFile(oldDumpFilePath)) {
+                Files.delete(oldDumpFilePath);
+                logger.debug("Deleted old backup: {}", oldDumpFilePath.getFileName());
+            }
+
+            if (Files.isRegularFile(dumpFilePath)) {
+                Files.move(dumpFilePath, oldDumpFilePath, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                logger.info("Moved {} -> {}", dumpFilePath.getFileName(), oldDumpFilePath.getFileName());
+            }
+
+            Files.move(outputFilePath, dumpFilePath, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            logger.info("Moved {} -> {}", outputFilePath.getFileName(), dumpFilePath.getFileName());
+
+            logger.info("Dump files rotation completed successfully");
         }
     }
 
@@ -369,7 +400,6 @@ public final class RknAutoDownloader {
             connection.setUseCaches(false);
             connection.setRequestProperty("Content-Type", "text/xml; charset=UTF-8");
 
-            // ✅ ИСПРАВЛЕНО: Полный SOAPAction из WSDL binding
             String soapAction = SOAP_ACTION_BASE + operation;
             connection.setRequestProperty("SOAPAction", "\"" + soapAction + "\"");
 
@@ -423,7 +453,6 @@ public final class RknAutoDownloader {
         }
     }
 
-    // ✅ ИСПРАВЛЕНО: Правильный namespace из WSDL
     private static String createSoapEnvelope(String operation, String operationBody) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 + "<soapenv:Envelope "
@@ -652,8 +681,6 @@ public final class RknAutoDownloader {
         if (epochMillis <= 0) return "not-set(" + epochMillis + ")";
         return Instant.ofEpochMilli(epochMillis) + " (" + epochMillis + ")";
     }
-
-    // ========== Inner classes ==========
 
     private static final class LastDumpDates {
         private final long lastDumpDate;

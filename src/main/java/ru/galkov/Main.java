@@ -19,6 +19,10 @@ import java.util.List;
 
 public final class Main {
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
+
+    // ✅ Lock для синхронизации доступа к файлам dump.xml / dump_old.xml / dumpByCert.xml
+    public static final Object DUMP_FILE_LOCK = new Object();
+
     private static volatile DnsServer dnsServer;
     private static volatile HttpProxyServer proxyServer;
     private static volatile AppConfig config;
@@ -27,7 +31,7 @@ public final class Main {
     private static volatile HttpAnomalyDetector httpAnomalyDetector;
     private static volatile boolean shutdownStarted;
     private static volatile RknSignatureFtpServer signatureFtpServer;
-    private static volatile RknAutoDownloader rknAutoDownloader;  // ✅ RKN AutoDownloader
+    private static volatile RknAutoDownloader rknAutoDownloader;
 
     private Main() {}
 
@@ -56,7 +60,7 @@ public final class Main {
             startProxyServer();
             startDetectors();
             startRknSignatureFtpServer();
-            startRknAutoDownloader();  // ✅ Запуск AutoDownloader
+            startRknAutoDownloader();
             registerShutdownHook();
 
             int checkApiPort = getConfig().getInt("check.api.port");
@@ -79,16 +83,16 @@ public final class Main {
 
         try {
             rknAutoDownloader = new RknAutoDownloader();
-            rknAutoDownloader.start();  // Запускается в фоновом потоке, не блокирует
+            rknAutoDownloader.start();
             logger.info("RKN AutoDownloader инициализирован (загрузка в фоне)");
         } catch (Exception e) {
             logger.error("RKN AutoDownloader не инициализирован: {}", e.getMessage());
             logger.warn("Приложение продолжит работу без автозагрузки РKN");
-            rknAutoDownloader = null;  // Гарантируем что null при ошибке
+            rknAutoDownloader = null;
         }
     }
 
-    private static void stopRknAutoDownloader() {  // ✅ Новый метод
+    private static void stopRknAutoDownloader() {
         if (rknAutoDownloader != null) {
             rknAutoDownloader.stop();
             rknAutoDownloader = null;
@@ -260,7 +264,7 @@ public final class Main {
         if (shutdownStarted) return;
         shutdownStarted = true;
         logger.info(LocaleUtil.getString("shutdown_started"));
-        stopRknAutoDownloader();  // ✅ Остановка AutoDownloader
+        stopRknAutoDownloader();
         stopRknSignatureFtpServer();
         stopProxyServer();
         stopDnsServer();
