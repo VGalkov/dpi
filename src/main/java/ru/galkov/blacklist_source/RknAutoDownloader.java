@@ -111,9 +111,7 @@ public final class RknAutoDownloader {
         if (executor != null) {
             executor.shutdown();
             try {
-                if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
-                    executor.shutdownNow();
-                }
+                if (!executor.awaitTermination(10, TimeUnit.SECONDS)) executor.shutdownNow();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 executor.shutdownNow();
@@ -185,12 +183,12 @@ public final class RknAutoDownloader {
 
     public void rotateDumpFiles() throws IOException {
         synchronized (Main.DUMP_FILE_LOCK) {
-            if (!Files.isRegularFile(outputFilePath)) {
+            if (!Files.isRegularFile(outputFilePath))
                 throw new IOException("Cannot rotate: " + outputFilePath.getFileName() + " does not exist");
-            }
-            if (Files.size(outputFilePath) == 0) {
+
+            if (Files.size(outputFilePath) == 0)
                 throw new IOException("Cannot rotate: " + outputFilePath.getFileName() + " is empty");
-            }
+
 
             logger.info("Rotating dump files: {} -> {}, {} -> {}",
                     dumpFilePath.getFileName(), oldDumpFilePath.getFileName(),
@@ -258,25 +256,25 @@ public final class RknAutoDownloader {
         logger.info("[2/5] sendRequest: result={}, code={}, comment={}",
                 sendResponse.result, safe(sendResponse.code), safe(sendResponse.resultComment));
 
-        if (!sendResponse.result) {
+        if (!sendResponse.result)
             throw new RknBusinessException(-100, "sendRequest rejected: " + safe(sendResponse.resultComment));
-        }
-        if (isBlank(sendResponse.code)) {
+
+        if (isBlank(sendResponse.code))
             throw new IOException("sendRequest returned empty code");
-        }
+
 
         logger.info("[2/5] Request accepted: code={}", sendResponse.code);
 
         logger.debug("[3/5] Waiting for getResult...");
         GetResultResponse resultResponse = waitForResult(sendResponse.code);
 
-        if (resultResponse.resultCode != 1) {
+        if (resultResponse.resultCode != 1)
             throw new RknBusinessException(resultResponse.resultCode,
                     "resultCode=" + resultResponse.resultCode + ": " + safe(resultResponse.resultComment));
-        }
-        if (isBlank(resultResponse.registerZipArchiveBase64)) {
+
+        if (isBlank(resultResponse.registerZipArchiveBase64))
             throw new IOException("getResult returned empty registerZipArchive");
-        }
+
 
         logger.info("[3/5] Result ready: operator={}, inn={}",
                 safe(resultResponse.operatorName), safe(resultResponse.inn));
@@ -294,14 +292,11 @@ public final class RknAutoDownloader {
     private LastDumpDates getLastDumpDates() throws Exception {
         String soapRequest = createSoapEnvelope(OP_GET_LAST_DUMP_DATE_EX, "");
         logger.debug("SOAP {} request:\n{}", OP_GET_LAST_DUMP_DATE_EX, soapRequest);
-
         String soapResponse = postSoap(OP_GET_LAST_DUMP_DATE_EX, soapRequest);
-        logger.debug("SOAP {} response:\n{}", OP_GET_LAST_DUMP_DATE_EX,
-                trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
+        logger.debug("SOAP {} response:\n{}", OP_GET_LAST_DUMP_DATE_EX, trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
 
         ensureNoSoapFault(soapResponse);
         Document document = parseXml(soapResponse);
-
         long lastDumpDate = getRequiredLong(document, "lastDumpDate");
         long lastDumpDateUrgently = getRequiredLong(document, "lastDumpDateUrgently");
         long lastDumpDateSocResources = getOptionalLong(document, "lastDumpDateSocResources", 0L);
@@ -320,14 +315,10 @@ public final class RknAutoDownloader {
         String soapRequest = createSoapEnvelope(OP_SEND_REQUEST, operationBody);
         logger.debug("SOAP {} formed: length={} bytes", OP_SEND_REQUEST,
                 soapRequest.getBytes(StandardCharsets.UTF_8).length);
-
         String soapResponse = postSoap(OP_SEND_REQUEST, soapRequest);
-        logger.debug("SOAP {} response:\n{}", OP_SEND_REQUEST,
-                trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
-
+        logger.debug("SOAP {} response:\n{}", OP_SEND_REQUEST, trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
         ensureNoSoapFault(soapResponse);
         Document document = parseXml(soapResponse);
-
         boolean result = getRequiredBoolean(document, "result");
         String resultComment = getOptionalText(document, "resultComment");
         String code = getOptionalText(document, "code");
@@ -338,7 +329,6 @@ public final class RknAutoDownloader {
     private GetResultResponse waitForResult(String requestCode) throws Exception {
         Instant deadline = Instant.now().plus(resultTimeout);
         int pollNumber = 0;
-
         logger.info("Waiting {}s before first getResult poll", resultPollInterval.toSeconds());
         sleepForResultPollInterval();
 
@@ -356,13 +346,11 @@ public final class RknAutoDownloader {
                 sleepForResultPollInterval();
                 continue;
             }
-            if (response.resultCode < 0) {
-                throw new RknBusinessException(response.resultCode,
-                        "Rejected: " + safe(response.resultComment));
-            }
-            if (response.resultCode == 1) {
-                return response;
-            }
+            if (response.resultCode < 0)
+                throw new RknBusinessException(response.resultCode, "Rejected: " + safe(response.resultComment));
+
+            if (response.resultCode == 1) return response;
+
             throw new RknBusinessException(response.resultCode,
                     "Unsupported resultCode=" + response.resultCode);
         }
@@ -374,10 +362,8 @@ public final class RknAutoDownloader {
         String operationBody = element("code", requestCode);
         String soapRequest = createSoapEnvelope(OP_GET_RESULT, operationBody);
         logger.debug("SOAP {} request for code={}:\n{}", OP_GET_RESULT, requestCode, soapRequest);
-
         String soapResponse = postSoap(OP_GET_RESULT, soapRequest);
-        logger.debug("SOAP {} response:\n{}", OP_GET_RESULT,
-                trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
+        logger.debug("SOAP {} response:\n{}", OP_GET_RESULT, trimForLog(soapResponse, MAX_HTTP_BODY_FOR_DEBUG_LOG));
 
         ensureNoSoapFault(soapResponse);
         Document document = parseXml(soapResponse);
@@ -445,14 +431,12 @@ public final class RknAutoDownloader {
                 }
             }
 
-            if (status != HttpURLConnection.HTTP_OK) {
+            if (status != HttpURLConnection.HTTP_OK)
                 throw new IOException("RKN HTTP " + status + " (" + operation + "): " +
                         trimForLog(responseText, MAX_HTTP_ERROR_BODY_FOR_EXCEPTION));
-            }
 
-            if (isBlank(responseText)) {
+            if (isBlank(responseText))
                 throw new IOException("HTTP 200 but empty response (" + operation + ")");
-            }
 
             return responseText;
 
@@ -537,9 +521,9 @@ public final class RknAutoDownloader {
 
     private static boolean getRequiredBoolean(Document document, String localName) throws IOException {
         String value = getRequiredText(document, localName);
-        if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+        if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value))
             throw new IOException("Invalid boolean: " + localName + "=" + value);
-        }
+
         return Boolean.parseBoolean(value);
     }
 
@@ -572,9 +556,9 @@ public final class RknAutoDownloader {
     }
 
     private static void validateZipHeader(byte[] bytes) throws IOException {
-        if (bytes == null || bytes.length < 4) {
+        if (bytes == null || bytes.length < 4)
             throw new IOException("ZIP archive is null or too short");
-        }
+
         boolean regularZip = (bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] == 3 && bytes[3] == 4);
         boolean emptyZip = (bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] == 5 && bytes[3] == 6);
         if (!regularZip && !emptyZip) {
@@ -613,36 +597,36 @@ public final class RknAutoDownloader {
     private void validateConfiguration() {
         if (serviceUrl.isBlank()) throw new IllegalArgumentException("serviceUrl is empty");
         if (dumpFormatVersion.isBlank()) throw new IllegalArgumentException("dumpFormatVersion is empty");
-        if (updateInterval.isNegative() || updateInterval.isZero()) {
+        if (updateInterval.isNegative() || updateInterval.isZero())
             throw new IllegalArgumentException("updateInterval must be > 0");
-        }
-        if (resultPollInterval.isNegative() || resultPollInterval.isZero()) {
+
+        if (resultPollInterval.isNegative() || resultPollInterval.isZero())
             throw new IllegalArgumentException("resultPollInterval must be > 0");
-        }
-        if (resultTimeout.isNegative() || resultTimeout.isZero()) {
+
+        if (resultTimeout.isNegative() || resultTimeout.isZero())
             throw new IllegalArgumentException("resultTimeout must be > 0");
-        }
-        if (resultPollInterval.compareTo(resultTimeout) >= 0) {
+
+        if (resultPollInterval.compareTo(resultTimeout) >= 0)
             throw new IllegalArgumentException("resultPollInterval must be < resultTimeout");
-        }
+
     }
 
     private static void validateInputFile(Path path, String fileName) throws IOException {
-        if (!Files.isRegularFile(path)) {
+        if (!Files.isRegularFile(path))
             throw new FileNotFoundException(fileName + " not found: " + path.toAbsolutePath());
-        }
-        if (Files.size(path) <= 0) {
+
+        if (Files.size(path) <= 0)
             throw new IOException(fileName + " is empty: " + path.toAbsolutePath());
-        }
+
     }
 
     private static byte[] readAllBytes(InputStream input) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         byte[] buffer = new byte[16 * 1024];
         int read;
-        while ((read = input.read(buffer)) != -1) {
+        while ((read = input.read(buffer)) != -1)
             output.write(buffer, 0, read);
-        }
+
         return output.toByteArray();
     }
 
@@ -651,9 +635,9 @@ public final class RknAutoDownloader {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             StringBuilder result = new StringBuilder();
             String line;
-            while ((line = reader.readLine()) != null) {
+            while ((line = reader.readLine()) != null)
                 result.append(line).append('\n');
-            }
+
             return result.toString();
         }
     }
