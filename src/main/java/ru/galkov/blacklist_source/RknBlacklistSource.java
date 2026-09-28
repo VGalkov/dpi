@@ -17,9 +17,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * s0506777@yandex.ru Galkov V.A.
- */
 public final class RknBlacklistSource implements BlacklistSource {
     private static final Logger logger = LoggerFactory.getLogger(RknBlacklistSource.class);
     private final Path xmlFile;
@@ -110,7 +107,9 @@ public final class RknBlacklistSource implements BlacklistSource {
                             ? BlacklistRule.RuleType.DOMAIN
                             : BlacklistRule.RuleType.IP;
 
-                    if (value.startsWith("*.")) value = value.substring(2);
+                    // ✅ ИСПРАВЛЕНО: Сохраняем *. для wildcard-доменов
+                    // Раньше было: if (value.startsWith("*.")) value = value.substring(2);
+                    // Теперь: оставляем как есть, BlacklistLoader сам определит тип блокировки
 
                     rules.add(new BlacklistRule(
                             type,
@@ -119,6 +118,8 @@ public final class RknBlacklistSource implements BlacklistSource {
                             currentContentId,
                             currentBlockType
                     ));
+
+                    logger.trace("RKN rule added: type={}, value={}, id={}", type, value, currentContentId);
                 }
             }
         }

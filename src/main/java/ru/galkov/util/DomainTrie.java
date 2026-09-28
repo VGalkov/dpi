@@ -5,9 +5,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-/**
- * s0506777@yandex.ru Galkov V.A.
- */
 public final class DomainTrie {
 
     private final TrieNode root = new TrieNode();
@@ -90,11 +87,21 @@ public final class DomainTrie {
         lock.readLock().lock();
         try {
             TrieNode node = root;
+
+            // Проходим по меткам домена снизу вверх (com → example → sub)
             for (int i = labels.length - 1; i >= 0; i--) {
                 node = node.children.get(labels[i]);
                 if (node == null) return false;
+
+                // ✅ SUBTREE: блокирует текущий домен и все поддомены
+                // Проверяем в любой точке пути
                 if (node.subtreeBlocked) return true;
+
+                // ✅ EXACT: блокирует только если это последняя метка (полное совпадение)
                 if (i == 0 && node.exactBlocked) return true;
+
+                // ✅ WILDCARD: *.example.com блокирует sub.example.com, но не сам example.com
+                // Проверяем, если есть ещё метки выше (т.е. это поддомен)
                 if (i > 0 && node.wildcardBlocked) return true;
             }
             return false;

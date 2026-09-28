@@ -12,9 +12,6 @@ import java.net.*;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * [s0506777@yandex.ru](mailto:s0506777@yandex.ru) Galkov V.A.
- */
 public final class AdguardBlacklistSource extends AbstractBlacklistSource {
     private static final int MAX_REDIRECTS = 3;
     private static final int MAX_LINE_LENGTH = 16_384;
@@ -143,14 +140,24 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         if (line == null || line.length() > MAX_LINE_LENGTH) return null;
         String value = line.trim();
         if (value.isEmpty() || value.startsWith("#") || value.startsWith("!")) return null;
-        if (value.startsWith("||")) value = parseAdguardDomain(value);
-        else value = parseHostsLine(value);
+
+        // ✅ Преобразуем AdGuard-синтаксис ||domain^ в *.domain (wildcard)
+        if (value.startsWith("||")) {
+            value = parseAdguardDomain(value);
+            // Добавляем wildcard для блокировки поддоменов
+            if (!value.startsWith("*.")) {
+                value = "*." + value;
+            }
+        } else {
+            value = parseHostsLine(value);
+        }
+
         if (!isValidDomainCandidate(value)) return null;
         return new BlacklistRule(BlacklistRule.RuleType.DOMAIN, value.toLowerCase(Locale.ROOT), sourceName, null, null);
     }
 
     private static String parseAdguardDomain(String value) {
-        value = value.substring(2);
+        value = value.substring(2); // убираем ||
         int separator = value.indexOf('^'), modifier = value.indexOf('$'), end = value.length();
         if (separator >= 0) end = separator;
         if (modifier >= 0) end = Math.min(end, modifier);
@@ -166,12 +173,27 @@ public final class AdguardBlacklistSource extends AbstractBlacklistSource {
         return parts[1].trim();
     }
 
+    // ✅ Разрешаем wildcard (*) в доменах
     private static boolean isValidDomainCandidate(String value) {
         if (value == null || value.isEmpty() || value.length() > 253
                 || value.contains("://") || value.contains("@") || value.contains("?")
-                || value.contains("=") || value.contains("%") || value.contains("*")
-                || value.startsWith(".") || value.endsWith(".")
-                || value.startsWith("-") || value.endsWith("-")) return false;
+                || value.contains("=") || value.contains("%")) return false;
+
+        // ✅ Разрешаем только один * в начале (wildcard)
+        if (value.startsWith("*.")) {
+            // Проверяем остальную часть после *.
+            String rest = value.substring(2);
+            if (rest.contains("*")) return false; // только один * в начале
+            return isValidLabels(rest);
+        } else if (value.contains("*")) {
+            return false; // * не в начале - недопустимо
+        }
+
+        return isValidLabels(value);
+    }
+
+    private static boolean isValidLabels(String value) {
+        if (value.isEmpty() || value.startsWith(".") || value.endsWith(".")) return false;
         String[] labels = value.split("\\.", -1);
         for (String label : labels) {
             if (label.isEmpty() || label.length() > 63 || label.startsWith("-") || label.endsWith("-")) return false;

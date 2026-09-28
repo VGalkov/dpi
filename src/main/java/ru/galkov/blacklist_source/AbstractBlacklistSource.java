@@ -12,9 +12,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * s0506777@yandex.ru Galkov V.A.
- */
 public abstract class AbstractBlacklistSource implements BlacklistSource {
     protected final Logger logger = LoggerFactory.getLogger(getClass());
 
@@ -40,6 +37,7 @@ public abstract class AbstractBlacklistSource implements BlacklistSource {
 
         if (value.isEmpty()) return null;
 
+        // ✅ Поддержка wildcard: *.example.com
         return new BlacklistRule(BlacklistRule.RuleType.DOMAIN, value, sourceName, null, null);
     }
 }

@@ -8,7 +8,6 @@ import ru.galkov.llm.HttpAnomalyDetector;
 import ru.galkov.llm.LlmAnomalyDetector;
 import ru.galkov.servers.*;
 import ru.galkov.util.BlacklistLoader;
-import ru.galkov.util.BlacklistSnapshot;
 import ru.galkov.util.LocaleUtil;
 
 import java.net.InetSocketAddress;
@@ -64,7 +63,7 @@ public final class Main {
             registerShutdownHook();
 
             int checkApiPort = getConfig().getInt("check.api.port");
-            startCheckApiServer(blacklist.snapshot(), checkApiPort);
+            startCheckApiServer(blacklist, checkApiPort);
             logger.info("Check API server started on port {}", checkApiPort);
 
             logger.info(LocaleUtil.getString("system_started"));
@@ -121,12 +120,12 @@ public final class Main {
         }
     }
 
-    private static void startCheckApiServer(BlacklistSnapshot snapshot, int port) {
+    private static void startCheckApiServer(BlacklistLoader blacklistLoader, int port) {
         try {
             com.sun.net.httpserver.HttpServer server =
                     com.sun.net.httpserver.HttpServer.create(new InetSocketAddress(port), 0);
 
-            server.createContext("/", new CheckApiHandler(snapshot, port));
+            server.createContext("/", new CheckApiHandler(blacklistLoader, port));
             server.setExecutor(null);
             server.start();
 

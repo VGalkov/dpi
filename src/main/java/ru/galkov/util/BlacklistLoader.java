@@ -147,17 +147,39 @@ public final class BlacklistLoader implements AutoCloseable {
                         String ip = HostNormalizer.normalizeIp(value);
                         if (ip == null) invalid++; else { if (!ips.add(ip)) duplicateIps++; accepted++; }
                     } else {
+                        // ✅ ИСПРАВЛЕНО: Проверка на wildcard ТОЛЬКО по наличию * в начале
                         String domain = HostNormalizer.normalizeHost(value);
-                        if (domain == null) invalid++;
-                        else {
-                            DomainTrie.MatchType type = domain.startsWith("*.") ? DomainTrie.MatchType.WILDCARD
-                                    : isSubtreeRule(result.source()) ? DomainTrie.MatchType.SUBTREE : DomainTrie.MatchType.EXACT;
-                            String domainToAdd = type == DomainTrie.MatchType.WILDCARD ? domain.substring(2) : domain;
-                            if (!domainTrie.contains(domainToAdd)) {
-                                domainTrie.addDomain(domainToAdd, type);
-                                domainSources.put(domainToAdd, result.source().toString());
-                                accepted++;
-                            } else duplicateDomains++;
+                        if (domain == null) { invalid++; continue; }
+
+                        // Пропускаем одночастные домены (TLD) - они не должны блокироваться
+                        String[] labels = domain.split("\\.");
+                        if (labels.length < 2) {
+                            logger.debug("Skipping TLD/single-label domain from blacklist: {} (source={})", domain, result.source());
+                            invalid++;
+                            continue;
+                        }
+
+                        DomainTrie.MatchType type;
+                        String domainToAdd;
+
+                        // ✅ ТОЛЬКО явный wildcard (*) использует агрегацию поддоменов
+                        if (domain.startsWith("*.")) {
+                            type = DomainTrie.MatchType.WILDCARD;
+                            domainToAdd = domain.substring(2); // убираем *.
+                            logger.trace("Adding WILDCARD domain: {}.{} (source={})", "*", domainToAdd, result.source());
+                        } else {
+                            // ✅ Все остальные домены - EXACT (без агрегации поддоменов)
+                            type = DomainTrie.MatchType.EXACT;
+                            domainToAdd = domain;
+                            logger.trace("Adding EXACT domain: {} (source={})", domainToAdd, result.source());
+                        }
+
+                        if (!domainTrie.contains(domainToAdd)) {
+                            domainTrie.addDomain(domainToAdd, type);
+                            domainSources.put(domainToAdd, result.source().toString());
+                            accepted++;
+                        } else {
+                            duplicateDomains++;
                         }
                     }
                     totalRules++;
@@ -189,7 +211,6 @@ public final class BlacklistLoader implements AutoCloseable {
         return CompletableFuture.supplyAsync(() -> {
             long startedAt = System.currentTimeMillis();
             try {
-                // ✅ Синхронизация для RknBlacklistSource - защита от переименования файла во время чтения
                 if (source instanceof RknBlacklistSource) {
                     synchronized (Main.DUMP_FILE_LOCK) {
                         List<BlacklistRule> rules = source.loadRules();
@@ -298,5 +319,9 @@ public final class BlacklistLoader implements AutoCloseable {
         logger.info(LocaleUtil.getString("blacklist_scheduler_stopped"));
     }
 
-    private static boolean isSubtreeRule(BlacklistSource source) { return source instanceof RknBlacklistSource; }
+    private static boolean isSubtreeRule(BlacklistSource source) {
+        // ⚠️ БОЛЕЕ НЕ ИСПОЛЬЗУЕТСЯ для определения типа блокировки
+        // Оставлено для обратной совместимости
+        return source instanceof RknBlacklistSource;
+    }
 }
