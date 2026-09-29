@@ -155,7 +155,15 @@ public final class BlacklistLoader implements AutoCloseable {
                         if (ip == null) invalid++; else { if (!ips.add(ip)) duplicateIps++; accepted++; }
                     } else {
                         if (!domainFilterEnabled) continue;
-                        String domain = HostNormalizer.normalizeHost(value);
+
+                        // ✅ ИСПРАВЛЕНО: Проверяем wildcard ДО нормализации
+                        boolean isWildcard = value.startsWith("*.");
+
+                        // ✅ ИСПРАВЛЕНО: Используем normalizeHostWithWildcard для wildcard-доменов
+                        String domain = isWildcard
+                                ? HostNormalizer.normalizeHostWithWildcard(value)
+                                : HostNormalizer.normalizeHost(value);
+
                         if (domain == null) { invalid++; continue; }
 
                         String[] labels = domain.split("\\.");
@@ -168,7 +176,7 @@ public final class BlacklistLoader implements AutoCloseable {
                         DomainTrie.MatchType type;
                         String domainToAdd;
 
-                        if (domain.startsWith("*.")) {
+                        if (isWildcard) {
                             type = DomainTrie.MatchType.WILDCARD;
                             domainToAdd = domain.substring(2);
                             logger.trace("Adding WILDCARD domain: {}.{} (source={})", "*", domainToAdd, result.source());
@@ -321,9 +329,5 @@ public final class BlacklistLoader implements AutoCloseable {
         try { if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow(); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); executor.shutdownNow(); }
         logger.info(LocaleUtil.getString("blacklist_scheduler_stopped"));
-    }
-
-    private static boolean isSubtreeRule(BlacklistSource source) {
-        return source instanceof RknBlacklistSource;
     }
 }

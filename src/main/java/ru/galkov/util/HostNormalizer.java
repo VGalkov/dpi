@@ -40,6 +40,47 @@ public final class HostNormalizer {
         return host;
     }
 
+    /**
+     * Нормализует домен с поддержкой wildcard-префикса (*.example.com)
+     * Разрешает звёздочку только в первой метке и только если она одна там
+     */
+    public static String normalizeHostWithWildcard(String value) {
+        if (value == null || value.trim().isEmpty()) return null;
+        String host = value.trim().toLowerCase(Locale.ROOT);
+        host = removeTrailingDot(host);
+        if (host == null || host.isEmpty()) return null;
+
+        // Проверяем wildcard-префикс
+        boolean isWildcard = host.startsWith("*.");
+        String domainPart = isWildcard ? host.substring(2) : host;
+
+        if (
+                host.length() > 253
+                        || domainPart.startsWith(".")
+                        || domainPart.endsWith(".")
+                        || host.indexOf(':') >= 0
+                        || host.indexOf('/') >= 0
+                        || host.indexOf(' ') >= 0
+                        || host.indexOf('\\') >= 0
+        ) {
+            return null;
+        }
+
+        String[] labels = splitHostToLabels(domainPart);
+
+        // Wildcard должен быть только один и в начале: *.example.com
+        if (isWildcard) {
+            // После *. должно быть хотя бы две метки (example.com)
+            if (labels.length < 2) return null;
+        }
+
+        for (String label : labels) {
+            if (!isValidDnsLabel(label)) return null;
+        }
+
+        return host;
+    }
+
     public static String normalizeIp(String value) {
         if (value == null || value.trim().isEmpty()) return null;
         String ip = value.trim();
