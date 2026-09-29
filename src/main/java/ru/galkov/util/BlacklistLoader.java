@@ -94,6 +94,11 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     private BlacklistSnapshot buildSnapshot() {
+        boolean domainFilterEnabled = getConfig().getBoolean("blacklist.filter.domains.enabled");
+        boolean ipFilterEnabled = getConfig().getBoolean("blacklist.filter.ips.enabled");
+        if (!domainFilterEnabled && !ipFilterEnabled) throw new IllegalStateException("Both blacklist domain and IP filters are disabled");
+        logger.info("Blacklist filters: domains={}, ips={}", domainFilterEnabled, ipFilterEnabled);
+
         DomainTrie domainTrie = new DomainTrie();
         Set<String> ips = new HashSet<>();
         Set<IpCidr> cidrs = new HashSet<>();
@@ -142,16 +147,17 @@ public final class BlacklistLoader implements AutoCloseable {
                     if (value == null) { invalid++; continue; }
 
                     if (value.indexOf('/') >= 0) {
+                        if (!ipFilterEnabled) continue;
                         try { cidrs.add(new IpCidr(value)); accepted++; } catch (Exception e) { invalid++; }
                     } else if (HostNormalizer.isIpLiteralFast(value)) {
+                        if (!ipFilterEnabled) continue;
                         String ip = HostNormalizer.normalizeIp(value);
                         if (ip == null) invalid++; else { if (!ips.add(ip)) duplicateIps++; accepted++; }
                     } else {
-                        // ✅ ИСПРАВЛЕНО: Проверка на wildcard ТОЛЬКО по наличию * в начале
+                        if (!domainFilterEnabled) continue;
                         String domain = HostNormalizer.normalizeHost(value);
                         if (domain == null) { invalid++; continue; }
 
-                        // Пропускаем одночастные домены (TLD) - они не должны блокироваться
                         String[] labels = domain.split("\\.");
                         if (labels.length < 2) {
                             logger.debug("Skipping TLD/single-label domain from blacklist: {} (source={})", domain, result.source());
@@ -162,13 +168,11 @@ public final class BlacklistLoader implements AutoCloseable {
                         DomainTrie.MatchType type;
                         String domainToAdd;
 
-                        // ✅ ТОЛЬКО явный wildcard (*) использует агрегацию поддоменов
                         if (domain.startsWith("*.")) {
                             type = DomainTrie.MatchType.WILDCARD;
-                            domainToAdd = domain.substring(2); // убираем *.
+                            domainToAdd = domain.substring(2);
                             logger.trace("Adding WILDCARD domain: {}.{} (source={})", "*", domainToAdd, result.source());
                         } else {
-                            // ✅ Все остальные домены - EXACT (без агрегации поддоменов)
                             type = DomainTrie.MatchType.EXACT;
                             domainToAdd = domain;
                             logger.trace("Adding EXACT domain: {} (source={})", domainToAdd, result.source());
@@ -320,8 +324,6 @@ public final class BlacklistLoader implements AutoCloseable {
     }
 
     private static boolean isSubtreeRule(BlacklistSource source) {
-        // ⚠️ БОЛЕЕ НЕ ИСПОЛЬЗУЕТСЯ для определения типа блокировки
-        // Оставлено для обратной совместимости
         return source instanceof RknBlacklistSource;
     }
 }
